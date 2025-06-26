@@ -15,6 +15,13 @@ members = [
 ]
 
 [dependencies]
+# Internal workspace dependencies
+postgres-collector-core = { path = "crates/core" }
+postgres-extensions = { path = "crates/extensions" }
+postgres-nri-adapter = { path = "crates/nri-adapter" }
+postgres-otel-adapter = { path = "crates/otel-adapter" }
+postgres-query-engine = { path = "crates/query-engine" }
+
 # Core dependencies
 tokio = { version = "1.35", features = ["full"] }
 async-trait = "0.1"

@@ -2,6 +2,16 @@
 
 A unified PostgreSQL metrics collector that supports both New Relic Infrastructure (NRI) and OpenTelemetry (OTel) output formats. This collector maintains 100% compatibility with the existing OHI PostgreSQL integration while adding enhanced capabilities.
 
+## 📚 Documentation
+
+For comprehensive documentation, please see the [docs/](docs/) directory:
+
+- [Architecture Overview](docs/01-architecture-overview.md) - System design and components
+- [Implementation Guide](docs/02-implementation-guide.md) - Building and extending
+- [Deployment & Operations](docs/03-deployment-operations.md) - Installation and configuration
+- [Metrics Reference](docs/04-metrics-reference.md) - Complete metrics documentation
+- [Migration Guide](docs/05-migration-guide.md) - Upgrading from nri-postgresql
+
 ## Features
 
 ### Core Features

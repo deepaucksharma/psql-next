@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 use anyhow::Result;
-use sqlx::PgConnection;
+use sqlx::{PgConnection, Row};
 use postgres_collector_core::{CollectorError, ExtensionInfo};
 use serde::{Deserialize, Serialize};
 
@@ -265,12 +265,28 @@ impl ActiveSessionSampler {
         "#;
         
         let now = chrono::Utc::now();
-        let rows = sqlx::query_as::<_, ASHSample>(query)
+        let rows = sqlx::query(query)
             .bind(now)
             .fetch_all(conn)
             .await?;
         
-        Ok(rows)
+        let mut samples = Vec::new();
+        for row in rows {
+            samples.push(ASHSample {
+                sample_time: now,
+                pid: row.get("pid"),
+                usename: row.get("usename"),
+                datname: row.get("datname"),
+                query_id: row.get("query_id"),
+                state: row.get("state"),
+                wait_event_type: row.get("wait_event_type"),
+                wait_event: row.get("wait_event"),
+                query: row.get("query"),
+                backend_type: row.get("backend_type"),
+            });
+        }
+        
+        Ok(samples)
     }
     
     pub async fn get_recent_samples(&self) -> Vec<ASHSample> {

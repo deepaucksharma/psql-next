@@ -26,7 +26,7 @@ impl NRIAdapter {
     
     pub fn adapt(&self, metrics: &UnifiedMetrics) -> Result<NRIOutput, ProcessError> {
         let mut integration = Integration::new("com.newrelic.postgresql", &self.integration_version);
-        let entity = integration.entity(&self.entity_key, "pg-instance")?;
+        let mut entity = integration.entity(&self.entity_key, "pg-instance")?;
         
         // Convert to NRI format exactly as OHI expects
         self.adapt_slow_queries(&mut entity, &metrics.slow_queries)?;

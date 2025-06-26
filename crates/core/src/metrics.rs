@@ -55,6 +55,7 @@ pub struct ExtendedSlowQueryMetrics {
 
 /// Exactly matches OHI WaitEventMetrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(sqlx::FromRow)]
 pub struct WaitEventMetric {
     pub pid: Option<i32>,
     pub wait_event_type: Option<String>,
@@ -70,6 +71,7 @@ pub struct WaitEventMetric {
 
 /// Exactly matches OHI BlockingSessionMetrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(sqlx::FromRow)]
 pub struct BlockingSessionMetric {
     pub blocking_pid: Option<i32>,
     pub blocked_pid: Option<i32>,
@@ -87,6 +89,7 @@ pub struct BlockingSessionMetric {
 
 /// Exactly matches OHI IndividualQueryMetrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(sqlx::FromRow)]
 pub struct IndividualQueryMetric {
     pub pid: Option<i32>,
     pub query_id: Option<String>,

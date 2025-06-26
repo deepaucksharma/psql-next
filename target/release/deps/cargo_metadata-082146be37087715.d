@@ -1,0 +1,11 @@
+/home/deepak/src/psql-next/target/release/deps/cargo_metadata-082146be37087715.d: /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/lib.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/dependency.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/diagnostic.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/errors.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/messages.rs
+
+/home/deepak/src/psql-next/target/release/deps/libcargo_metadata-082146be37087715.rlib: /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/lib.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/dependency.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/diagnostic.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/errors.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/messages.rs
+
+/home/deepak/src/psql-next/target/release/deps/libcargo_metadata-082146be37087715.rmeta: /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/lib.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/dependency.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/diagnostic.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/errors.rs /home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/messages.rs
+
+/home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/lib.rs:
+/home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/dependency.rs:
+/home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/diagnostic.rs:
+/home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/errors.rs:
+/home/deepak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.15.4/src/messages.rs:

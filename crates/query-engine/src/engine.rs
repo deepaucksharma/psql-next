@@ -2,9 +2,45 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::{PgConnection, FromRow, Row};
-use postgres_collector_core::{CollectorError, CommonParameters};
+use postgres_collector_core::{CollectorError, CommonParameters, SlowQueryMetric};
 
 use crate::queries;
+
+#[derive(FromRow)]
+pub struct RawSlowQueryMetric {
+    pub newrelic: Option<String>,
+    pub query_id: Option<String>,
+    pub query_text: Option<String>,
+    pub database_name: Option<String>,
+    pub schema_name: Option<String>,
+    pub execution_count: Option<i64>,
+    pub avg_elapsed_time_ms: Option<f64>,
+    pub avg_disk_reads: Option<f64>,
+    pub avg_disk_writes: Option<f64>,
+    pub statement_type: Option<String>,
+    pub collection_timestamp: Option<String>,
+    pub individual_query: Option<String>,
+}
+
+impl From<RawSlowQueryMetric> for SlowQueryMetric {
+    fn from(raw: RawSlowQueryMetric) -> Self {
+        SlowQueryMetric {
+            newrelic: raw.newrelic,
+            query_id: raw.query_id,
+            query_text: raw.query_text,
+            database_name: raw.database_name,
+            schema_name: raw.schema_name,
+            execution_count: raw.execution_count,
+            avg_elapsed_time_ms: raw.avg_elapsed_time_ms,
+            avg_disk_reads: raw.avg_disk_reads,
+            avg_disk_writes: raw.avg_disk_writes,
+            statement_type: raw.statement_type,
+            collection_timestamp: raw.collection_timestamp,
+            individual_query: raw.individual_query,
+            extended_metrics: None, // Populated separately
+        }
+    }
+}
 
 pub struct QueryRegistry {
     queries: HashMap<String, &'static str>,
@@ -89,16 +125,16 @@ impl QueryEngine {
     pub fn format_query(&self, query: &str, params: &QueryParams) -> Result<String, CollectorError> {
         let formatted = match params {
             QueryParams::SlowQueries { databases, limit } => {
-                format!(query, databases, limit)
+                query.replace("%s", &databases).replace("%d", &limit.to_string())
             }
             QueryParams::WaitEvents { databases, limit } => {
-                format!(query, databases, limit)
+                query.replace("%s", &databases).replace("%d", &limit.to_string())
             }
             QueryParams::Blocking { databases, limit } => {
-                format!(query, databases, limit)
+                query.replace("%s", &databases).replace("%d", &limit.to_string())
             }
             QueryParams::Individual { databases, limit } => {
-                format!(query, databases, limit)
+                query.replace("%s", &databases).replace("%d", &limit.to_string())
             }
             QueryParams::None => query.to_string(),
         };
@@ -174,14 +210,16 @@ impl OHICompatibleQueryExecutor {
         &self,
         conn: &mut PgConnection,
         params: &CommonParameters,
-    ) -> Result<Vec<postgres_collector_core::SlowQueryMetric>, CollectorError> {
+    ) -> Result<Vec<SlowQueryMetric>, CollectorError> {
         let query_params = QueryParams::from_common_params(params, "slow_queries");
-        let mut rows = self.engine.execute_versioned(
+        let raw_rows = self.engine.execute_versioned::<RawSlowQueryMetric>(
             conn,
             "slow_queries",
             params.version,
             query_params,
         ).await?;
+        
+        let mut rows: Vec<SlowQueryMetric> = raw_rows.into_iter().map(Into::into).collect();
         
         // Apply OHI post-processing
         self.post_process_slow_queries(&mut rows, params);
@@ -191,8 +229,8 @@ impl OHICompatibleQueryExecutor {
     
     fn post_process_slow_queries(
         &self,
-        queries: &mut Vec<postgres_collector_core::SlowQueryMetric>,
-        params: &CommonParameters,
+        queries: &mut Vec<SlowQueryMetric>,
+        _params: &CommonParameters,
     ) {
         for query in queries {
             // OHI anonymizes ALTER statements

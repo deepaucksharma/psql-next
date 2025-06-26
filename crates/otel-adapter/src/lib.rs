@@ -1,18 +1,15 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
-use opentelemetry::{
-    metrics::{Meter, MeterProvider},
-    KeyValue,
-};
+use opentelemetry::{KeyValue};
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::{
+    data::{Metric, ResourceMetrics, ScopeMetrics, Temporality},
+    reader::{DefaultTemporalitySelector, TemporalitySelector},
+    Aggregation, InstrumentKind, SdkMeterProvider,
+};
 use opentelemetry_sdk::{
     export::metrics::aggregation,
-    metrics::{
-        data::{Metric, ResourceMetrics, ScopeMetrics, Temporality},
-        reader::{DefaultTemporalitySelector, TemporalitySelector},
-        Aggregation, InstrumentKind, SdkMeterProvider,
-    },
     runtime,
     Resource,
 };
@@ -24,8 +21,6 @@ use std::time::{Duration, SystemTime};
 
 use postgres_collector_core::{
     UnifiedMetrics, MetricOutput, ProcessError,
-    SlowQueryMetric, WaitEventMetric, BlockingSessionMetric,
-    IndividualQueryMetric, ExecutionPlanMetric,
 };
 
 /// OpenTelemetry Adapter

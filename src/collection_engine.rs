@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::{postgres::PgPoolOptions, PgConnection, PgPool};
+use sqlx::{postgres::PgPoolOptions, PgConnection, PgPool, Row};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,7 +11,7 @@ use postgres_collector_core::{
     Capabilities, CollectionMetadata, CollectorError, CommonParameters,
     ExtensionInfo, MetricBatch, PostgresCollector, UnifiedMetrics,
     SlowQueryMetric, WaitEventMetric, BlockingSessionMetric,
-    IndividualQueryMetric, ExecutionPlanMetric,
+    IndividualQueryMetric, ExecutionPlanMetric, ProcessError,
 };
 use postgres_extensions::{ExtensionManager, OHIValidations, ActiveSessionSampler};
 use postgres_query_engine::{OHICompatibleQueryExecutor, QueryParams};
@@ -32,8 +32,8 @@ pub struct UnifiedCollectionEngine {
     // Configuration
     config: CollectorConfig,
     
-    // Adapters
-    adapters: Vec<Box<dyn MetricAdapter>>,
+    // Adapters - simplified for now
+    // adapters: Vec<Box<dyn MetricAdapter>>,
     
     // Cached capabilities
     capabilities: Arc<RwLock<Option<Capabilities>>>,
@@ -67,7 +67,7 @@ impl UnifiedCollectionEngine {
             ebpf_engine: None,
             ash_sampler,
             config,
-            adapters: Vec::new(),
+            // adapters: Vec::new(),
             capabilities: Arc::new(RwLock::new(None)),
         })
     }
@@ -89,7 +89,7 @@ impl UnifiedCollectionEngine {
         let version = version.unwrap_or(12) as u64;
         
         // Detect extensions
-        let mut extension_manager = self.extension_manager.clone();
+        let mut extension_manager = ExtensionManager::new();
         let ext_config = extension_manager.detect_and_configure(&mut conn).await?;
         
         // Check if RDS
