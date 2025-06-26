@@ -1,0 +1,19 @@
+[package]
+name = "postgres-otel-adapter"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+postgres-collector-core = { path = "../core" }
+async-trait = "0.1"
+opentelemetry = { version = "0.21", features = ["metrics"] }
+opentelemetry-otlp = { version = "0.14", features = ["tonic", "metrics"] }
+opentelemetry-semantic-conventions = "0.13"
+prost = "0.12"
+tonic = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }

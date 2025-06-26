@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: postgres-ebpf-collector
+  namespace: postgres-monitoring
+  labels:
+    app: postgres-ebpf-collector
+spec:
+  selector:
+    matchLabels:
+      app: postgres-ebpf-collector
+  template:
+    metadata:
+      labels:
+        app: postgres-ebpf-collector
+    spec:
+      hostNetwork: true
+      hostPID: true
+      serviceAccountName: postgres-ebpf-collector
+      containers:
+      - name: ebpf-collector
+        image: postgres-unified-collector:ebpf
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+            - SYS_PTRACE
+            - NET_ADMIN
+            - SYS_RESOURCE
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: COLLECTOR_MODE
+          value: "ebpf"
+        - name: ENABLE_EBPF
+          value: "true"
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-license
+              key: key
+        - name: POSTGRES_TARGETS
+          value: "postgres-primary:5432,postgres-replica:5432"
+        volumeMounts:
+        - name: sys
+          mountPath: /sys
+          readOnly: true
+        - name: proc
+          mountPath: /proc
+          readOnly: true
+        - name: debug
+          mountPath: /sys/kernel/debug
+        - name: config
+          mountPath: /etc/collector
+          readOnly: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: debug
+        hostPath:
+          path: /sys/kernel/debug
+      - name: config
+        configMap:
+          name: postgres-collector-config
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/control-plane
+        effect: NoSchedule
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-ebpf-collector
+  namespace: postgres-monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: postgres-ebpf-collector
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: postgres-ebpf-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: postgres-ebpf-collector
+subjects:
+- kind: ServiceAccount
+  name: postgres-ebpf-collector
+  namespace: postgres-monitoring

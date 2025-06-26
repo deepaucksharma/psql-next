@@ -1,0 +1,46 @@
+# PostgreSQL OpenTelemetry Collector Configuration
+
+# Connection settings
+connection_string = "postgresql://postgres:password@localhost:5432/postgres"
+host = "localhost"
+port = 5432
+databases = ["postgres"]
+max_connections = 5
+connect_timeout_secs = 30
+
+# Collection settings
+collection_interval_secs = 60
+collection_mode = "otel"
+
+# Query monitoring settings
+query_monitoring_count_threshold = 20
+query_monitoring_response_time_threshold = 500
+max_query_length = 4095
+
+# Extended metrics
+enable_extended_metrics = true
+enable_ebpf = false
+enable_ash = true
+ash_sample_interval_secs = 1
+ash_retention_hours = 1
+
+# OTLP output configuration
+[outputs.otlp]
+enabled = true
+endpoint = "${OTLP_ENDPOINT:-http://localhost:4317}"
+compression = "gzip"
+timeout_secs = 30
+
+# Headers for authentication
+# headers = [
+#     ["api-key", "${OTLP_API_KEY}"],
+# ]
+
+# Disable NRI output for OTel mode
+[outputs.nri]
+enabled = false
+
+# Sampling configuration
+[sampling]
+mode = "fixed"
+base_sample_rate = 1.0

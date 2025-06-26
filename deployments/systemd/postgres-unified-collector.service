@@ -1,0 +1,45 @@
+[Unit]
+Description=PostgreSQL Unified Collector
+Documentation=https://github.com/your-org/postgres-unified-collector
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=postgres-collector
+Group=postgres-collector
+ExecStart=/usr/local/bin/postgres-unified-collector \
+  --config /etc/postgres-collector/config.toml
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=postgres-collector
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/postgres-collector
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+PrivateMounts=true
+
+# Resource limits
+LimitNOFILE=65536
+MemoryLimit=512M
+CPUQuota=50%
+
+# Environment
+Environment="RUST_LOG=info"
+EnvironmentFile=-/etc/default/postgres-collector
+
+[Install]
+WantedBy=multi-user.target

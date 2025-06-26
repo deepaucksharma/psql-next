@@ -1,0 +1,89 @@
+[package]
+name = "postgres-unified-collector"
+version = "1.0.0"
+edition = "2021"
+authors = ["PostgreSQL Unified Collector Team"]
+description = "Unified PostgreSQL collector supporting both New Relic Infrastructure and OpenTelemetry"
+
+[workspace]
+members = [
+    "crates/core",
+    "crates/nri-adapter",
+    "crates/otel-adapter",
+    "crates/query-engine",
+    "crates/extensions",
+]
+
+[dependencies]
+# Core dependencies
+tokio = { version = "1.35", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Configuration
+config = "0.13"
+toml = "0.8"
+clap = { version = "4.4", features = ["derive", "env"] }
+
+# Metrics and observability
+opentelemetry = { version = "0.21", features = ["metrics", "trace"] }
+opentelemetry-otlp = { version = "0.14", features = ["tonic", "metrics", "trace"] }
+opentelemetry-semantic-conventions = "0.13"
+prometheus = { version = "0.13", features = ["process"] }
+
+# Networking
+tonic = "0.10"
+hyper = { version = "0.14", features = ["full"] }
+tower = "0.4"
+
+# Utils
+regex = "1.10"
+lazy_static = "1.4"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+base64 = "0.21"
+
+# Optional dependencies
+libbpf-rs = { version = "0.22", optional = true }
+libbpf-cargo = { version = "0.22", optional = true }
+
+[dev-dependencies]
+mockall = "0.12"
+proptest = "1.4"
+criterion = "0.5"
+tempfile = "3.8"
+
+[features]
+default = ["nri", "otel"]
+nri = []
+otel = []
+ebpf = ["libbpf-rs", "libbpf-cargo"]
+extended-metrics = []
+all = ["nri", "otel", "ebpf", "extended-metrics"]
+
+[[bin]]
+name = "postgres-unified-collector"
+path = "src/bin/unified_collector.rs"
+
+[[bin]]
+name = "nri-postgresql"
+path = "src/bin/nri_postgresql.rs"
+
+[[bin]]
+name = "postgres-otel-collector"
+path = "src/bin/otel_collector.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.bench]
+debug = true
