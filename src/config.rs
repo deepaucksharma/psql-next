@@ -23,10 +23,8 @@ pub struct CollectorConfig {
     // Collection settings
     #[serde(alias = "COLLECTION_INTERVAL_SECS")]
     pub collection_interval_secs: u64,
-    #[serde(alias = "COLLECTION_MODE")]
-    pub collection_mode: CollectionMode,
     
-    // OHI compatibility settings
+    // Query monitoring settings
     #[serde(alias = "QUERY_MONITORING_COUNT_THRESHOLD")]
     pub query_monitoring_count_threshold: i32,
     #[serde(alias = "QUERY_MONITORING_RESPONSE_TIME_THRESHOLD")]
@@ -64,29 +62,12 @@ pub struct CollectorConfig {
     pub pgbouncer: Option<PgBouncerConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CollectionMode {
-    Otel,
-    Nri,
-    Hybrid,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputConfig {
-    pub nri: Option<NRIOutputConfig>,
-    pub otlp: Option<OTLPOutputConfig>,
+    pub otlp: OTLPOutputConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NRIOutputConfig {
-    #[serde(alias = "NRI_ENABLED")]
-    pub enabled: bool,
-    #[serde(alias = "NRI_ENTITY_KEY")]
-    pub entity_key: String,
-    #[serde(alias = "NRI_INTEGRATION_NAME")]
-    pub integration_name: String,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OTLPOutputConfig {
@@ -100,12 +81,25 @@ pub struct OTLPOutputConfig {
     pub timeout_secs: u64,
     #[serde(alias = "OTLP_HEADERS")]
     pub headers: Vec<(String, String)>,
+    
+    // New Relic specific settings
+    #[serde(alias = "NEWRELIC_API_KEY")]
+    pub newrelic_api_key: Option<String>,
+    #[serde(alias = "NEWRELIC_REGION")]
+    pub newrelic_region: Option<String>,
+    #[serde(alias = "NEWRELIC_BATCH_SIZE")]
+    pub batch_size: Option<usize>,
+    #[serde(alias = "EXPORT_INTERVAL_SECS")]
+    pub export_interval_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SamplingConfig {
+    #[serde(alias = "SAMPLING_MODE")]
     pub mode: SamplingMode,
+    #[serde(alias = "SAMPLING_BASE_RATE")]
     pub base_sample_rate: f64,
+    #[serde(alias = "SAMPLING_RULES")]
     pub rules: Vec<SamplingRule>,
 }
 
@@ -124,18 +118,27 @@ pub struct SamplingRule {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PgBouncerConfig {
+    #[serde(alias = "PGBOUNCER_ENABLED")]
     pub enabled: bool,
+    #[serde(alias = "PGBOUNCER_ADMIN_CONNECTION_STRING")]
     pub admin_connection_string: String,
+    #[serde(alias = "PGBOUNCER_COLLECTION_INTERVAL_SECS")]
     pub collection_interval_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceConfig {
+    #[serde(alias = "INSTANCE_NAME")]
     pub name: String,  // Unique identifier for this instance
+    #[serde(alias = "INSTANCE_CONNECTION_STRING")]
     pub connection_string: String,
+    #[serde(alias = "INSTANCE_HOST")]
     pub host: String,
+    #[serde(alias = "INSTANCE_PORT")]
     pub port: u16,
+    #[serde(alias = "INSTANCE_DATABASES")]
     pub databases: Vec<String>,
+    #[serde(alias = "INSTANCE_ENABLED")]
     pub enabled: bool,
     
     // Instance-specific overrides
@@ -161,7 +164,6 @@ impl Default for CollectorConfig {
             instances: None,
             
             collection_interval_secs: 60,
-            collection_mode: CollectionMode::Hybrid,
             
             query_monitoring_count_threshold: 20,
             query_monitoring_response_time_threshold: 500,
@@ -178,18 +180,17 @@ impl Default for CollectorConfig {
             sanitization_mode: Some("smart".to_string()),
             
             outputs: OutputConfig {
-                nri: Some(NRIOutputConfig {
+                otlp: OTLPOutputConfig {
                     enabled: true,
-                    entity_key: "${HOSTNAME}:${PORT}".to_string(),
-                    integration_name: "com.newrelic.postgresql".to_string(),
-                }),
-                otlp: Some(OTLPOutputConfig {
-                    enabled: true,
-                    endpoint: "http://localhost:4317".to_string(),
+                    endpoint: "https://otlp.nr-data.net:4318".to_string(),
                     compression: "gzip".to_string(),
                     timeout_secs: 30,
                     headers: vec![],
-                }),
+                    newrelic_api_key: None,
+                    newrelic_region: Some("US".to_string()),
+                    batch_size: Some(1000),
+                    export_interval_secs: Some(30),
+                },
             },
             
             sampling: SamplingConfig {

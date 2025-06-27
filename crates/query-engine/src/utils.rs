@@ -1,9 +1,9 @@
 use regex::Regex;
 use lazy_static::lazy_static;
 
-/// Match OHI anonymization exactly
+/// Anonymize query text by replacing literals with placeholders
 pub fn anonymize_query_text(query: &str) -> String {
-    // OHI regex: `'[^']*'|\d+|".*?"`
+    // Replace literals: `'[^']*'|\d+|".*?"`
     lazy_static! {
         static ref RE: Regex = Regex::new(r#"'[^']*'|\d+|".*?""#).unwrap();
     }
@@ -11,7 +11,7 @@ pub fn anonymize_query_text(query: &str) -> String {
 }
 
 pub fn anonymize_and_normalize(query: &str) -> String {
-    // Match OHI normalization steps exactly
+    // Normalize query for comparison
     let mut result = query.to_string();
     
     // Replace numbers

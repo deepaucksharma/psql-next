@@ -5,9 +5,9 @@ use tokio::time;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use postgres_unified_collector::{
-    UnifiedCollectionEngine, CollectorConfig, CollectionMode,
-    adapters::OTelMetricAdapter,
+use postgres_otel_collector::{
+    UnifiedCollectionEngine, CollectorConfig,
+    metrics::{init_new_relic_metrics, NewRelicConfig, DimensionalMetrics, create_resource},
 };
 
 #[derive(Parser, Debug)]
@@ -41,40 +41,59 @@ async fn main() -> Result<()> {
     
     // Load configuration
     let mut config = CollectorConfig::from_file(&args.config)?;
-    config.collection_mode = CollectionMode::Otel;
     
     // Override endpoint if specified
     if let Some(endpoint) = args.endpoint {
-        if let Some(otlp_config) = &mut config.outputs.otlp {
-            otlp_config.endpoint = endpoint;
-        }
+        config.outputs.otlp.endpoint = endpoint;
     }
     
     // Validate configuration
     config.validate().map_err(|e| anyhow::anyhow!(e))?;
     
     info!("Configuration loaded successfully");
-    info!("OTLP endpoint: {}", 
-        config.outputs.otlp.as_ref()
-            .map(|c| c.endpoint.as_str())
-            .unwrap_or("not configured")
-    );
+    info!("OTLP endpoint: {}", config.outputs.otlp.endpoint);
     
     // Create collection engine
     let mut engine = UnifiedCollectionEngine::new(config.clone()).await?;
     
-    // Add OTel adapter
-    if let Some(otlp_config) = &config.outputs.otlp {
-        if otlp_config.enabled && !args.console {
-            engine.add_adapter(Box::new(OTelMetricAdapter::new(
-                otlp_config.endpoint.clone()
-            )));
-            info!("OTel adapter enabled");
-        }
+    // Check if OTLP is enabled
+    if !config.outputs.otlp.enabled {
+        return Err(anyhow::anyhow!("OTLP output is disabled in configuration"));
     }
     
-    // Skip OpenTelemetry SDK setup for now - just use the adapter
-    info!("OpenTelemetry provider setup skipped - using simplified adapter");
+    if args.console {
+        info!("Console mode enabled - metrics will be printed to stdout");
+    }
+    
+    // Initialize New Relic OpenTelemetry metrics
+    if !args.console {
+        let newrelic_config = NewRelicConfig {
+            api_key: config.outputs.otlp.newrelic_api_key.clone()
+                .ok_or_else(|| anyhow::anyhow!("NEW_RELIC_API_KEY is required"))?,
+            region: config.outputs.otlp.newrelic_region.clone(),
+            endpoint_override: if let Some(endpoint) = args.endpoint {
+                Some(endpoint)
+            } else {
+                None
+            },
+        };
+        
+        // Create resource attributes
+        let resource = create_resource(&config);
+        
+        // Initialize New Relic metrics
+        let meter_provider = init_new_relic_metrics(newrelic_config, resource)?;
+        
+        // Create dimensional metrics
+        let dimensional_metrics = DimensionalMetrics::new(&meter_provider);
+        
+        // Set dimensional metrics in the collection engine
+        engine.set_dimensional_metrics(dimensional_metrics);
+        
+        info!("New Relic OpenTelemetry metrics initialized");
+    } else {
+        info!("Console mode - skipping OpenTelemetry setup");
+    }
     
     // Start collection loop
     let mut interval = time::interval(Duration::from_secs(config.collection_interval_secs));
@@ -105,6 +124,13 @@ async fn main() -> Result<()> {
                                 metrics.wait_events.len(),
                                 metrics.blocking_sessions.len()
                             );
+                            // Could also print actual metrics JSON here if needed
+                        } else {
+                            // Send metrics via OTLP
+                            match engine.send_metrics(&metrics).await {
+                                Ok(_) => info!("Metrics sent successfully"),
+                                Err(e) => error!("Failed to send metrics: {}", e),
+                            }
                         }
                     }
                     Err(e) => {

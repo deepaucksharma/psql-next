@@ -1,5 +1,4 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use sqlx::{postgres::PgPoolOptions, PgConnection, PgPool, Row};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,21 +10,22 @@ use postgres_collector_core::{
     Capabilities, CollectorError, CommonParameters,
     ExtensionInfo, UnifiedMetrics,
     SlowQueryMetric,
-    IndividualQueryMetric, ExecutionPlanMetric, ProcessError,
+    IndividualQueryMetric, ExecutionPlanMetric,
 };
-use postgres_extensions::{ExtensionManager, OHIValidations, ActiveSessionSampler};
-use postgres_query_engine::OHICompatibleQueryExecutor;
+use postgres_extensions::{ExtensionManager, ActiveSessionSampler};
+use postgres_query_engine::SafeQueryExecutor;
+use postgres_otel_adapter::OTelAdapter;
 
 use crate::config::CollectorConfig;
 use crate::pgbouncer::PgBouncerCollector;
 use crate::sanitizer::{QuerySanitizer, SanitizationMode};
 use crate::exporter::MetricExporter;
+use crate::metrics::DimensionalMetrics;
 
 pub struct UnifiedCollectionEngine {
     // Core components
     connection_pool: PgPool,
     extension_manager: ExtensionManager,
-    query_executor: OHICompatibleQueryExecutor,
     
     // Optional components
     #[cfg(feature = "ebpf")]
@@ -36,8 +36,11 @@ pub struct UnifiedCollectionEngine {
     // Configuration
     config: CollectorConfig,
     
-    // Adapters using dynamic dispatch
-    adapters: Vec<Box<dyn MetricAdapterDyn>>,
+    // OpenTelemetry adapter
+    otel_adapter: OTelAdapter,
+    
+    // Dimensional metrics
+    dimensional_metrics: Option<DimensionalMetrics>,
     
     // Cached capabilities
     capabilities: Arc<RwLock<Option<Capabilities>>>,
@@ -58,7 +61,7 @@ impl UnifiedCollectionEngine {
             .await?;
         
         let extension_manager = ExtensionManager::new();
-        let query_executor = OHICompatibleQueryExecutor::new();
+        let otel_adapter = OTelAdapter::new(config.outputs.otlp.endpoint.clone());
         
         let ash_sampler = if config.enable_ash {
             let mut sampler = ActiveSessionSampler::new(
@@ -69,6 +72,10 @@ impl UnifiedCollectionEngine {
             if let Some(limit_mb) = config.ash_max_memory_mb {
                 sampler = sampler.with_memory_limit(limit_mb);
             }
+            
+            // Start the ASH sampling background task
+            sampler.start_sampling(connection_pool.clone()).await;
+            info!("Active Session History sampling started with {}s interval", config.ash_sample_interval_secs);
             
             Some(sampler)
         } else {
@@ -111,24 +118,24 @@ impl UnifiedCollectionEngine {
         Ok(Self {
             connection_pool,
             extension_manager,
-            query_executor,
             #[cfg(feature = "ebpf")]
             ebpf_engine: None,
             ash_sampler,
             pgbouncer_collector,
             config,
-            adapters: Vec::new(),
+            otel_adapter,
+            dimensional_metrics: None,
             capabilities: Arc::new(RwLock::new(None)),
             query_sanitizer,
             exporter: MetricExporter::new(),
         })
     }
     
-    pub fn add_adapter(&mut self, adapter: Box<dyn MetricAdapterDyn>) {
-        self.adapters.push(adapter);
+    pub fn set_dimensional_metrics(&mut self, metrics: DimensionalMetrics) {
+        self.dimensional_metrics = Some(metrics);
     }
     
-    pub async fn detect_capabilities(&self) -> Result<Capabilities, CollectorError> {
+    pub async fn detect_capabilities(&mut self) -> Result<Capabilities, CollectorError> {
         let mut conn = self.connection_pool.acquire().await?;
         
         // Get version
@@ -139,9 +146,8 @@ impl UnifiedCollectionEngine {
         let version: Option<i32> = version_row.get("version");
         let version = version.unwrap_or(12) as u64;
         
-        // Detect extensions
-        let mut extension_manager = ExtensionManager::new();
-        let ext_config = extension_manager.detect_and_configure(&mut conn).await?;
+        // Use the instance extension manager for detection
+        let ext_config = self.extension_manager.detect_and_configure(&mut conn).await?;
         
         // Check if RDS
         let is_rds = self.check_is_rds(&mut conn).await?;
@@ -184,13 +190,16 @@ impl UnifiedCollectionEngine {
         let capabilities = Capabilities {
             version,
             is_rds,
-            extensions,
+            extensions: extensions.clone(),
             has_superuser: self.check_superuser(&mut conn).await?,
             has_ebpf_support: cfg!(feature = "ebpf"),
         };
         
         // Cache capabilities
         *self.capabilities.write().await = Some(capabilities.clone());
+        
+        info!("Detected PostgreSQL capabilities: version={}, extensions={}, is_rds={}, has_superuser={}", 
+              version, capabilities.extensions.len(), is_rds, capabilities.has_superuser);
         
         Ok(capabilities)
     }
@@ -212,7 +221,7 @@ impl UnifiedCollectionEngine {
         Ok(is_superuser.unwrap_or(false))
     }
     
-    pub async fn collect_all_metrics(&self) -> Result<UnifiedMetrics, CollectorError> {
+    pub async fn collect_all_metrics(&mut self) -> Result<UnifiedMetrics, CollectorError> {
         let start_time = Instant::now();
         
         // Detect capabilities
@@ -237,76 +246,53 @@ impl UnifiedCollectionEngine {
         let mut metrics = UnifiedMetrics::default();
         let mut conn = self.connection_pool.acquire().await?;
         
-        // Always collect slow queries if pg_stat_statements is available
-        if OHIValidations::check_slow_query_metrics_fetch_eligibility(&caps.extensions) {
+        // Collect slow queries if pg_stat_statements is available
+        if caps.extensions.contains_key("pg_stat_statements") {
             info!("Collecting slow query metrics");
-            let mut slow_queries = self.query_executor
-                .execute_slow_queries(&mut conn, &params)
+            let mut slow_queries = SafeQueryExecutor::execute_slow_queries(&mut conn, &params, caps.version)
                 .await?;
             
             // Sanitize query text if enabled
             if let Some(sanitizer) = &self.query_sanitizer {
                 for query in &mut slow_queries {
                     if let Some(text) = query.query_text.clone() {
-                        query.query_text = Some(sanitizer.sanitize(&text));
-                        
                         // Add warning if PII detected
                         if let Some(warning) = sanitizer.get_pii_warning(&text) {
                             warn!("PII detected in query: {}", warning);
                         }
+                        query.query_text = Some(sanitizer.sanitize(&text));
                     }
                 }
             }
             
             metrics.slow_queries = slow_queries;
-        } else {
-            warn!("pg_stat_statements not available, skipping slow query metrics");
         }
         
-        // Collect blocking sessions based on version
-        if OHIValidations::check_blocking_session_metrics_fetch_eligibility(&caps.extensions, caps.version) {
-            info!("Collecting blocking session metrics");
-            metrics.blocking_sessions = self.query_executor
-                .execute_blocking_sessions(&mut conn, &params)
-                .await?;
-        }
+        // Collect blocking sessions
+        info!("Collecting blocking session metrics");
+        metrics.blocking_sessions = SafeQueryExecutor::execute_blocking_sessions(&mut conn, &params, caps.version, caps.is_rds)
+            .await?;
         
         // Collect wait events
-        if OHIValidations::check_wait_event_metrics_fetch_eligibility(&caps.extensions) && !caps.is_rds {
-            info!("Collecting wait event metrics");
-            metrics.wait_events = self.query_executor
-                .execute_wait_events(&mut conn, &params)
-                .await?;
-        } else if caps.is_rds {
-            // RDS fallback mode
-            info!("Collecting wait events in RDS mode");
-            metrics.wait_events = self.query_executor
-                .execute_wait_events(&mut conn, &params)
-                .await?;
-        }
+        info!("Collecting wait event metrics");
+        metrics.wait_events = SafeQueryExecutor::execute_wait_events(&mut conn, &params, caps.is_rds)
+            .await?;
         
         // Collect individual queries
-        if OHIValidations::check_individual_query_metrics_fetch_eligibility(&caps.extensions) && !caps.is_rds {
-            info!("Collecting individual query metrics");
-            metrics.individual_queries = self.query_executor
-                .execute_individual_queries(&mut conn, &params)
-                .await?;
-        } else if caps.is_rds {
-            // RDS mode: correlate through text
-            info!("Collecting individual queries in RDS mode");
-            let mut individual_queries = self.correlate_queries_by_text(&metrics.slow_queries, &mut conn).await?;
-            
-            // Sanitize individual query text
-            if let Some(sanitizer) = &self.query_sanitizer {
-                for query in &mut individual_queries {
-                    if let Some(text) = &query.query_text {
-                        query.query_text = Some(sanitizer.sanitize(text));
-                    }
+        info!("Collecting individual query metrics");
+        let mut individual_queries = SafeQueryExecutor::execute_individual_queries(&mut conn, &params, caps.version, caps.is_rds)
+            .await?;
+        
+        // Sanitize individual query text
+        if let Some(sanitizer) = &self.query_sanitizer {
+            for query in &mut individual_queries {
+                if let Some(text) = &query.query_text {
+                    query.query_text = Some(sanitizer.sanitize(text));
                 }
             }
-            
-            metrics.individual_queries = individual_queries;
         }
+        
+        metrics.individual_queries = individual_queries;
         
         // Collect execution plans
         if !metrics.individual_queries.is_empty() {
@@ -335,6 +321,11 @@ impl UnifiedCollectionEngine {
         
         let collection_duration = start_time.elapsed();
         info!("Metrics collection completed in {:?}", collection_duration);
+        
+        // Record metrics using dimensional approach
+        if let Some(dim_metrics) = &self.dimensional_metrics {
+            self.record_dimensional_metrics(dim_metrics, &metrics, collection_duration)?;
+        }
         
         Ok(metrics)
     }
@@ -471,6 +462,91 @@ impl UnifiedCollectionEngine {
         })
     }
     
+    fn record_dimensional_metrics(
+        &self,
+        dim_metrics: &DimensionalMetrics,
+        metrics: &UnifiedMetrics,
+        collection_duration: Duration,
+    ) -> Result<(), CollectorError> {
+        use opentelemetry::KeyValue;
+        
+        // Record collection duration
+        dim_metrics.record_collection_duration(collection_duration.as_secs_f64());
+        
+        // Record slow queries
+        for slow_query in &metrics.slow_queries {
+            let attrs = OTelAdapter::query_attributes(slow_query);
+            
+            // Record query duration
+            if let Some(mean_exec_time) = slow_query.mean_exec_time {
+                dim_metrics.record_query_duration(mean_exec_time, &attrs);
+            }
+            
+            // Record query count
+            if let Some(calls) = slow_query.calls {
+                dim_metrics.record_query_count(calls as u64, &attrs);
+            }
+            
+            // Record rows
+            if let Some(rows) = slow_query.rows {
+                dim_metrics.record_query_rows(rows as u64, &attrs);
+            }
+            
+            // Record shared buffer hits
+            if let Some(shared_blks_hit) = slow_query.shared_blks_hit {
+                dim_metrics.record_shared_buffer_hits(shared_blks_hit as u64, &attrs);
+            }
+            
+            // Record shared buffer reads
+            if let Some(shared_blks_read) = slow_query.shared_blks_read {
+                dim_metrics.record_shared_buffer_reads(shared_blks_read as u64, &attrs);
+            }
+            
+            // Record temp blocks
+            if let Some(temp_blks_written) = slow_query.temp_blks_written {
+                dim_metrics.record_temp_blocks_written(temp_blks_written as u64, &attrs);
+            }
+        }
+        
+        // Record wait events
+        for wait_event in &metrics.wait_events {
+            let attrs = OTelAdapter::wait_event_attributes(wait_event);
+            
+            // Record wait duration - using 1.0 as placeholder since actual duration not in metric
+            dim_metrics.record_wait_duration(1.0, &attrs);
+            
+            // Record wait count
+            dim_metrics.record_wait_count(1, &attrs);
+        }
+        
+        // Record blocking sessions
+        for blocking_session in &metrics.blocking_sessions {
+            let attrs = OTelAdapter::blocking_session_attributes(blocking_session);
+            
+            // Record blocking time - using blocking_duration if available
+            if let Some(duration) = &blocking_session.blocking_duration {
+                // Parse duration string to seconds
+                if let Ok(seconds) = parse_interval_to_seconds(duration) {
+                    dim_metrics.record_blocking_time(seconds, &attrs);
+                }
+            }
+            
+            // Record blocking session count
+            dim_metrics.record_blocking_sessions(1, &attrs);
+        }
+        
+        // Record database metrics
+        let db_attrs = vec![
+            KeyValue::new("db.name", self.config.databases.first().cloned().unwrap_or_default()),
+            KeyValue::new("db.system", "postgresql"),
+        ];
+        
+        // Record metric counts
+        dim_metrics.record_slow_queries_collected(metrics.slow_queries.len() as u64, &db_attrs);
+        
+        Ok(())
+    }
+    
     async fn collect_extended_metrics(
         &self,
         metrics: &mut UnifiedMetrics,
@@ -507,112 +583,84 @@ impl UnifiedCollectionEngine {
     }
     
     pub async fn send_metrics(&self, metrics: &UnifiedMetrics) -> Result<(), CollectorError> {
-        let mut errors = Vec::new();
+        use postgres_collector_core::MetricOutput;
         
-        for adapter in &self.adapters {
-            match adapter.adapt_dyn(metrics).await {
-                Ok(output) => {
-                    match output.serialize() {
-                        Ok(data) => {
-                            info!(
-                                "Successfully serialized metrics for {} adapter ({} bytes)",
-                                adapter.name(),
-                                data.len()
-                            );
-                            
-                            // Send metrics based on adapter type
-                            match adapter.name() {
-                                "NRI" => {
-                                    // NRI outputs to stdout for infrastructure agent to capture
-                                    println!("{}", String::from_utf8_lossy(&data));
-                                    info!("NRI metrics sent to stdout");
-                                }
-                                "OpenTelemetry" => {
-                                    // OTLP sends to configured endpoint
-                                    if let Some(otlp_config) = &self.config.outputs.otlp {
-                                        if otlp_config.enabled {
-                                            // Append the correct path for OTLP HTTP metrics endpoint
-                                            let endpoint = if otlp_config.endpoint.ends_with('/') {
-                                                format!("{}v1/metrics", otlp_config.endpoint)
-                                            } else {
-                                                format!("{}/v1/metrics", otlp_config.endpoint)
-                                            };
-                                            
-                                            match self.exporter.export_http(
-                                                &endpoint,
-                                                data,
-                                                output.content_type(),
-                                                &otlp_config.headers,
-                                            ).await {
-                                                Ok(_) => info!("OTLP metrics sent to {}", endpoint),
-                                                Err(e) => {
-                                                    error!("Failed to export OTLP metrics to {}: {}", endpoint, e);
-                                                    errors.push(format!("OTLP export failed: {}", e));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    warn!("Unknown adapter type: {}", adapter.name());
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to serialize metrics for {}: {}", adapter.name(), e);
-                            errors.push(format!("{}: serialization failed - {}", adapter.name(), e));
-                        }
-                    }
+        // Adapt metrics to OTel format
+        let output = self.otel_adapter.adapt(metrics)
+            .map_err(|e| CollectorError::General(anyhow::anyhow!("Failed to adapt metrics: {}", e)))?;
+        
+        // Serialize the output
+        let data = output.serialize()
+            .map_err(|e| CollectorError::General(anyhow::anyhow!("Failed to serialize metrics: {}", e)))?;
+        
+        info!("Successfully serialized metrics ({} bytes)", data.len());
+        
+        let otlp_config = &self.config.outputs.otlp;
+        if otlp_config.enabled {
+            // Append the correct path for OTLP HTTP metrics endpoint
+            let endpoint = if otlp_config.endpoint.ends_with('/') {
+                format!("{}v1/metrics", otlp_config.endpoint)
+            } else {
+                format!("{}/v1/metrics", otlp_config.endpoint)
+            };
+            
+            match self.exporter.export_http(
+                &endpoint,
+                data,
+                output.content_type(),
+                &otlp_config.headers,
+            ).await {
+                Ok(_) => {
+                    info!("OTLP metrics sent to {}", endpoint);
+                    Ok(())
                 }
                 Err(e) => {
-                    error!("Failed to adapt metrics for {}: {}", adapter.name(), e);
-                    errors.push(format!("{}: adaptation failed - {}", adapter.name(), e));
+                    error!("Failed to export OTLP metrics to {}: {}", endpoint, e);
+                    Err(CollectorError::General(
+                        anyhow::anyhow!("OTLP export failed: {}", e)
+                    ))
                 }
             }
+        } else {
+            warn!("OTLP output is disabled in configuration");
+            Ok(())
         }
-        
-        if !errors.is_empty() {
-            return Err(CollectorError::General(
-                anyhow::anyhow!("Failed to send metrics: {}", errors.join("; "))
-            ));
-        }
-        
-        Ok(())
-    }
-}
-
-#[async_trait]
-pub trait MetricAdapter: Send + Sync {
-    type Output: postgres_collector_core::MetricOutput;
-    
-    async fn adapt(&self, metrics: &UnifiedMetrics) -> Result<Self::Output, ProcessError>;
-}
-
-// Dynamic dispatch trait for storing heterogeneous adapters
-#[async_trait]
-pub trait MetricAdapterDyn: Send + Sync {
-    async fn adapt_dyn(&self, metrics: &UnifiedMetrics) -> Result<Box<dyn MetricOutputDyn>, ProcessError>;
-    fn name(&self) -> &str;
-}
-
-// Dynamic dispatch trait for outputs
-pub trait MetricOutputDyn: Send + Sync {
-    fn serialize(&self) -> Result<Vec<u8>, ProcessError>;
-    fn content_type(&self) -> &'static str;
-}
-
-// Blanket implementation to convert concrete outputs to dynamic
-impl<T: postgres_collector_core::MetricOutput + Send + Sync + 'static> MetricOutputDyn for T {
-    fn serialize(&self) -> Result<Vec<u8>, ProcessError> {
-        postgres_collector_core::MetricOutput::serialize(self)
-    }
-    
-    fn content_type(&self) -> &'static str {
-        postgres_collector_core::MetricOutput::content_type(self)
     }
 }
 
 // Placeholder for eBPF engine
+// Helper function to parse PostgreSQL interval to seconds
+fn parse_interval_to_seconds(interval: &str) -> Result<f64, CollectorError> {
+    // Simple parser for common PostgreSQL interval formats
+    // Examples: "00:05:23", "1 day 02:30:00", "00:00:01.234"
+    
+    // Try to parse as HH:MM:SS or HH:MM:SS.FFF
+    if let Some(time_part) = interval.split(' ').last() {
+        let parts: Vec<&str> = time_part.split(':').collect();
+        if parts.len() >= 3 {
+            let hours: f64 = parts[0].parse().unwrap_or(0.0);
+            let minutes: f64 = parts[1].parse().unwrap_or(0.0);
+            let seconds: f64 = parts[2].parse().unwrap_or(0.0);
+            
+            let mut total_seconds = hours * 3600.0 + minutes * 60.0 + seconds;
+            
+            // Check for days
+            if interval.contains("day") {
+                if let Some(day_part) = interval.split(" day").next() {
+                    if let Ok(days) = day_part.trim().parse::<f64>() {
+                        total_seconds += days * 86400.0;
+                    }
+                }
+            }
+            
+            return Ok(total_seconds);
+        }
+    }
+    
+    // If we can't parse, return 0
+    Ok(0.0)
+}
+
 #[cfg(feature = "ebpf")]
 pub struct EbpfEngine;
 

@@ -1,0 +1,200 @@
+{
+  "name": "PostgreSQL OpenTelemetry Alerts",
+  "description": "Alert conditions for PostgreSQL monitoring",
+  "conditions": [
+    {
+      "name": "High Query Duration",
+      "description": "Alert when average query duration exceeds threshold",
+      "type": "NRQL",
+      "enabled": true,
+      "runbookUrl": "",
+      "violationTimeLimitSeconds": 86400,
+      "nrql": {
+        "query": "SELECT average(postgresql.query.duration) FROM Metric WHERE db.system = 'postgresql'",
+        "evaluationOffset": 3
+      },
+      "signal": {
+        "aggregationWindow": 60,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "NONE"
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": 5000,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        },
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": 2000,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        }
+      ]
+    },
+    {
+      "name": "Blocking Sessions Detected",
+      "description": "Alert when blocking sessions are detected",
+      "type": "NRQL",
+      "enabled": true,
+      "runbookUrl": "",
+      "violationTimeLimitSeconds": 3600,
+      "nrql": {
+        "query": "SELECT sum(postgresql.blocking.sessions) FROM Metric WHERE db.system = 'postgresql'",
+        "evaluationOffset": 3
+      },
+      "signal": {
+        "aggregationWindow": 60,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "STATIC",
+        "fillValue": 0
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": 10,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "AT_LEAST_ONCE"
+        },
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": 5,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "AT_LEAST_ONCE"
+        }
+      ]
+    },
+    {
+      "name": "Low Buffer Cache Hit Ratio",
+      "description": "Alert when buffer cache hit ratio drops below threshold",
+      "type": "NRQL",
+      "enabled": true,
+      "runbookUrl": "",
+      "violationTimeLimitSeconds": 7200,
+      "nrql": {
+        "query": "SELECT rate(sum(postgresql.shared_buffer.hits), 1 minute) / (rate(sum(postgresql.shared_buffer.hits), 1 minute) + rate(sum(postgresql.shared_buffer.reads), 1 minute)) * 100 FROM Metric WHERE db.system = 'postgresql'",
+        "evaluationOffset": 3
+      },
+      "signal": {
+        "aggregationWindow": 300,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "NONE"
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "BELOW",
+          "threshold": 85,
+          "thresholdDuration": 900,
+          "thresholdOccurrences": "ALL"
+        },
+        {
+          "priority": "WARNING",
+          "operator": "BELOW",
+          "threshold": 90,
+          "thresholdDuration": 600,
+          "thresholdOccurrences": "ALL"
+        }
+      ]
+    },
+    {
+      "name": "High Wait Event Count",
+      "description": "Alert when wait events spike",
+      "type": "NRQL",
+      "enabled": true,
+      "runbookUrl": "",
+      "violationTimeLimitSeconds": 3600,
+      "nrql": {
+        "query": "SELECT rate(sum(postgresql.wait.count), 1 minute) FROM Metric WHERE db.system = 'postgresql'",
+        "evaluationOffset": 3
+      },
+      "signal": {
+        "aggregationWindow": 60,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "STATIC",
+        "fillValue": 0
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": 1000,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        },
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": 500,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        }
+      ]
+    },
+    {
+      "name": "Collector Failed",
+      "description": "Alert when collector stops reporting metrics",
+      "type": "NRQL",
+      "enabled": true,
+      "runbookUrl": "",
+      "violationTimeLimitSeconds": 1800,
+      "nrql": {
+        "query": "SELECT count(*) FROM Metric WHERE db.system = 'postgresql' AND service.name = 'postgresql'",
+        "evaluationOffset": 3
+      },
+      "signal": {
+        "aggregationWindow": 300,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "STATIC",
+        "fillValue": 0
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "EQUALS",
+          "threshold": 0,
+          "thresholdDuration": 600,
+          "thresholdOccurrences": "ALL"
+        }
+      ]
+    },
+    {
+      "name": "High Temp Block Usage",
+      "description": "Alert when temporary blocks usage is high",
+      "type": "NRQL",
+      "enabled": true,
+      "runbookUrl": "",
+      "violationTimeLimitSeconds": 7200,
+      "nrql": {
+        "query": "SELECT rate(sum(postgresql.temp_blocks.written), 1 minute) FROM Metric WHERE db.system = 'postgresql'",
+        "evaluationOffset": 3
+      },
+      "signal": {
+        "aggregationWindow": 300,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "STATIC",
+        "fillValue": 0
+      },
+      "terms": [
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": 1000,
+          "thresholdDuration": 900,
+          "thresholdOccurrences": "ALL"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database with monitoring extensions
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: testdb
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries='pg_stat_statements'"
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Simulated workload generator
+  workload:
+    image: postgres:15
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: |
+      bash -c "
+        sleep 10
+        while true; do
+          PGPASSWORD=postgres123 psql -h postgres -U postgres -d testdb -c 'SELECT pg_sleep(random()), * FROM generate_series(1,1000);' &
+          PGPASSWORD=postgres123 psql -h postgres -U postgres -d testdb -c 'INSERT INTO test_table (data) SELECT md5(random()::text) FROM generate_series(1,100);' &
+          PGPASSWORD=postgres123 psql -h postgres -U postgres -d testdb -c 'UPDATE test_table SET data = md5(random()::text) WHERE id = (SELECT id FROM test_table ORDER BY random() LIMIT 1);' &
+          sleep 5
+        done
+      "
+
+  # PostgreSQL OpenTelemetry Collector for New Relic
+  postgres-otel-collector:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # PostgreSQL Connection
+      POSTGRES_CONNECTION_STRING: postgresql://postgres:postgres123@postgres:5432/testdb
+      POSTGRES_DATABASES: testdb,postgres
+      
+      # New Relic Configuration
+      NEWRELIC_API_KEY: ${NEWRELIC_API_KEY}
+      NEWRELIC_REGION: ${NEWRELIC_REGION:-US}
+      
+      # Collection Settings
+      COLLECTION_INTERVAL_SECS: 30
+      QUERY_MONITORING_COUNT_THRESHOLD: 20
+      QUERY_MONITORING_RESPONSE_TIME_THRESHOLD: 500
+      MAX_SLOW_QUERIES: 1000
+      
+      # Extended Metrics
+      ENABLE_EXTENDED_METRICS: true
+      ENABLE_ASH: true
+      
+      # OTLP Settings
+      OTLP_ENABLED: true
+      OTLP_PROTOCOL: http
+      OTLP_COMPRESSION: gzip
+      
+      # Service Identity
+      SERVICE_NAME: postgresql-demo
+      SERVICE_NAMESPACE: demo
+      DEPLOYMENT_ENVIRONMENT: demo
+      
+      # Logging
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"  # Health check endpoint
+    volumes:
+      - ./otel-config.toml:/etc/otel-config.toml
+
+volumes:
+  postgres_data:

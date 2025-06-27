@@ -17,7 +17,7 @@ pub struct MultiInstanceManager {
 
 struct InstanceCollector {
     name: String,
-    engine: UnifiedCollectionEngine,
+    engine: Arc<RwLock<UnifiedCollectionEngine>>,
     handle: Option<JoinHandle<()>>,
     metrics: Arc<RwLock<Option<UnifiedMetrics>>>,
 }
@@ -109,7 +109,7 @@ impl MultiInstanceManager {
             Ok(engine) => {
                 let collector = InstanceCollector {
                     name: name.clone(),
-                    engine,
+                    engine: Arc::new(RwLock::new(engine)),
                     handle: None,
                     metrics: Arc::new(RwLock::new(None)),
                 };
@@ -139,12 +139,12 @@ impl MultiInstanceManager {
         
         for (name, collector) in instances.iter() {
             let name = name.clone();
-            let engine = &collector.engine;
+            let engine = collector.engine.clone();
             let metrics_store = collector.metrics.clone();
             
             // Create a future for collection
             let fut = async move {
-                match engine.collect_all_metrics().await {
+                match engine.write().await.collect_all_metrics().await {
                     Ok(metrics) => {
                         *metrics_store.write().await = Some(metrics.clone());
                         Ok((name, metrics))
@@ -184,7 +184,7 @@ impl MultiInstanceManager {
         
         for (name, collector) in instances.iter() {
             if let Some(metrics) = &*collector.metrics.read().await {
-                match collector.engine.send_metrics(metrics).await {
+                match collector.engine.read().await.send_metrics(metrics).await {
                     Ok(_) => info!("Successfully sent metrics for instance '{}'", name),
                     Err(e) => {
                         error!("Failed to send metrics for instance '{}': {}", name, e);

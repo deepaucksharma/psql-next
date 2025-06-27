@@ -1,30 +1,28 @@
 [package]
-name = "postgres-unified-collector"
+name = "postgres-otel-collector"
 version = "1.0.0"
 edition = "2021"
-authors = ["PostgreSQL Unified Collector Team"]
-description = "Unified PostgreSQL collector supporting both New Relic Infrastructure and OpenTelemetry"
+authors = ["PostgreSQL OpenTelemetry Collector Team"]
+description = "PostgreSQL metrics collector for OpenTelemetry"
 license = "Apache-2.0"
-repository = "https://github.com/YOUR_ORG/postgres-unified-collector"
+repository = "https://github.com/YOUR_ORG/postgres-otel-collector"
 
 [workspace]
 members = [
     "crates/core",
-    "crates/nri-adapter",
     "crates/otel-adapter",
     "crates/query-engine",
     "crates/extensions",
 ]
 
 [[bin]]
-name = "postgres-unified-collector"
-path = "src/bin/unified_collector.rs"
+name = "postgres-otel-collector"
+path = "src/bin/otel_collector.rs"
 
 [dependencies]
 # Internal workspace dependencies
 postgres-collector-core = { path = "crates/core" }
 postgres-extensions = { path = "crates/extensions" }
-postgres-nri-adapter = { path = "crates/nri-adapter" }
 postgres-otel-adapter = { path = "crates/otel-adapter" }
 postgres-query-engine = { path = "crates/query-engine" }
 
@@ -84,12 +82,10 @@ criterion = "0.5"
 tempfile = "3.8"
 
 [features]
-default = ["nri", "otel"]
-nri = []
-otel = []
+default = []
 ebpf = ["libbpf-rs", "libbpf-cargo"]
 extended-metrics = []
-all = ["nri", "otel", "ebpf", "extended-metrics"]
+all = ["ebpf", "extended-metrics"]
 
 [profile.release]
 opt-level = 3

@@ -1,0 +1,326 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: postgres-monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-collector-config
+  namespace: postgres-monitoring
+data:
+  config.toml: |
+    # PostgreSQL connection configuration
+    connection_string = "postgres://postgres:password@postgres:5432/testdb"
+    databases = ["testdb"]
+    
+    # Slow query configuration
+    [slow_queries]
+    enabled = true
+    min_duration_ms = 500
+    interval = 30
+    
+    # Blocking sessions configuration
+    [blocking_sessions]
+    enabled = true
+    min_blocking_duration_ms = 1000
+    interval = 30
+    
+    # OTLP output configuration
+    [outputs.otlp]
+    enabled = true
+    endpoint = "http://otel-collector:4317"
+    timeout_seconds = 10
+    compression = "gzip"
+    
+    # Resource attributes
+    [outputs.otlp.resource_attributes]
+    service.name = "postgresql-unified-collector"
+    service.version = "1.0.0"
+    db.system = "postgresql"
+    deployment.environment = "production"
+    k8s.namespace.name = "postgres-monitoring"
+    
+    # Additional attributes
+    [outputs.otlp.attributes]
+    collector.version = "1.0.0"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: postgres-monitoring
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+      
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+        spike_limit_mib: 128
+      
+      resource:
+        attributes:
+          - key: k8s.cluster.name
+            value: production-cluster
+            action: insert
+    
+    exporters:
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: postgresql
+        
+      logging:
+        loglevel: info
+    
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    
+    service:
+      extensions: [health_check]
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource]
+          exporters: [prometheus, logging]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+  namespace: postgres-monitoring
+type: Opaque
+data:
+  password: cGFzc3dvcmQ= # base64 encoded "password"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: postgres-monitoring
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        env:
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: POSTGRES_DB
+          value: testdb
+        args:
+        - postgres
+        - -c
+        - shared_preload_libraries=pg_stat_statements
+        - -c
+        - pg_stat_statements.track=all
+        - -c
+        - pg_stat_statements.max=10000
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: postgres-monitoring
+spec:
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-collector
+  namespace: postgres-monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-collector
+  template:
+    metadata:
+      labels:
+        app: postgres-collector
+    spec:
+      containers:
+      - name: collector
+        image: postgres-unified-collector:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: RUST_LOG
+          value: info
+        volumeMounts:
+        - name: config
+          mountPath: /etc/collector
+        ports:
+        - containerPort: 8080
+          name: health
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      volumes:
+      - name: config
+        configMap:
+          name: postgres-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-collector
+  namespace: postgres-monitoring
+spec:
+  selector:
+    app: postgres-collector
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: health
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: postgres-monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:latest
+        args: ["--config=/etc/otel-collector-config.yaml"]
+        volumeMounts:
+        - name: config
+          mountPath: /etc
+        ports:
+        - containerPort: 4317
+          name: otlp-grpc
+        - containerPort: 4318
+          name: otlp-http
+        - containerPort: 8889
+          name: prometheus
+        - containerPort: 13133
+          name: health
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+      volumes:
+      - name: config
+        configMap:
+          name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: postgres-monitoring
+spec:
+  selector:
+    app: otel-collector
+  ports:
+  - port: 4317
+    targetPort: 4317
+    name: otlp-grpc
+  - port: 4318
+    targetPort: 4318
+    name: otlp-http
+  - port: 8889
+    targetPort: 8889
+    name: prometheus
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-prometheus
+  namespace: postgres-monitoring
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8889"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: otel-collector
+  ports:
+  - port: 8889
+    targetPort: 8889
+    name: metrics

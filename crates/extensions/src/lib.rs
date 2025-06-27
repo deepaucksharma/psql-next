@@ -123,54 +123,6 @@ impl ExtensionManager {
     }
 }
 
-/// OHI Validation helpers
-pub struct OHIValidations;
-
-impl OHIValidations {
-    pub fn check_slow_query_metrics_fetch_eligibility(
-        extensions: &HashMap<String, ExtensionInfo>,
-    ) -> bool {
-        extensions.get("pg_stat_statements")
-            .map(|e| e.enabled)
-            .unwrap_or(false)
-    }
-    
-    pub fn check_wait_event_metrics_fetch_eligibility(
-        extensions: &HashMap<String, ExtensionInfo>,
-    ) -> bool {
-        extensions.get("pg_stat_statements")
-            .map(|e| e.enabled)
-            .unwrap_or(false)
-            && extensions.get("pg_wait_sampling")
-                .map(|e| e.enabled)
-                .unwrap_or(false)
-    }
-    
-    pub fn check_blocking_session_metrics_fetch_eligibility(
-        extensions: &HashMap<String, ExtensionInfo>,
-        version: u64,
-    ) -> bool {
-        // Version 12 and 13 don't require pg_stat_statements
-        if version == 12 || version == 13 {
-            return true;
-        }
-        extensions.get("pg_stat_statements")
-            .map(|e| e.enabled)
-            .unwrap_or(false)
-    }
-    
-    pub fn check_individual_query_metrics_fetch_eligibility(
-        extensions: &HashMap<String, ExtensionInfo>,
-    ) -> bool {
-        extensions.get("pg_stat_monitor")
-            .map(|e| e.enabled)
-            .unwrap_or(false)
-    }
-    
-    pub fn check_postgres_version_support_for_query_monitoring(version: u64) -> bool {
-        version >= 12
-    }
-}
 
 /// Extension compatibility matrix
 #[derive(Default)]
@@ -184,7 +136,7 @@ struct VersionRule {
 }
 
 impl CompatibilityMatrix {
-    pub fn is_compatible(&self, extension: &str, version: &str) -> bool {
+    pub fn is_compatible(&self, _extension: &str, _version: &str) -> bool {
         // For now, assume all versions are compatible
         // In a real implementation, this would check version compatibility
         true
@@ -266,7 +218,8 @@ impl ActiveSessionSampler {
                         }
                         
                         // Maintain retention window
-                        let cutoff = chrono::Utc::now() - chrono::Duration::from_std(retention).unwrap();
+                        let cutoff = chrono::Utc::now() - chrono::Duration::from_std(retention)
+                            .unwrap_or_else(|_| chrono::Duration::hours(1));
                         while let Some(front) = samples_guard.front() {
                             if front.sample_time < cutoff {
                                 samples_guard.pop_front();

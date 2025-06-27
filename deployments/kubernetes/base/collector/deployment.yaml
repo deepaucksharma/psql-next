@@ -13,9 +13,7 @@ spec:
       labels:
         app: postgres-collector
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
-        prometheus.io/path: "/metrics"
+        # New Relic OTLP collector
     spec:
       serviceAccountName: postgres-collector
       securityContext:
@@ -24,7 +22,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: collector
-        image: postgres-unified-collector:latest
+        image: postgres-otel-collector:latest
         imagePullPolicy: IfNotPresent
         args:
           - "-c"
@@ -49,13 +47,17 @@ spec:
               secretKeyRef:
                 name: postgres-credentials
                 key: POSTGRES_DATABASE
-          - name: NEW_RELIC_LICENSE_KEY
+          - name: NEWRELIC_API_KEY
             valueFrom:
               secretKeyRef:
                 name: newrelic-credentials
-                key: NEW_RELIC_LICENSE_KEY
-          - name: COLLECTOR_MODE
-            value: "hybrid"  # Default, overridden by overlays
+                key: NEWRELIC_API_KEY
+          - name: NEWRELIC_REGION
+            value: "US"  # or EU
+          - name: OTLP_ENABLED
+            value: "true"
+          - name: OTLP_PROTOCOL
+            value: "http"
           - name: RUST_LOG
             value: "info"
           - name: POD_NAME
@@ -69,9 +71,6 @@ spec:
         ports:
           - name: health
             containerPort: 8080
-            protocol: TCP
-          - name: metrics
-            containerPort: 9090
             protocol: TCP
         volumeMounts:
           - name: config

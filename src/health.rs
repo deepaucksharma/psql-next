@@ -62,7 +62,6 @@ async fn handle_request(
     let response = match req.uri().path() {
         "/health" => health_check(status).await,
         "/ready" => readiness_check(status).await,
-        "/metrics" => prometheus_metrics(status).await,
         _ => not_found(),
     };
     
@@ -111,34 +110,9 @@ async fn readiness_check(status: Arc<RwLock<HealthStatus>>) -> Response<Body> {
     }
 }
 
-async fn prometheus_metrics(status: Arc<RwLock<HealthStatus>>) -> Response<Body> {
-    let status = status.read().await;
-    
-    let metrics = format!(
-        "# HELP postgres_collector_up Whether the collector is up and running\n\
-         # TYPE postgres_collector_up gauge\n\
-         postgres_collector_up {}\n\
-         # HELP postgres_collector_metrics_sent_total Total number of metrics successfully sent\n\
-         # TYPE postgres_collector_metrics_sent_total counter\n\
-         postgres_collector_metrics_sent_total {}\n\
-         # HELP postgres_collector_metrics_failed_total Total number of failed metric sends\n\
-         # TYPE postgres_collector_metrics_failed_total counter\n\
-         postgres_collector_metrics_failed_total {}\n",
-        if status.is_healthy { 1 } else { 0 },
-        status.metrics_sent,
-        status.metrics_failed
-    );
-    
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "text/plain; version=0.0.4")
-        .body(Body::from(metrics))
-        .unwrap()
-}
-
 fn not_found() -> Response<Body> {
     Response::builder()
         .status(StatusCode::NOT_FOUND)
         .body(Body::from("404 - Not Found"))
-        .unwrap()
+        .unwrap_or_else(|_| Response::new(Body::from("Internal Server Error")))
 }

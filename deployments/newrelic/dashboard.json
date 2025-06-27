@@ -1,0 +1,321 @@
+{
+  "name": "PostgreSQL OpenTelemetry Monitoring",
+  "description": "Comprehensive PostgreSQL monitoring dashboard using dimensional metrics from OpenTelemetry collector",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Overview",
+      "description": "PostgreSQL cluster overview and key metrics",
+      "widgets": [
+        {
+          "title": "Database Status",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT latest(postgresql.database.connected) AS 'Connected', latest(postgresql.database.size) AS 'Size (MB)' FROM Metric WHERE db.system = 'postgresql' FACET db.name"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Query Performance",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(postgresql.query.duration) AS 'Avg Duration (ms)', sum(postgresql.query.count) AS 'Query Count' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Active Sessions",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT count(postgresql.session.active) FROM Metric WHERE db.system = 'postgresql' FACET postgresql.state TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.stacked-bar"
+          }
+        },
+        {
+          "title": "Wait Events",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT sum(postgresql.wait.count) FROM Metric WHERE db.system = 'postgresql' FACET postgresql.wait.event, postgresql.wait.type TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.pie"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query Analysis",
+      "description": "Detailed query performance analysis",
+      "widgets": [
+        {
+          "title": "Top Slow Queries",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(postgresql.query.duration) AS 'Avg Duration', sum(postgresql.query.count) AS 'Executions', average(postgresql.query.rows) AS 'Avg Rows' FROM Metric WHERE db.system = 'postgresql' FACET db.query.fingerprint LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Query Operations Breakdown",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT sum(postgresql.query.count) FROM Metric WHERE db.system = 'postgresql' FACET db.operation TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.stacked-bar"
+          }
+        },
+        {
+          "title": "Query Duration Distribution",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT histogram(postgresql.query.duration, width: 100) FROM Metric WHERE db.system = 'postgresql'"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.histogram"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Blocking & Locks",
+      "description": "Lock monitoring and blocking session analysis",
+      "widgets": [
+        {
+          "title": "Blocking Sessions",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT sum(postgresql.blocking.sessions) AS 'Blocking Sessions', average(postgresql.blocking.time) AS 'Avg Blocking Time (s)' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Lock Types",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT sum(postgresql.blocking.sessions) FROM Metric WHERE db.system = 'postgresql' FACET postgresql.lock.type"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.pie"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Buffer Cache",
+      "description": "Buffer cache performance and efficiency",
+      "widgets": [
+        {
+          "title": "Buffer Hit Ratio",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT rate(sum(postgresql.shared_buffer.hits), 1 minute) / (rate(sum(postgresql.shared_buffer.hits), 1 minute) + rate(sum(postgresql.shared_buffer.reads), 1 minute)) * 100 AS 'Hit Ratio %' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "max": 100,
+              "min": 0
+            }
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Buffer Operations",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT rate(sum(postgresql.shared_buffer.hits), 1 minute) AS 'Hits/min', rate(sum(postgresql.shared_buffer.reads), 1 minute) AS 'Reads/min' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Temp Blocks",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT rate(sum(postgresql.temp_blocks.written), 1 minute) AS 'Temp Blocks Written/min' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Collector Health",
+      "description": "Monitoring the PostgreSQL OpenTelemetry collector itself",
+      "widgets": [
+        {
+          "title": "Collection Duration",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(postgresql.collector.collection_duration) AS 'Collection Duration (s)' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Metrics Collected",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT latest(postgresql.collector.slow_queries_collected) AS 'Slow Queries' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        }
+      ]
+    }
+  ]
+}

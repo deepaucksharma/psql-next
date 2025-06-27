@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: myapp
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries='pg_stat_statements'"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-extensions.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-otel-collector:
+    image: postgres-otel-collector:latest
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # PostgreSQL Connection
+      POSTGRES_CONNECTION_STRING: postgresql://postgres:mysecretpassword@postgres:5432/myapp
+      POSTGRES_DATABASES: myapp,postgres
+      POSTGRES_MAX_CONNECTIONS: 10
+      POSTGRES_CONNECT_TIMEOUT_SECS: 30
+      
+      # New Relic Configuration
+      NEWRELIC_API_KEY: ${NEWRELIC_API_KEY}
+      NEWRELIC_REGION: ${NEWRELIC_REGION:-US}
+      
+      # Collection Settings
+      COLLECTION_INTERVAL_SECS: 60
+      QUERY_MONITORING_COUNT_THRESHOLD: 100
+      QUERY_MONITORING_RESPONSE_TIME_THRESHOLD: 1000
+      MAX_SLOW_QUERIES: 1000
+      SANITIZE_QUERY_TEXT: "true"
+      SANITIZATION_MODE: smart
+      
+      # Extended Metrics
+      ENABLE_EXTENDED_METRICS: "true"
+      ENABLE_ASH: "true"
+      ASH_SAMPLE_INTERVAL_SECS: 5
+      ASH_RETENTION_HOURS: 24
+      ASH_MAX_MEMORY_MB: 100
+      
+      # OTLP Configuration
+      OTLP_ENABLED: "true"
+      OTLP_PROTOCOL: http
+      OTLP_COMPRESSION: gzip
+      OTLP_TIMEOUT_SECS: 30
+      
+      # Dimensional Metrics Settings
+      EXPORT_INTERVAL_SECS: 30
+      METRIC_BATCH_SIZE: 1000
+      MAX_CONCURRENT_EXPORTS: 2
+      
+      # Cardinality Control
+      MAX_QUERY_FINGERPRINTS: 10000
+      MAX_WAIT_EVENTS: 100
+      MAX_USERS: 1000
+      QUERY_TEXT_MAX_LENGTH: 1000
+      
+      # Service Identity
+      SERVICE_NAME: postgresql
+      SERVICE_NAMESPACE: production
+      SERVICE_INSTANCE_ID: ${HOSTNAME:-postgres-prod}:5432
+      DEPLOYMENT_ENVIRONMENT: production
+      
+      # Health and Logging
+      HEALTH_CHECK_PORT: 8080
+      HEALTH_CHECK_PATH: /health
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      
+      # Performance Tuning
+      WORKER_THREADS: 4
+      MAX_MEMORY_MB: 512
+      BUFFER_SIZE_MB: 64
+    volumes:
+      - ./collector-config.toml:/etc/postgres-collector/collector-config.toml:ro
+    ports:
+      - "8080:8080"  # Health check endpoint
+    networks:
+      - monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+volumes:
+  postgres_data:
+
+networks:
+  monitoring:
+    driver: bridge

@@ -19,7 +19,7 @@ services:
       retries: 5
 
   postgres-collector:
-    image: postgres-unified-collector:latest
+    image: postgres-otel-collector:latest
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile
@@ -39,7 +39,6 @@ services:
       POSTGRES_CONNECT_TIMEOUT_SECS: 30
       
       # Collection configuration
-      COLLECTION_MODE: hybrid
       COLLECTION_INTERVAL_SECS: 60
       ENABLE_EXTENDED_METRICS: "true"
       ENABLE_EBPF: "false"
@@ -54,11 +53,6 @@ services:
       SANITIZE_QUERY_TEXT: "true"
       SANITIZATION_MODE: smart
       
-      # NRI Output
-      NRI_ENABLED: "true"
-      NRI_ENTITY_KEY: "postgres:5432"
-      NRI_INTEGRATION_NAME: "com.newrelic.postgresql"
-      
       # OTLP Output
       OTLP_ENABLED: "true"
       OTLP_ENDPOINT: http://otel-collector:4318
@@ -66,11 +60,6 @@ services:
       OTLP_COMPRESSION: gzip
       OTLP_TIMEOUT_SECS: 30
       
-      # New Relic Configuration
-      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
-      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
-      NEW_RELIC_REGION: ${NEW_RELIC_REGION:-US}
-      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
       
       # Health and logging
       HEALTH_ENABLED: "true"

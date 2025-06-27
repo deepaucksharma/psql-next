@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Unified metric structure that encompasses all OHI metrics plus extensions
+/// Unified metric structure for PostgreSQL metrics
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnifiedMetrics {
-    // Base metrics matching OHI exactly
+    // Base metrics
     pub slow_queries: Vec<SlowQueryMetric>,
     pub wait_events: Vec<WaitEventMetric>,
     pub blocking_sessions: Vec<BlockingSessionMetric>,
@@ -26,10 +26,9 @@ pub struct UnifiedMetrics {
     pub pgbouncer_metrics: Option<serde_json::Value>,
 }
 
-/// Exactly matches OHI SlowRunningQueryMetrics
+/// Slow query metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlowQueryMetric {
-    pub newrelic: Option<String>,              // OHI compatibility
     pub query_id: Option<i64>,
     pub query_text: Option<String>,            // Anonymized, max 4095 chars
     pub database_name: Option<String>,
@@ -40,9 +39,9 @@ pub struct SlowQueryMetric {
     pub avg_disk_writes: Option<f64>,
     pub statement_type: Option<String>,
     pub collection_timestamp: Option<String>,
-    pub individual_query: Option<String>,      // For RDS mode
+    pub individual_query: Option<String>,
     
-    // Extended fields (nullable for OHI compatibility)
+    // Extended fields
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extended_metrics: Option<ExtendedSlowQueryMetrics>,
 }
@@ -57,7 +56,7 @@ pub struct ExtendedSlowQueryMetrics {
     pub ebpf_metrics: Option<EbpfQueryMetrics>,
 }
 
-/// Exactly matches OHI WaitEventMetrics
+/// Wait event metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(sqlx::FromRow)]
 pub struct WaitEventMetric {
@@ -73,7 +72,7 @@ pub struct WaitEventMetric {
     pub collection_timestamp: Option<String>,
 }
 
-/// Exactly matches OHI BlockingSessionMetrics
+/// Blocking session metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(sqlx::FromRow)]
 pub struct BlockingSessionMetric {
@@ -91,7 +90,7 @@ pub struct BlockingSessionMetric {
     pub collection_timestamp: Option<String>,
 }
 
-/// Exactly matches OHI IndividualQueryMetrics
+/// Individual query metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(sqlx::FromRow)]
 pub struct IndividualQueryMetric {
@@ -111,7 +110,7 @@ pub struct IndividualQueryMetric {
     pub collection_timestamp: Option<String>,
 }
 
-/// Exactly matches OHI ExecutionPlanMetrics
+/// Execution plan metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionPlanMetric {
     pub query_id: Option<i64>,
