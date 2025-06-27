@@ -1,0 +1,291 @@
+# PostgreSQL Collector Metrics Metadata
+# This file defines all metrics collected by the PostgreSQL collector
+# Following OpenTelemetry conventions
+
+metrics:
+  # Query Performance Metrics
+  postgresql.query.duration:
+    enabled: true
+    description: Average query execution time
+    unit: ms
+    gauge:
+      value_type: double
+    attributes:
+      - db.name
+      - db.schema
+      - db.operation
+      - db.query.id
+      - db.query.fingerprint
+
+  postgresql.query.count:
+    enabled: true
+    description: Number of query executions
+    unit: "{queries}"
+    sum:
+      value_type: int
+      monotonic: true
+      aggregation_temporality: cumulative
+    attributes:
+      - db.name
+      - db.schema
+      - db.operation
+      - db.query.id
+
+  postgresql.query.rows:
+    enabled: true
+    description: Number of rows returned by queries
+    unit: "{rows}"
+    sum:
+      value_type: int
+      monotonic: true
+      aggregation_temporality: cumulative
+    attributes:
+      - db.name
+      - db.query.id
+
+  # Buffer Metrics
+  postgresql.buffer.hit_ratio:
+    enabled: true
+    description: Buffer cache hit ratio
+    unit: 1
+    gauge:
+      value_type: double
+    attributes:
+      - db.name
+
+  postgresql.buffer.shared.hits:
+    enabled: true
+    description: Number of shared buffer hits
+    unit: "{hits}"
+    sum:
+      value_type: int
+      monotonic: true
+    attributes:
+      - db.name
+      - db.query.id
+
+  postgresql.buffer.shared.reads:
+    enabled: true
+    description: Number of shared buffer reads from disk
+    unit: "{reads}"
+    sum:
+      value_type: int
+      monotonic: true
+    attributes:
+      - db.name
+      - db.query.id
+
+  # Temp I/O Metrics
+  postgresql.temp.blocks.written:
+    enabled: true
+    description: Number of temporary blocks written
+    unit: "{blocks}"
+    sum:
+      value_type: int
+      monotonic: true
+    attributes:
+      - db.name
+      - db.query.id
+
+  postgresql.temp.blocks.read:
+    enabled: true
+    description: Number of temporary blocks read
+    unit: "{blocks}"
+    sum:
+      value_type: int
+      monotonic: true
+    attributes:
+      - db.name
+      - db.query.id
+
+  # Connection Metrics
+  postgresql.backends:
+    enabled: true
+    description: Number of active backend connections
+    unit: "{connections}"
+    gauge:
+      value_type: int
+    attributes:
+      - db.name
+      - state
+
+  postgresql.connections.max:
+    enabled: true
+    description: Maximum number of connections
+    unit: "{connections}"
+    gauge:
+      value_type: int
+    attributes:
+      - db.name
+
+  # Database Size Metrics
+  postgresql.database.size:
+    enabled: true
+    description: Size of the database in bytes
+    unit: By
+    gauge:
+      value_type: int
+    attributes:
+      - db.name
+
+  # Lock Metrics
+  postgresql.locks:
+    enabled: true
+    description: Number of locks held
+    unit: "{locks}"
+    gauge:
+      value_type: int
+    attributes:
+      - db.name
+      - lock_type
+      - mode
+      - granted
+
+  postgresql.locks.blocking.count:
+    enabled: true
+    description: Number of blocking lock situations
+    unit: "{locks}"
+    gauge:
+      value_type: int
+    attributes:
+      - db.name
+      - lock_type
+
+  postgresql.locks.blocking.duration:
+    enabled: true
+    description: Duration of blocking lock situations
+    unit: ms
+    gauge:
+      value_type: double
+    attributes:
+      - db.name
+      - lock_type
+      - blocking_pid
+      - blocked_pid
+
+  # Wait Event Metrics
+  postgresql.wait.count:
+    enabled: true
+    description: Number of wait events
+    unit: "{events}"
+    sum:
+      value_type: int
+      monotonic: true
+    attributes:
+      - db.name
+      - wait_event_type
+      - wait_event
+      - state
+
+  postgresql.wait.duration:
+    enabled: true
+    description: Duration of wait events
+    unit: ms
+    gauge:
+      value_type: double
+    attributes:
+      - db.name
+      - wait_event_type
+      - wait_event
+      - state
+
+  # Transaction Metrics
+  postgresql.transactions.committed:
+    enabled: true
+    description: Number of committed transactions
+    unit: "{transactions}"
+    sum:
+      value_type: int
+      monotonic: true
+    attributes:
+      - db.name
+
+  postgresql.transactions.rolled_back:
+    enabled: true
+    description: Number of rolled back transactions
+    unit: "{transactions}"
+    sum:
+      value_type: int
+      monotonic: true
+    attributes:
+      - db.name
+
+  # Deadlock Metrics
+  postgresql.deadlocks:
+    enabled: false
+    description: Number of deadlocks detected
+    unit: "{deadlocks}"
+    sum:
+      value_type: int
+      monotonic: true
+    attributes:
+      - db.name
+
+  # Checkpoint Metrics
+  postgresql.checkpoints.timed:
+    enabled: false
+    description: Number of scheduled checkpoints
+    unit: "{checkpoints}"
+    sum:
+      value_type: int
+      monotonic: true
+
+  postgresql.checkpoints.requested:
+    enabled: false
+    description: Number of requested checkpoints
+    unit: "{checkpoints}"
+    sum:
+      value_type: int
+      monotonic: true
+
+  # Replication Metrics
+  postgresql.replication.lag:
+    enabled: false
+    description: Replication lag in bytes
+    unit: By
+    gauge:
+      value_type: int
+    attributes:
+      - slot_name
+      - slot_type
+
+  # Collector Self-Monitoring Metrics
+  postgresql.collector.scrape.duration:
+    enabled: true
+    description: Duration of metric collection
+    unit: s
+    histogram:
+      value_type: double
+    attributes:
+      - status
+
+  postgresql.collector.scrape.errors:
+    enabled: true
+    description: Number of collection errors
+    unit: "{errors}"
+    sum:
+      value_type: int
+      monotonic: true
+    attributes:
+      - scraper
+      - error_type
+
+  postgresql.collector.metrics.collected:
+    enabled: true
+    description: Number of metrics collected
+    unit: "{metrics}"
+    gauge:
+      value_type: int
+    attributes:
+      - metric_type
+
+# Resource attributes that will be added to all metrics
+resource_attributes:
+  - service.name
+  - service.version
+  - service.namespace
+  - db.system
+  - db.connection_string
+  - host.name
+  - cloud.provider
+  - cloud.region
