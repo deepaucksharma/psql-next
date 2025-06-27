@@ -1,0 +1,208 @@
+---
+# PostgreSQL StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      securityContext:
+        fsGroup: 999
+        runAsUser: 999
+        runAsGroup: 999
+      containers:
+      - name: postgres
+        image: postgres:15
+        env:
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          value: password
+        - name: POSTGRES_DB
+          value: testdb
+        ports:
+        - containerPort: 5432
+          name: postgres
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: init-script
+          mountPath: /docker-entrypoint-initdb.d
+        command:
+        - postgres
+        - -c
+        - shared_preload_libraries=pg_stat_statements
+        - -c
+        - pg_stat_statements.track=all
+        - -c
+        - pg_stat_statements.max=10000
+      volumes:
+      - name: init-script
+        configMap:
+          name: postgres-init
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 100Mi
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: postgres
+---
+# PostgreSQL Init ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: default
+data:
+  init.sql: |
+    -- Enable required extensions
+    CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+    
+    -- Create test schema
+    CREATE SCHEMA IF NOT EXISTS test_schema;
+    
+    -- Create function for generating slow queries
+    CREATE OR REPLACE FUNCTION test_schema.simulate_slow_query(delay_seconds NUMERIC)
+    RETURNS void AS $$
+    BEGIN
+        PERFORM pg_sleep(delay_seconds);
+    END;
+    $$ LANGUAGE plpgsql;
+---
+# Collector ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-collector-config
+  namespace: default
+data:
+  config.toml: |
+    connection_string = "postgres://postgres:password@postgres:5432/testdb"
+    host = "postgres"
+    port = 5432
+    databases = ["testdb"]
+    max_connections = 5
+    connect_timeout_secs = 30
+    
+    collection_interval_secs = 30
+    collection_mode = "nri"
+    query_monitoring_count_threshold = 20
+    query_monitoring_response_time_threshold = 500
+    max_query_length = 4096
+    
+    enable_extended_metrics = true
+    enable_ash = true
+    ash_sample_interval_secs = 1
+    ash_retention_hours = 1
+    ash_max_memory_mb = 100
+    enable_ebpf = false
+    
+    sanitize_query_text = true
+    sanitization_mode = "smart"
+    
+    [sampling]
+    mode = "fixed"
+    base_sample_rate = 1.0
+    rules = []
+    
+    [outputs.nri]
+    enabled = true
+    entity_key = "postgres:5432"
+    integration_name = "com.newrelic.postgresql"
+    
+    [outputs.otlp]
+    enabled = false
+    endpoint = "http://localhost:4318"
+    compression = "gzip"
+    timeout_secs = 30
+    headers = []
+---
+# Collector Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-collector
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-collector
+  template:
+    metadata:
+      labels:
+        app: postgres-collector
+    spec:
+      containers:
+      - name: collector
+        image: postgres-unified-collector:latest
+        imagePullPolicy: IfNotPresent  # For local testing
+        env:
+        - name: DATABASE_URL
+          value: "postgres://postgres:password@postgres:5432/testdb"
+        - name: RUST_LOG
+          value: "info"
+        ports:
+        - containerPort: 8080
+          name: health
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.toml
+          subPath: config.toml
+        command: ["/usr/local/bin/postgres-unified-collector"]
+        args: ["-c", "/app/config.toml", "-m", "nri"]
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: postgres-collector-config
+---
+# Collector Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-collector
+  namespace: default
+spec:
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: health
+  selector:
+    app: postgres-collector
