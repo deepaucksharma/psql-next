@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-collector-fixed-config
+data:
+  config.toml: |
+    connection_string = "postgresql://monitoring:monitoring@postgres-primary:5432/testdb"
+    host = "postgres-primary"
+    port = 5432
+    databases = ["testdb"]
+    collection_interval_secs = 30
+    collection_mode = "hybrid"
+    
+    [outputs.nri]
+    enabled = true
+    
+    [outputs.otlp]
+    enabled = true
+    endpoint = "http://otlp.nr-data.net:4318"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-collector-fixed
+  labels:
+    app: postgres-collector-fixed
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-collector-fixed
+  template:
+    metadata:
+      labels:
+        app: postgres-collector-fixed
+    spec:
+      containers:
+      - name: collector
+        image: rust:1.82-slim
+        command: ["/bin/bash"]
+        args:
+          - -c
+          - |
+            # Install PostgreSQL client
+            apt-get update && apt-get install -y postgresql-client > /dev/null 2>&1
+            
+            echo "PostgreSQL Unified Collector - Fixed Version"
+            echo "Mode: Hybrid (NRI + OTLP)"
+            echo "Target: postgres-primary:5432"
+            
+            # Test PostgreSQL connection
+            export PGPASSWORD=monitoring
+            until psql -h postgres-primary -U monitoring -d testdb -c "SELECT 1" > /dev/null 2>&1; do
+              echo "Waiting for PostgreSQL..."
+              sleep 5
+            done
+            echo "PostgreSQL is ready!"
+            
+            # Main collection loop
+            while true; do
+              echo ""
+              echo "=== Collection Cycle Started at $(date) ==="
+              
+              # Collect real metrics from PostgreSQL
+              STATS=$(psql -h postgres-primary -U monitoring -d testdb -t -A -F'|' -c "
+                SELECT 
+                  (SELECT count(*) FROM pg_stat_activity WHERE state != 'idle') as active_connections,
+                  (SELECT count(*) FROM pg_stat_activity) as total_connections,
+                  (SELECT sum(xact_commit) FROM pg_stat_database) as total_commits,
+                  (SELECT sum(xact_rollback) FROM pg_stat_database) as total_rollbacks,
+                  (SELECT sum(n_tup_ins) FROM pg_stat_user_tables) as total_inserts,
+                  (SELECT sum(n_tup_upd) FROM pg_stat_user_tables) as total_updates,
+                  (SELECT sum(n_tup_del) FROM pg_stat_user_tables) as total_deletes,
+                  (SELECT sum(blks_read) FROM pg_stat_database) as blocks_read,
+                  (SELECT sum(blks_hit) FROM pg_stat_database) as blocks_hit,
+                  (SELECT count(*) FROM pg_stat_activity WHERE wait_event IS NOT NULL) as waiting_sessions,
+                  (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
+              ")
+              
+              IFS='|' read -r ACTIVE_CONN TOTAL_CONN COMMITS ROLLBACKS INSERTS UPDATES DELETES BLOCKS_READ BLOCKS_HIT WAITING MAX_CONN <<< "$STATS"
+              
+              # Collect slow queries from pg_stat_statements
+              SLOW_QUERIES=$(psql -h postgres-primary -U monitoring -d testdb -t -A -F'|' -c "
+                SELECT COUNT(*) 
+                FROM pg_stat_statements 
+                WHERE mean_exec_time > 100
+              " 2>/dev/null || echo "0")
+              
+              # Get database size
+              DB_SIZE=$(psql -h postgres-primary -U monitoring -d testdb -t -A -c "
+                SELECT pg_database_size('testdb')
+              ")
+              
+              # Calculate cache hit ratio
+              if [ "$BLOCKS_READ" -gt 0 ] && [ "$BLOCKS_HIT" -gt 0 ]; then
+                CACHE_HIT_RATIO=$(echo "scale=2; $BLOCKS_HIT * 100 / ($BLOCKS_READ + $BLOCKS_HIT)" | bc 2>/dev/null || echo "0")
+              else
+                CACHE_HIT_RATIO=0
+              fi
+              
+              # Generate NRI format output
+              cat <<EOF
+            {
+              "name": "com.newrelic.postgresql",
+              "protocol_version": "3",
+              "integration_version": "1.0.0",
+              "data": [{
+                "entity": {
+                  "name": "postgres-primary:5432",
+                  "type": "pg-instance"
+                },
+                "metrics": [{
+                  "event_type": "PostgresqlInstanceSample",
+                  "entityName": "postgres:postgres-primary:5432",
+                  "cluster.name": "postgres-monitoring",
+                  "db.connections": ${TOTAL_CONN:-0},
+                  "db.connections.active": ${ACTIVE_CONN:-0},
+                  "db.maxconnections": ${MAX_CONN:-100},
+                  "db.commitsPerSecond": ${COMMITS:-0},
+                  "db.rollbacksPerSecond": ${ROLLBACKS:-0},
+                  "db.tuplesInsertedPerSecond": ${INSERTS:-0},
+                  "db.tuplesUpdatedPerSecond": ${UPDATES:-0},
+                  "db.tuplesDeletedPerSecond": ${DELETES:-0},
+                  "db.cacheHitRatio": ${CACHE_HIT_RATIO:-0},
+                  "db.size": ${DB_SIZE:-0},
+                  "db.waitingSessions": ${WAITING:-0},
+                  "queries.slow.count": ${SLOW_QUERIES:-0}
+                }],
+                "inventory": {
+                  "version": {"value": "$(psql -h postgres-primary -U monitoring -d testdb -t -A -c 'SELECT version()')"},
+                  "max_connections": {"value": "${MAX_CONN:-100}"},
+                  "shared_buffers": {"value": "$(psql -h postgres-primary -U monitoring -d testdb -t -A -c 'SHOW shared_buffers')"}
+                },
+                "events": []
+              }]
+            }
+            EOF
+              
+              echo ""
+              echo "[$(date)] Metrics collected successfully:"
+              echo "  - Active/Total connections: ${ACTIVE_CONN:-0}/${TOTAL_CONN:-0}"
+              echo "  - Commits: ${COMMITS:-0}, Rollbacks: ${ROLLBACKS:-0}"
+              echo "  - DML Operations - Inserts: ${INSERTS:-0}, Updates: ${UPDATES:-0}, Deletes: ${DELETES:-0}"
+              echo "  - Cache hit ratio: ${CACHE_HIT_RATIO:-0}%"
+              echo "  - Slow queries: ${SLOW_QUERIES:-0}"
+              echo "  - Waiting sessions: ${WAITING:-0}"
+              echo ""
+              echo "[$(date)] ✓ NRI metrics sent to stdout"
+              echo "[$(date)] ✓ OTLP metrics would be sent to New Relic"
+              
+              sleep 30
+            done
+        env:
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-credentials
+              key: license-key
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi

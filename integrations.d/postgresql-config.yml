@@ -1,0 +1,11 @@
+integrations:
+  - name: com.newrelic.postgresql
+    command: /Users/deepaksharma/syc/psql-next/target/release/postgres-unified-collector
+    arguments:
+      - "-c"
+      - "/Users/deepaksharma/syc/psql-next/config-local.toml"
+      - "-m"
+      - "nri"
+    interval: 30s
+    env:
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}

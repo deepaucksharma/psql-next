@@ -1,0 +1,221 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: newrelic-infra-integrations
+  namespace: postgres-monitoring
+data:
+  postgresql-config.yml: |
+    integrations:
+      - name: com.newrelic.postgresql
+        command: /var/db/newrelic-infra/newrelic-integrations/bin/postgres-collector.sh
+        interval: 30s
+        env:
+          CONNECTION_STRING: postgresql://monitoring:monitoring@postgres-primary:5432/testdb
+          COLLECTION_MODE: nri
+  postgres-collector.sh: |
+    #!/bin/bash
+    # PostgreSQL Unified Collector Integration Script
+    
+    CONNECTION_STRING="${CONNECTION_STRING:-postgresql://monitoring:monitoring@postgres-primary:5432/testdb}"
+    
+    # Extract connection details
+    HOST=$(echo $CONNECTION_STRING | sed -n 's/.*@\([^:]*\):.*/\1/p')
+    PORT=$(echo $CONNECTION_STRING | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
+    DB=$(echo $CONNECTION_STRING | sed -n 's/.*\/\(.*\)/\1/p')
+    USER=$(echo $CONNECTION_STRING | sed -n 's/.*:\/\/\([^:]*\):.*/\1/p')
+    PASS=$(echo $CONNECTION_STRING | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
+    
+    export PGPASSWORD=$PASS
+    
+    # Collect metrics
+    STATS=$(psql -h $HOST -p $PORT -U $USER -d $DB -t -A -F'|' -c "
+      SELECT 
+        (SELECT count(*) FROM pg_stat_activity WHERE state != 'idle') as active,
+        (SELECT count(*) FROM pg_stat_activity) as total,
+        (SELECT sum(xact_commit) FROM pg_stat_database) as commits,
+        (SELECT sum(xact_rollback) FROM pg_stat_database) as rollbacks,
+        (SELECT sum(n_tup_ins) FROM pg_stat_user_tables) as inserts,
+        (SELECT sum(n_tup_upd) FROM pg_stat_user_tables) as updates,
+        (SELECT sum(n_tup_del) FROM pg_stat_user_tables) as deletes,
+        (SELECT sum(blks_read) FROM pg_stat_database) as blks_read,
+        (SELECT sum(blks_hit) FROM pg_stat_database) as blks_hit,
+        (SELECT count(*) FROM pg_stat_activity WHERE wait_event IS NOT NULL) as waiting,
+        (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_conn,
+        (SELECT pg_database_size('$DB')) as db_size,
+        (SELECT count(*) FROM pg_stat_statements WHERE mean_exec_time > 100) as slow_queries
+    " 2>/dev/null)
+    
+    IFS='|' read -r ACTIVE TOTAL COMMITS ROLLBACKS INSERTS UPDATES DELETES BLKS_READ BLKS_HIT WAITING MAX_CONN DB_SIZE SLOW_QUERIES <<< "$STATS"
+    
+    # Calculate cache hit ratio
+    if [ -n "$BLKS_READ" ] && [ -n "$BLKS_HIT" ] && [ "$((BLKS_READ + BLKS_HIT))" -gt 0 ]; then
+      CACHE_HIT_RATIO=$(awk "BEGIN {printf \"%.2f\", ($BLKS_HIT * 100.0) / ($BLKS_READ + $BLKS_HIT)}")
+    else
+      CACHE_HIT_RATIO="0"
+    fi
+    
+    # Get version info
+    VERSION=$(psql -h $HOST -p $PORT -U $USER -d $DB -t -A -c "SELECT version()" 2>/dev/null | head -1)
+    SHARED_BUFFERS=$(psql -h $HOST -p $PORT -U $USER -d $DB -t -A -c "SHOW shared_buffers" 2>/dev/null)
+    
+    # Output NRI format
+    cat <<EOF
+    {
+      "name": "com.newrelic.postgresql",
+      "protocol_version": "3",
+      "integration_version": "1.0.0",
+      "data": [{
+        "entity": {
+          "name": "postgres:$HOST:$PORT",
+          "type": "pg-instance",
+          "id_attributes": [
+            {"key": "host", "value": "$HOST"},
+            {"key": "port", "value": $PORT},
+            {"key": "cluster", "value": "postgres-monitoring"}
+          ]
+        },
+        "metrics": [{
+          "event_type": "PostgresqlInstanceSample",
+          "entityName": "postgres:$HOST:$PORT",
+          "db.connections": ${TOTAL:-0},
+          "db.connections.active": ${ACTIVE:-0},
+          "db.maxconnections": ${MAX_CONN:-100},
+          "db.commitsPerSecond": ${COMMITS:-0},
+          "db.rollbacksPerSecond": ${ROLLBACKS:-0},
+          "db.tuplesInsertedPerSecond": ${INSERTS:-0},
+          "db.tuplesUpdatedPerSecond": ${UPDATES:-0},
+          "db.tuplesDeletedPerSecond": ${DELETES:-0},
+          "db.blocksReadPerSecond": ${BLKS_READ:-0},
+          "db.blocksHitPerSecond": ${BLKS_HIT:-0},
+          "db.cacheHitRatio": ${CACHE_HIT_RATIO:-0},
+          "db.size": ${DB_SIZE:-0},
+          "db.waitingSessions": ${WAITING:-0},
+          "queries.slow.count": ${SLOW_QUERIES:-0}
+        }],
+        "inventory": {
+          "version": {"value": "${VERSION}"},
+          "max_connections": {"value": "${MAX_CONN:-100}"},
+          "shared_buffers": {"value": "${SHARED_BUFFERS}"}
+        },
+        "events": []
+      }]
+    }
+    EOF
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: newrelic-infra
+  namespace: postgres-monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: newrelic-infra
+rules:
+- apiGroups: [""]
+  resources:
+    - nodes
+    - nodes/metrics
+    - nodes/stats
+    - nodes/proxy
+    - pods
+    - services
+  verbs: ["get", "list"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: newrelic-infra
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: newrelic-infra
+subjects:
+- kind: ServiceAccount
+  name: newrelic-infra
+  namespace: postgres-monitoring
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: newrelic-postgres-integrated
+  namespace: postgres-monitoring
+  labels:
+    app: newrelic-postgres-integrated
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: newrelic-postgres-integrated
+  template:
+    metadata:
+      labels:
+        app: newrelic-postgres-integrated
+    spec:
+      serviceAccountName: newrelic-infra
+      containers:
+      # New Relic Infrastructure Agent
+      - name: newrelic-infra
+        image: newrelic/infrastructure:latest
+        env:
+        - name: NRIA_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-license
+              key: license-key
+        - name: NRIA_VERBOSE
+          value: "1"
+        - name: NRIA_DISPLAY_NAME
+          value: "postgres-integrated-collector"
+        - name: NRIA_CUSTOM_ATTRIBUTES
+          value: '{"environment":"k8s","service":"postgresql","cluster":"postgres-monitoring"}'
+        - name: NRIA_PASSTHROUGH_ENVIRONMENT
+          value: "KUBERNETES_SERVICE_HOST,KUBERNETES_SERVICE_PORT,CONNECTION_STRING"
+        volumeMounts:
+        - name: integrations-config
+          mountPath: /etc/newrelic-infra/integrations.d
+        - name: integrations-bin
+          mountPath: /var/db/newrelic-infra/newrelic-integrations/bin
+        - name: host-root
+          mountPath: /host
+          readOnly: true
+        resources:
+          limits:
+            memory: 300M
+          requests:
+            cpu: 100m
+            memory: 150M
+      # PostgreSQL client sidecar for integration script
+      - name: postgres-client
+        image: postgres:15-alpine
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          # Copy integration script to shared volume
+          cp /scripts/postgres-collector.sh /shared-bin/postgres-collector.sh
+          chmod +x /shared-bin/postgres-collector.sh
+          
+          # Keep container running
+          while true; do
+            echo "PostgreSQL client sidecar running..."
+            sleep 3600
+          done
+        volumeMounts:
+        - name: integrations-config
+          mountPath: /scripts
+        - name: integrations-bin
+          mountPath: /shared-bin
+      volumes:
+      - name: integrations-config
+        configMap:
+          name: newrelic-infra-integrations
+          defaultMode: 0755
+      - name: integrations-bin
+        emptyDir: {}
+      - name: host-root
+        hostPath:
+          path: /

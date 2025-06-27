@@ -4,35 +4,54 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectorConfig {
     // Connection settings - now supports multiple instances
+    #[serde(alias = "POSTGRES_CONNECTION_STRING")]
     pub connection_string: String,  // Default/primary instance
+    #[serde(alias = "POSTGRES_HOST")]
     pub host: String,
+    #[serde(alias = "POSTGRES_PORT")]
     pub port: u16,
+    #[serde(alias = "POSTGRES_DATABASES")]
     pub databases: Vec<String>,
+    #[serde(alias = "POSTGRES_MAX_CONNECTIONS")]
     pub max_connections: u32,
+    #[serde(alias = "POSTGRES_CONNECT_TIMEOUT_SECS")]
     pub connect_timeout_secs: u64,
     
     // Multi-instance support
     pub instances: Option<Vec<InstanceConfig>>,
     
     // Collection settings
+    #[serde(alias = "COLLECTION_INTERVAL_SECS")]
     pub collection_interval_secs: u64,
+    #[serde(alias = "COLLECTION_MODE")]
     pub collection_mode: CollectionMode,
     
     // OHI compatibility settings
+    #[serde(alias = "QUERY_MONITORING_COUNT_THRESHOLD")]
     pub query_monitoring_count_threshold: i32,
+    #[serde(alias = "QUERY_MONITORING_RESPONSE_TIME_THRESHOLD")]
     pub query_monitoring_response_time_threshold: i32,
+    #[serde(alias = "MAX_QUERY_LENGTH")]
     pub max_query_length: usize,
     
     // Extended metrics
+    #[serde(alias = "ENABLE_EXTENDED_METRICS")]
     pub enable_extended_metrics: bool,
+    #[serde(alias = "ENABLE_EBPF")]
     pub enable_ebpf: bool,
+    #[serde(alias = "ENABLE_ASH")]
     pub enable_ash: bool,
+    #[serde(alias = "ASH_SAMPLE_INTERVAL_SECS")]
     pub ash_sample_interval_secs: u64,
+    #[serde(alias = "ASH_RETENTION_HOURS")]
     pub ash_retention_hours: u64,
+    #[serde(alias = "ASH_MAX_MEMORY_MB")]
     pub ash_max_memory_mb: Option<usize>,
     
     // Security settings
+    #[serde(alias = "SANITIZE_QUERY_TEXT")]
     pub sanitize_query_text: bool,
+    #[serde(alias = "SANITIZATION_MODE")]
     pub sanitization_mode: Option<String>,  // "full", "smart", "none"
     
     // Output settings
@@ -61,17 +80,25 @@ pub struct OutputConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NRIOutputConfig {
+    #[serde(alias = "NRI_ENABLED")]
     pub enabled: bool,
+    #[serde(alias = "NRI_ENTITY_KEY")]
     pub entity_key: String,
+    #[serde(alias = "NRI_INTEGRATION_NAME")]
     pub integration_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OTLPOutputConfig {
+    #[serde(alias = "OTLP_ENABLED")]
     pub enabled: bool,
+    #[serde(alias = "OTLP_ENDPOINT")]
     pub endpoint: String,
+    #[serde(alias = "OTLP_COMPRESSION")]
     pub compression: String,
+    #[serde(alias = "OTLP_TIMEOUT_SECS")]
     pub timeout_secs: u64,
+    #[serde(alias = "OTLP_HEADERS")]
     pub headers: Vec<(String, String)>,
 }
 
@@ -181,8 +208,31 @@ impl CollectorConfig {
         let settings = config::Config::builder()
             .add_source(config::File::from(path.as_ref()))
             .add_source(config::Environment::with_prefix("POSTGRES_COLLECTOR"))
+            .add_source(config::Environment::default()) // Support unprefixed environment variables
             .build()?;
         
+        settings.try_deserialize()
+    }
+
+    pub fn from_env() -> Result<Self, config::ConfigError> {
+        let settings = config::Config::builder()
+            .add_source(config::Environment::default())
+            .add_source(config::Environment::with_prefix("POSTGRES_COLLECTOR"))
+            .build()?;
+        
+        settings.try_deserialize()
+    }
+
+    pub fn from_env_and_file<P: AsRef<Path>>(path: Option<P>) -> Result<Self, config::ConfigError> {
+        let mut builder = config::Config::builder()
+            .add_source(config::Environment::default())
+            .add_source(config::Environment::with_prefix("POSTGRES_COLLECTOR"));
+        
+        if let Some(path) = path {
+            builder = builder.add_source(config::File::from(path.as_ref()));
+        }
+        
+        let settings = builder.build()?;
         settings.try_deserialize()
     }
     
