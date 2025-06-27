@@ -4,7 +4,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, error};
+use tracing::info;
 
 #[derive(Clone)]
 pub struct HealthStatus {
@@ -81,7 +81,7 @@ async fn health_check(status: Arc<RwLock<HealthStatus>>) -> Response<Body> {
                 "metrics_sent": status.metrics_sent,
                 "metrics_failed": status.metrics_failed,
             }).to_string()))
-            .unwrap()
+            .unwrap_or_else(|_| Response::new(Body::from("Internal Server Error")))
     } else {
         Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)
@@ -90,7 +90,7 @@ async fn health_check(status: Arc<RwLock<HealthStatus>>) -> Response<Body> {
                 "error": status.last_collection_error,
                 "last_collection": status.last_collection_time,
             }).to_string()))
-            .unwrap()
+            .unwrap_or_else(|_| Response::new(Body::from("Internal Server Error")))
     }
 }
 
@@ -102,12 +102,12 @@ async fn readiness_check(status: Arc<RwLock<HealthStatus>>) -> Response<Body> {
         Response::builder()
             .status(StatusCode::OK)
             .body(Body::from("ready"))
-            .unwrap()
+            .unwrap_or_else(|_| Response::new(Body::from("Internal Server Error")))
     } else {
         Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)
             .body(Body::from("not ready"))
-            .unwrap()
+            .unwrap_or_else(|_| Response::new(Body::from("Internal Server Error")))
     }
 }
 

@@ -8,16 +8,16 @@ use tokio::sync::RwLock;
 use tracing::{info, warn, error};
 
 use postgres_collector_core::{
-    Capabilities, CollectionMetadata, CollectorError, CommonParameters,
-    ExtensionInfo, MetricBatch, PostgresCollector, UnifiedMetrics,
-    SlowQueryMetric, WaitEventMetric, BlockingSessionMetric,
-    IndividualQueryMetric, ExecutionPlanMetric, ProcessError, KernelMetric,
+    Capabilities, CollectorError, CommonParameters,
+    ExtensionInfo, UnifiedMetrics,
+    SlowQueryMetric,
+    IndividualQueryMetric, ExecutionPlanMetric, ProcessError,
 };
 use postgres_extensions::{ExtensionManager, OHIValidations, ActiveSessionSampler};
-use postgres_query_engine::{OHICompatibleQueryExecutor, QueryParams};
+use postgres_query_engine::OHICompatibleQueryExecutor;
 
 use crate::config::CollectorConfig;
-use crate::pgbouncer::{PgBouncerCollector, PgBouncerMetrics};
+use crate::pgbouncer::PgBouncerCollector;
 use crate::sanitizer::{QuerySanitizer, SanitizationMode};
 use crate::exporter::MetricExporter;
 
@@ -148,34 +148,34 @@ impl UnifiedCollectionEngine {
         
         // Build capabilities
         let mut extensions = HashMap::new();
-        if ext_config.pg_stat_statements.is_some() {
+        if let Some(ref pg_stat_statements) = ext_config.pg_stat_statements {
             extensions.insert(
                 "pg_stat_statements".to_string(),
                 ExtensionInfo {
                     name: "pg_stat_statements".to_string(),
-                    version: ext_config.pg_stat_statements.as_ref().unwrap().version.clone(),
+                    version: pg_stat_statements.version.clone(),
                     enabled: true,
                 },
             );
         }
         
-        if ext_config.pg_wait_sampling.is_some() {
+        if let Some(ref pg_wait_sampling) = ext_config.pg_wait_sampling {
             extensions.insert(
                 "pg_wait_sampling".to_string(),
                 ExtensionInfo {
                     name: "pg_wait_sampling".to_string(),
-                    version: ext_config.pg_wait_sampling.as_ref().unwrap().version.to_string(),
+                    version: pg_wait_sampling.version.to_string(),
                     enabled: true,
                 },
             );
         }
         
-        if ext_config.pg_stat_monitor.is_some() {
+        if let Some(ref pg_stat_monitor) = ext_config.pg_stat_monitor {
             extensions.insert(
                 "pg_stat_monitor".to_string(),
                 ExtensionInfo {
                     name: "pg_stat_monitor".to_string(),
-                    version: ext_config.pg_stat_monitor.as_ref().unwrap().version.clone(),
+                    version: pg_stat_monitor.version.clone(),
                     enabled: true,
                 },
             );
@@ -378,7 +378,7 @@ impl UnifiedCollectionEngine {
         
         // Filter active queries that match slow queries
         let mut correlated = Vec::new();
-        for mut aq in active_queries {
+        for aq in active_queries {
             if let Some(text) = &aq.query_text {
                 let normalized = postgres_query_engine::utils::anonymize_and_normalize(text);
                 if slow_query_map.contains_key(&normalized) {
@@ -456,10 +456,10 @@ impl UnifiedCollectionEngine {
         // Compute query hash for query_id
         let mut hasher = DefaultHasher::new();
         query_text.hash(&mut hasher);
-        let query_id = hasher.finish();
+        let query_id = hasher.finish() as i64;
         
         Ok(ExecutionPlanMetric {
-            query_id: Some(query_id.to_string()),
+            query_id: Some(query_id),
             query_text: Some(query_text.to_string()),
             database_name: self.config.databases.first().cloned(),
             plan: Some(plan_json),
@@ -474,7 +474,7 @@ impl UnifiedCollectionEngine {
     async fn collect_extended_metrics(
         &self,
         metrics: &mut UnifiedMetrics,
-        caps: &Capabilities,
+        _caps: &Capabilities,
     ) -> Result<(), CollectorError> {
         // Active Session History
         if let Some(ash) = &self.ash_sampler {
