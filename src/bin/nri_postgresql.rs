@@ -1,13 +1,11 @@
 use anyhow::Result;
 use clap::Parser;
 use std::env;
-use std::time::Duration;
 use tracing::{error, info};
 
 use postgres_unified_collector::{
     UnifiedCollectionEngine, CollectorConfig, CollectionMode,
-    adapters::NRIMetricAdapter,
-    nri_adapter::NRIOutput,
+    adapters::NRIMetricAdapter, MetricAdapter, MetricOutput,
 };
 
 #[derive(Parser, Debug)]
@@ -65,7 +63,8 @@ async fn main() -> Result<()> {
             let adapter = NRIMetricAdapter::new(format!("{}:{}", config.host, config.port));
             match adapter.adapt(&filtered_metrics).await {
                 Ok(output) => {
-                    let json = serde_json::to_string_pretty(&output)?;
+                    let bytes = output.serialize()?;
+                    let json = String::from_utf8_lossy(&bytes);
                     println!("{}", json);
                 }
                 Err(e) => {

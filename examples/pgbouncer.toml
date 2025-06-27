@@ -1,0 +1,26 @@
+# Example: PostgreSQL with PgBouncer Monitoring
+
+# PostgreSQL connection
+connection_string = "postgresql://postgres:password@localhost:5432/postgres"
+host = "localhost"
+port = 5432
+databases = ["postgres", "app_db"]
+
+# Collection settings
+collection_interval_secs = 30
+collection_mode = "hybrid"
+
+# PgBouncer monitoring
+[pgbouncer]
+enabled = true
+admin_connection_string = "postgresql://pgbouncer@localhost:6432/pgbouncer"
+collection_interval_secs = 15  # Collect PgBouncer metrics more frequently
+
+# Output configuration
+[outputs.nri]
+enabled = true
+entity_key = "postgres-with-pgbouncer"
+
+[outputs.otlp]
+enabled = true
+endpoint = "http://localhost:4317"

@@ -3,13 +3,16 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectorConfig {
-    // Connection settings
-    pub connection_string: String,
+    // Connection settings - now supports multiple instances
+    pub connection_string: String,  // Default/primary instance
     pub host: String,
     pub port: u16,
     pub databases: Vec<String>,
     pub max_connections: u32,
     pub connect_timeout_secs: u64,
+    
+    // Multi-instance support
+    pub instances: Option<Vec<InstanceConfig>>,
     
     // Collection settings
     pub collection_interval_secs: u64,
@@ -26,12 +29,20 @@ pub struct CollectorConfig {
     pub enable_ash: bool,
     pub ash_sample_interval_secs: u64,
     pub ash_retention_hours: u64,
+    pub ash_max_memory_mb: Option<usize>,
+    
+    // Security settings
+    pub sanitize_query_text: bool,
+    pub sanitization_mode: Option<String>,  // "full", "smart", "none"
     
     // Output settings
     pub outputs: OutputConfig,
     
     // Sampling configuration
     pub sampling: SamplingConfig,
+    
+    // PgBouncer monitoring
+    pub pgbouncer: Option<PgBouncerConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +95,32 @@ pub struct SamplingRule {
     pub sample_rate: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PgBouncerConfig {
+    pub enabled: bool,
+    pub admin_connection_string: String,
+    pub collection_interval_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceConfig {
+    pub name: String,  // Unique identifier for this instance
+    pub connection_string: String,
+    pub host: String,
+    pub port: u16,
+    pub databases: Vec<String>,
+    pub enabled: bool,
+    
+    // Instance-specific overrides
+    pub query_monitoring_count_threshold: Option<i32>,
+    pub query_monitoring_response_time_threshold: Option<i32>,
+    pub enable_extended_metrics: Option<bool>,
+    pub enable_ash: Option<bool>,
+    
+    // Instance-specific PgBouncer
+    pub pgbouncer: Option<PgBouncerConfig>,
+}
+
 impl Default for CollectorConfig {
     fn default() -> Self {
         Self {
@@ -93,6 +130,8 @@ impl Default for CollectorConfig {
             databases: vec!["postgres".to_string()],
             max_connections: 5,
             connect_timeout_secs: 30,
+            
+            instances: None,
             
             collection_interval_secs: 60,
             collection_mode: CollectionMode::Hybrid,
@@ -106,6 +145,10 @@ impl Default for CollectorConfig {
             enable_ash: false,
             ash_sample_interval_secs: 1,
             ash_retention_hours: 1,
+            ash_max_memory_mb: Some(100),
+            
+            sanitize_query_text: false,
+            sanitization_mode: Some("smart".to_string()),
             
             outputs: OutputConfig {
                 nri: Some(NRIOutputConfig {
@@ -127,6 +170,8 @@ impl Default for CollectorConfig {
                 base_sample_rate: 1.0,
                 rules: vec![],
             },
+            
+            pgbouncer: None,
         }
     }
 }

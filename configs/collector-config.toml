@@ -1,15 +1,15 @@
 # PostgreSQL Unified Collector Configuration
 
 # Connection settings
-connection_string = "postgresql://postgres:password@localhost:5432/postgres"
+connection_string = "postgresql://postgres:postgres@localhost:5432/testdb"
 host = "localhost"
 port = 5432
-databases = ["postgres"]
+databases = ["testdb"]
 max_connections = 5
 connect_timeout_secs = 30
 
 # Collection settings
-collection_interval_secs = 60
+collection_interval_secs = 30
 collection_mode = "hybrid"  # "otel", "nri", or "hybrid"
 
 # OHI compatibility settings
@@ -24,10 +24,14 @@ enable_ash = true
 ash_sample_interval_secs = 1
 ash_retention_hours = 1
 
+# Security settings
+sanitize_query_text = true
+sanitization_mode = "smart"
+
 # Output configuration
 [outputs.nri]
 enabled = true
-entity_key = "${HOSTNAME}:${PORT}"
+entity_key = "localhost:5432"
 integration_name = "com.newrelic.postgresql"
 
 [outputs.otlp]
@@ -35,11 +39,7 @@ enabled = true
 endpoint = "http://localhost:4317"
 compression = "gzip"
 timeout_secs = 30
-
-# Headers for authentication (optional)
-# headers = [
-#     ["api-key", "${NEW_RELIC_API_KEY}"],
-# ]
+headers = []
 
 # Adaptive sampling configuration
 [sampling]

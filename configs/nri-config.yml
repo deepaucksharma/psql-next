@@ -1,44 +1,17 @@
-# New Relic Infrastructure PostgreSQL Integration Configuration
-# This file is for backward compatibility with existing nri-postgresql deployments
-
 integrations:
   - name: nri-postgresql
     env:
-      # Connection settings
       HOSTNAME: localhost
       PORT: 5432
       USERNAME: postgres
-      PASSWORD: ${POSTGRES_PASSWORD}
+      PASSWORD: password
       DATABASE: postgres
-      
-      # Enable metrics and inventory
-      METRICS: true
-      INVENTORY: true
-      
-      # Database collection list
-      COLLECTION_LIST: '{"postgres": {"schemas": ["public"]}}'
-      
-      # SSL configuration
+      COLLECTION_LIST: '{"postgres": {"schemas": ["public", "pg_catalog"]}}'
       ENABLE_SSL: false
-      TRUST_SERVER_CERTIFICATE: false
-      # SSL_ROOT_CERT_LOCATION: /etc/ssl/certs/ca-cert.pem
-      # SSL_CERT_LOCATION: /etc/ssl/certs/client-cert.pem
-      # SSL_KEY_LOCATION: /etc/ssl/private/client-key.pem
-      
-      # Connection timeout
-      TIMEOUT: 30
-      
-      # Query performance monitoring
-      QUERY_MONITORING: true
       QUERY_MONITORING_COUNT_THRESHOLD: 20
       QUERY_MONITORING_RESPONSE_TIME_THRESHOLD: 500
-      
-      # Extended metrics (new features)
       ENABLE_EXTENDED_METRICS: true
-      ENABLE_EBPF: false
       ENABLE_ASH: true
-      
+      ENABLE_EBPF: false
     interval: 60s
-    labels:
-      env: production
-      role: primary
+    timeout: 30s

@@ -1,0 +1,18 @@
+integrations:
+  - name: nri-postgresql
+    command: /app/postgres-unified-collector
+    arguments:
+      mode: nri
+    env:
+      HOSTNAME: postgres
+      PORT: "5432"
+      USERNAME: postgres
+      PASSWORD: postgres
+      DATABASE: testdb
+      COLLECTION_LIST: '{"testdb": {"schemas": ["public", "test_schema", "pg_catalog"]}}'
+      ENABLE_SSL: "false"
+      QUERY_MONITORING_COUNT_THRESHOLD: "20"
+      QUERY_MONITORING_RESPONSE_TIME_THRESHOLD: "500"
+      ENABLE_EXTENDED_METRICS: "true"
+      ENABLE_ASH: "true"
+    interval: 60s

@@ -1,4 +1,4 @@
-# PostgreSQL OpenTelemetry Collector Configuration
+# OpenTelemetry PostgreSQL Collector Configuration
 
 # Connection settings
 connection_string = "postgresql://postgres:password@localhost:5432/postgres"
@@ -12,35 +12,33 @@ connect_timeout_secs = 30
 collection_interval_secs = 60
 collection_mode = "otel"
 
-# Query monitoring settings
+# Query monitoring
 query_monitoring_count_threshold = 20
 query_monitoring_response_time_threshold = 500
-max_query_length = 4095
+max_query_length = 4096
 
 # Extended metrics
 enable_extended_metrics = true
 enable_ebpf = false
 enable_ash = true
 ash_sample_interval_secs = 1
-ash_retention_hours = 1
+ash_retention_hours = 24
 
-# OTLP output configuration
+# Output configuration
 [outputs.otlp]
 enabled = true
-endpoint = "${OTLP_ENDPOINT:-http://localhost:4317}"
+endpoint = "http://localhost:4317"
 compression = "gzip"
 timeout_secs = 30
-
-# Headers for authentication
-# headers = [
-#     ["api-key", "${OTLP_API_KEY}"],
-# ]
-
-# Disable NRI output for OTel mode
-[outputs.nri]
-enabled = false
+headers = [
+    ["x-otel-service-name", "postgresql"],
+]
 
 # Sampling configuration
 [sampling]
-mode = "fixed"
-base_sample_rate = 1.0
+mode = "adaptive"
+base_sample_rate = 0.1
+
+[[sampling.rules]]
+condition = "query_duration > 500"
+sample_rate = 1.0

@@ -1,0 +1,52 @@
+# Example values for DaemonSet deployment
+# Runs collector on every database node
+
+# Use DaemonSet instead of Deployment
+deploymentMode: daemonset
+
+collectorMode: hybrid
+
+# PostgreSQL connection (localhost since running on same node)
+postgresql:
+  host: localhost
+  port: 5432
+  database: postgres
+  user: monitoring
+  password: "secure-password"
+
+# New Relic configuration
+newrelic:
+  licenseKey: "YOUR_LICENSE_KEY_HERE"
+
+# Node selector to run only on database nodes
+nodeSelector:
+  node-role.kubernetes.io/database: "true"
+  # Or use your own labels:
+  # app: postgresql
+  # tier: database
+
+# Tolerations for database nodes
+tolerations:
+  - key: "database"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Host network for local PostgreSQL access
+# Uncomment if PostgreSQL is not accessible via pod network
+# hostNetwork: true
+
+# Resource limits per node
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Collection settings
+collection:
+  intervalSeconds: 30
+  # Lower connection limit since monitoring local instance
+  maxConnections: 3

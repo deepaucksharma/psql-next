@@ -1,0 +1,39 @@
+# PostgreSQL Unified Collector - NRI Mode Configuration
+
+[general]
+collection_interval_secs = 30
+collection_timeout_secs = 10
+max_connections = 10
+connect_timeout_secs = 30
+log_level = "info"
+enable_extended_metrics = true
+enable_individual_queries = true
+health_port = 8080
+metrics_port = 9090
+mode = "nri"
+
+[database]
+host = "${POSTGRES_HOST:-postgres}"
+port = "${POSTGRES_PORT:-5432}"
+databases = ["${POSTGRES_DATABASE:-testdb}"]
+connection_string = "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DATABASE:-testdb}?sslmode=disable"
+
+[query_monitoring]
+count_threshold = 20
+response_time_threshold = 500.0
+
+[query_sanitization]
+sanitize_query_text = true
+sanitization_mode = "smart"
+
+[ash]
+enable_ash = true
+sample_interval_secs = 15
+retention_hours = 24
+max_memory_mb = 512
+
+[outputs.nri]
+enabled = true
+
+[outputs.otlp]
+enabled = false

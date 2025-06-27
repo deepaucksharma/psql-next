@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database with required extensions
+  postgres:
+    image: postgres:15
+    container_name: postgres-collector
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-testdb}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+    command: |
+      postgres
+      -c shared_preload_libraries='pg_stat_statements'
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.max=10000
+      -c track_io_timing=on
+      -c track_functions=all
+      -c log_statement=all
+      -c log_duration=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - collector-network
+
+  # PostgreSQL Unified Collector - NRI Mode
+  collector-nri:
+    build: .
+    image: postgres-unified-collector:latest
+    container_name: collector-nri
+    profiles: ["collector"]
+    environment:
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - COLLECTOR_MODE=nri
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-testdb}
+    volumes:
+      - ./config.toml:/config.toml:ro
+    command: ["--config", "/config.toml", "--mode", "nri"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - collector-network
+
+  # PostgreSQL Unified Collector - OTLP Mode
+  collector-otlp:
+    build: .
+    image: postgres-unified-collector:latest
+    container_name: collector-otlp
+    profiles: ["collector"]
+    environment:
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - COLLECTOR_MODE=otel
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-testdb}
+    volumes:
+      - ./config.toml:/config.toml:ro
+    command: ["--config", "/config.toml", "--mode", "otel"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - collector-network
+
+  # PgBouncer (Optional)
+  pgbouncer:
+    image: pgbouncer/pgbouncer:latest
+    container_name: pgbouncer
+    profiles: ["pgbouncer"]
+    environment:
+      - DATABASES_HOST=postgres
+      - DATABASES_PORT=5432
+      - DATABASES_USER=${POSTGRES_USER:-postgres}
+      - DATABASES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - DATABASES_DBNAME=${POSTGRES_DATABASE:-testdb}
+      - POOL_MODE=session
+      - MAX_CLIENT_CONN=100
+      - DEFAULT_POOL_SIZE=25
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - collector-network
+
+volumes:
+  postgres-data:
+
+networks:
+  collector-network:
+    driver: bridge

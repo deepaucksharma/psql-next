@@ -1,0 +1,134 @@
+# Production-ready values with security and high availability
+
+collectorMode: hybrid
+
+# Use existing secrets for sensitive data
+postgresql:
+  host: postgres.production.svc.cluster.local
+  port: 5432
+  database: postgres
+  user: monitoring
+  existingSecret: postgres-monitoring-credentials
+  existingSecretPasswordKey: password
+  sslMode: require
+
+newrelic:
+  existingSecret: newrelic-license
+  existingSecretLicenseKey: license-key
+  accountId: "YOUR_ACCOUNT_ID"
+  region: "US"
+
+# High availability with multiple replicas
+replicaCount: 3
+
+# Pod disruption budget
+podDisruptionBudget:
+  minAvailable: 1
+
+# Anti-affinity to spread pods across nodes
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - postgres-collector
+          topologyKey: kubernetes.io/hostname
+
+# Production resource limits
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Autoscaling configuration
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Enhanced security context
+podSecurityContext:
+  fsGroup: 2000
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Network policies
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - port: 9090
+          protocol: TCP
+
+# Service monitor for Prometheus
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      prometheus: kube-prometheus
+
+# Collection settings optimized for production
+collection:
+  intervalSeconds: 60
+  timeoutSeconds: 15
+  maxConnections: 10
+  queryMonitoringCountThreshold: 50
+  queryMonitoringResponseTimeThreshold: 1000
+
+# Query sanitization for compliance
+sanitization:
+  enabled: true
+  mode: full  # Maximum PII removal
+
+# ASH configuration for production
+ash:
+  enabled: true
+  sampleIntervalSeconds: 5
+  retentionHours: 24
+  maxMemoryMb: 500
+
+# Features
+features:
+  extendedMetrics: true
+  individualQueries: true
+  queryPlanCollection: true
+  indexStats: true
+  tableStats: true
+
+# Priority class for critical monitoring
+priorityClassName: monitoring-critical
+
+# Additional monitoring labels
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"

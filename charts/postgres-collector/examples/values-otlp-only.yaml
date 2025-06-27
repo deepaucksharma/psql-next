@@ -1,0 +1,50 @@
+# Example values for OTLP-only mode
+# This configuration sends metrics to an OpenTelemetry collector
+
+collectorMode: otel
+
+# PostgreSQL connection
+postgresql:
+  host: my-postgres.example.com
+  port: 5432
+  database: postgres
+  user: monitoring
+  password: "secure-password"  # Or use existingSecret
+
+# New Relic configuration (still needed for API key in OTLP headers)
+newrelic:
+  licenseKey: "YOUR_LICENSE_KEY_HERE"  # Or use existingSecret
+
+# Enable OTLP output
+otlp:
+  enabled: true
+  endpoint: "http://otel-collector:4317"
+  compression: gzip
+  timeout: 30
+
+# Disable NRI output
+nri:
+  enabled: false
+
+# Collection settings
+collection:
+  intervalSeconds: 30
+  queryMonitoringCountThreshold: 20
+  queryMonitoringResponseTimeThreshold: 500
+
+# Enable all features
+features:
+  extendedMetrics: true
+  individualQueries: true
+  queryPlanCollection: true
+  indexStats: true
+  tableStats: true
+
+# Resource limits for OTLP mode
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

@@ -201,21 +201,35 @@ pub struct ActiveSessionSampler {
     sample_interval: Duration,
     retention_period: Duration,
     samples: Arc<RwLock<VecDeque<ASHSample>>>,
+    max_samples: usize,
+    max_memory_mb: usize,
 }
 
 impl ActiveSessionSampler {
     pub fn new(sample_interval: Duration, retention_period: Duration) -> Self {
+        // Calculate max samples based on retention and interval
+        let max_samples = (retention_period.as_secs() / sample_interval.as_secs()) as usize;
+        
         Self {
             sample_interval,
             retention_period,
-            samples: Arc::new(RwLock::new(VecDeque::new())),
+            samples: Arc::new(RwLock::new(VecDeque::with_capacity(max_samples))),
+            max_samples,
+            max_memory_mb: 100, // Default 100MB limit
         }
+    }
+    
+    pub fn with_memory_limit(mut self, limit_mb: usize) -> Self {
+        self.max_memory_mb = limit_mb;
+        self
     }
     
     pub async fn start_sampling(&self, conn_pool: sqlx::PgPool) {
         let samples = self.samples.clone();
         let interval = self.sample_interval;
         let retention = self.retention_period;
+        let max_samples = self.max_samples;
+        let max_memory_mb = self.max_memory_mb;
         
         tokio::spawn(async move {
             let mut interval_timer = tokio::time::interval(interval);
@@ -227,8 +241,28 @@ impl ActiveSessionSampler {
                     if let Ok(current_samples) = Self::capture_active_sessions(&mut conn).await {
                         let mut samples_guard = samples.write().await;
                         
+                        // Check memory usage before adding samples
+                        let estimated_memory_mb = Self::estimate_memory_usage(&samples_guard);
+                        if estimated_memory_mb > max_memory_mb {
+                            tracing::warn!(
+                                "ASH memory limit exceeded ({} MB > {} MB), removing old samples",
+                                estimated_memory_mb,
+                                max_memory_mb
+                            );
+                            // Remove 10% of oldest samples
+                            let to_remove = samples_guard.len() / 10;
+                            for _ in 0..to_remove {
+                                samples_guard.pop_front();
+                            }
+                        }
+                        
                         for sample in current_samples {
                             samples_guard.push_back(sample);
+                            
+                            // Enforce max samples limit
+                            if samples_guard.len() > max_samples {
+                                samples_guard.pop_front();
+                            }
                         }
                         
                         // Maintain retention window
@@ -252,7 +286,7 @@ impl ActiveSessionSampler {
                 pid,
                 usename,
                 datname,
-                queryid as query_id,
+                query_id as query_id,
                 state,
                 wait_event_type,
                 wait_event,
@@ -291,5 +325,32 @@ impl ActiveSessionSampler {
     
     pub async fn get_recent_samples(&self) -> Vec<ASHSample> {
         self.samples.read().await.iter().cloned().collect()
+    }
+    
+    /// Estimate memory usage of samples in MB
+    fn estimate_memory_usage(samples: &VecDeque<ASHSample>) -> usize {
+        // Estimate size per sample:
+        // - Fixed fields: ~200 bytes
+        // - String fields (query text): avg 500 bytes
+        // - Total per sample: ~700 bytes
+        const BYTES_PER_SAMPLE: usize = 700;
+        
+        let total_bytes = samples.len() * BYTES_PER_SAMPLE;
+        total_bytes / (1024 * 1024) // Convert to MB
+    }
+    
+    /// Get current memory usage stats
+    pub async fn get_memory_stats(&self) -> (usize, usize, usize) {
+        let samples = self.samples.read().await;
+        let count = samples.len();
+        let memory_mb = Self::estimate_memory_usage(&samples);
+        (count, memory_mb, self.max_memory_mb)
+    }
+    
+    /// Clear all samples (for emergency memory recovery)
+    pub async fn clear_samples(&self) {
+        let mut samples = self.samples.write().await;
+        samples.clear();
+        tracing::info!("Cleared all ASH samples");
     }
 }

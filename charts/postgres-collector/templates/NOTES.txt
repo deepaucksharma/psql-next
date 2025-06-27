@@ -1,0 +1,35 @@
+1. Get the application status by running these commands:
+{{- if contains "deployment" .Values.deploymentMode }}
+  kubectl get deployment {{ include "postgres-collector.fullname" . }} -n {{ .Release.Namespace }}
+{{- else if contains "daemonset" .Values.deploymentMode }}
+  kubectl get daemonset {{ include "postgres-collector.fullname" . }} -n {{ .Release.Namespace }}
+{{- end }}
+
+2. View the logs:
+  kubectl logs -f -l app.kubernetes.io/name={{ include "postgres-collector.name" . }},app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }}
+
+3. Check health status:
+  kubectl exec -it $(kubectl get pod -l app.kubernetes.io/name={{ include "postgres-collector.name" . }},app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }} -o jsonpath='{.items[0].metadata.name}') -n {{ .Release.Namespace }} -- curl http://localhost:{{ .Values.service.healthPort }}/health
+
+4. View Prometheus metrics:
+  kubectl exec -it $(kubectl get pod -l app.kubernetes.io/name={{ include "postgres-collector.name" . }},app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }} -o jsonpath='{.items[0].metadata.name}') -n {{ .Release.Namespace }} -- curl http://localhost:{{ .Values.service.metricsPort }}/metrics
+
+{{- if .Values.metrics.serviceMonitor.enabled }}
+5. Prometheus ServiceMonitor has been created. Metrics will be scraped automatically.
+{{- end }}
+
+{{- if eq .Values.collectorMode "nri" }}
+6. NRI mode is enabled. Metrics are being output to stdout for the New Relic Infrastructure agent.
+{{- else if eq .Values.collectorMode "otel" }}
+6. OTLP mode is enabled. Metrics are being sent to: {{ .Values.otlp.endpoint }}
+{{- else if eq .Values.collectorMode "hybrid" }}
+6. Hybrid mode is enabled. Metrics are being sent to both NRI (stdout) and OTLP ({{ .Values.otlp.endpoint }}).
+{{- end }}
+
+{{- if .Values.pgbouncer.enabled }}
+7. PgBouncer monitoring is enabled. Ensure PgBouncer is accessible at {{ .Values.pgbouncer.host }}:{{ .Values.pgbouncer.port }}
+{{- end }}
+
+{{- if .Values.instances }}
+8. Multi-instance monitoring is configured for {{ len .Values.instances }} PostgreSQL instances.
+{{- end }}

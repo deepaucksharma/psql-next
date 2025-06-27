@@ -1,0 +1,72 @@
+# Example values for multi-instance monitoring
+# Monitor multiple PostgreSQL instances from a single collector
+
+collectorMode: hybrid
+
+# Primary connection (not used when instances are defined)
+postgresql:
+  host: primary.example.com
+  port: 5432
+  database: postgres
+  user: monitoring
+  password: "primary-password"
+
+# New Relic configuration
+newrelic:
+  licenseKey: "YOUR_LICENSE_KEY_HERE"
+
+# Multiple PostgreSQL instances
+instances:
+  - name: production-primary
+    host: prod-primary.example.com
+    port: 5432
+    database: production
+    user: monitoring
+    password: "prod-password"
+    enabled: true
+    
+  - name: production-replica-1
+    host: prod-replica-1.example.com
+    port: 5432
+    database: production
+    user: monitoring
+    password: "prod-password"
+    enabled: true
+    
+  - name: production-replica-2
+    host: prod-replica-2.example.com
+    port: 5432
+    database: production
+    user: monitoring
+    password: "prod-password"
+    enabled: true
+    
+  - name: staging
+    host: staging.example.com
+    port: 5432
+    database: staging
+    user: monitoring
+    password: "staging-password"
+    enabled: true
+
+# Increase resources for multi-instance monitoring
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Enable autoscaling for handling multiple instances
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Collection settings
+collection:
+  intervalSeconds: 60  # Longer interval for multiple instances
+  maxConnections: 10   # More connections for parallel collection

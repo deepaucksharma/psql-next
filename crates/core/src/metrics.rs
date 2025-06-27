@@ -20,13 +20,17 @@ pub struct UnifiedMetrics {
     pub active_session_history: Vec<ASHSample>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plan_changes: Vec<PlanChangeEvent>,
+    
+    // PgBouncer metrics - using generic Value for now
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pgbouncer_metrics: Option<serde_json::Value>,
 }
 
 /// Exactly matches OHI SlowRunningQueryMetrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlowQueryMetric {
     pub newrelic: Option<String>,              // OHI compatibility
-    pub query_id: Option<String>,
+    pub query_id: Option<i64>,
     pub query_text: Option<String>,            // Anonymized, max 4095 chars
     pub database_name: Option<String>,
     pub schema_name: Option<String>,
@@ -64,7 +68,7 @@ pub struct WaitEventMetric {
     pub state: Option<String>,
     pub usename: Option<String>,
     pub database_name: Option<String>,
-    pub query_id: Option<String>,
+    pub query_id: Option<i64>,
     pub query_text: Option<String>,
     pub collection_timestamp: Option<String>,
 }
@@ -92,7 +96,7 @@ pub struct BlockingSessionMetric {
 #[derive(sqlx::FromRow)]
 pub struct IndividualQueryMetric {
     pub pid: Option<i32>,
-    pub query_id: Option<String>,
+    pub query_id: Option<i64>,
     pub query_text: Option<String>,
     pub state: Option<String>,
     pub wait_event_type: Option<String>,
@@ -110,7 +114,7 @@ pub struct IndividualQueryMetric {
 /// Exactly matches OHI ExecutionPlanMetrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionPlanMetric {
-    pub query_id: Option<String>,
+    pub query_id: Option<i64>,
     pub query_text: Option<String>,
     pub database_name: Option<String>,
     pub plan: Option<serde_json::Value>,
@@ -124,7 +128,7 @@ pub struct ExecutionPlanMetric {
 // Extended metric types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionTrace {
-    pub query_id: String,
+    pub query_id: i64,
     pub trace_id: String,
     pub span_id: String,
     pub parent_span_id: Option<String>,
@@ -135,7 +139,7 @@ pub struct ExecutionTrace {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelMetric {
-    pub query_id: String,
+    pub query_id: i64,
     pub cpu_time_ms: f64,
     pub io_wait_ms: f64,
     pub context_switches: u64,
@@ -148,7 +152,7 @@ pub struct ASHSample {
     pub pid: i32,
     pub usename: String,
     pub datname: String,
-    pub query_id: Option<String>,
+    pub query_id: Option<i64>,
     pub state: String,
     pub wait_event_type: Option<String>,
     pub wait_event: Option<String>,
@@ -158,7 +162,7 @@ pub struct ASHSample {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanChangeEvent {
-    pub query_id: String,
+    pub query_id: i64,
     pub old_plan_hash: String,
     pub new_plan_hash: String,
     pub change_timestamp: chrono::DateTime<chrono::Utc>,

@@ -1,0 +1,60 @@
+# Base Kustomization for PostgreSQL Unified Collector
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: postgres-monitoring
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - collector/configmap.yaml
+  - collector/deployment.yaml
+  - collector/service.yaml
+  - monitoring/servicemonitor.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: postgres-unified-collector
+  app.kubernetes.io/component: database-monitoring
+  app.kubernetes.io/managed-by: kustomize
+
+# ConfigMap generator for collector configuration
+configMapGenerator:
+  - name: collector-config
+    files:
+      - config.toml=collector/config.toml
+    options:
+      disableNameSuffixHash: true
+
+# Secret generator (can be overridden in overlays)
+secretGenerator:
+  - name: postgres-credentials
+    type: Opaque
+    literals:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DATABASE=postgres
+    options:
+      disableNameSuffixHash: true
+  - name: newrelic-credentials
+    type: Opaque
+    literals:
+      - NEW_RELIC_LICENSE_KEY=YOUR_LICENSE_KEY_HERE
+    options:
+      disableNameSuffixHash: true
+
+# Image configuration (can be overridden in overlays)
+images:
+  - name: postgres-unified-collector
+    newName: postgres-unified-collector
+    newTag: latest
+
+# Variables that can be referenced in patches
+vars:
+  - name: COLLECTOR_MODE
+    objref:
+      kind: ConfigMap
+      name: collector-config
+      apiVersion: v1
+    fieldref:
+      fieldpath: data.mode

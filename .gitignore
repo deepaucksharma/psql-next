@@ -1,0 +1,58 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+postgres-data/
+grafana-data/
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+*.test
+test-results/
+coverage/
+tarpaulin-report.html
+cobertura.xml
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+temp/
+
+# Local configuration (keep examples)
+config.toml
+collector-config.toml
+docker-config-file.toml
+
+# Kubernetes secrets
+deployments/kubernetes/secrets.yaml
+
+# Archives
+/archive/
+
+# Generated files
+*.orig
+
+# Binaries (if built locally)
+postgres-unified-collector

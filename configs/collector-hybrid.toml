@@ -1,0 +1,59 @@
+# PostgreSQL Unified Collector - Hybrid Mode Configuration
+# Sends metrics to both New Relic Infrastructure (NRI) and OpenTelemetry (OTLP)
+
+[general]
+collection_interval_secs = 30
+collection_timeout_secs = 10
+max_connections = 10
+connect_timeout_secs = 30
+log_level = "${LOG_LEVEL:-info}"
+enable_extended_metrics = true
+enable_individual_queries = true
+health_port = 8080
+metrics_port = 9090
+mode = "hybrid"
+
+[database]
+host = "${POSTGRES_HOST:-localhost}"
+port = "${POSTGRES_PORT:-5432}"
+databases = ["${POSTGRES_DATABASE:-postgres}"]
+connection_string = "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}/${POSTGRES_DATABASE:-postgres}?sslmode=prefer"
+
+[query_monitoring]
+count_threshold = 20
+response_time_threshold = 500.0
+
+[query_sanitization]
+sanitize_query_text = true
+sanitization_mode = "smart"
+detect_pii = true
+pii_warning_enabled = true
+
+[ash]
+enable_ash = true
+sample_interval_secs = 15
+retention_hours = 24
+max_memory_mb = 512
+
+[outputs.nri]
+enabled = true
+entity_key = "postgres:${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}"
+
+[outputs.otlp]
+enabled = true
+endpoint = "${OTLP_ENDPOINT:-http://otel-collector:4317}"
+headers = { "api-key" = "${NEW_RELIC_LICENSE_KEY}" }
+timeout_secs = 10
+compression = "gzip"
+
+[pgbouncer]
+enabled = false
+admin_connection_string = "postgres://pgbouncer:${PGBOUNCER_PASSWORD:-pgbouncer}@${PGBOUNCER_HOST:-localhost}:6432/pgbouncer?sslmode=disable"
+
+[advanced]
+enable_statement_timeout = true
+statement_timeout_ms = 5000
+enable_query_plan_collection = true
+max_query_plan_length = 10000
+enable_index_stats = true
+enable_table_stats = true

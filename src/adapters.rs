@@ -3,7 +3,7 @@ use postgres_collector_core::{UnifiedMetrics, ProcessError};
 use postgres_nri_adapter::{NRIAdapter, NRIOutput};
 use postgres_otel_adapter::{OTelAdapter, OTelOutput};
 
-use crate::collection_engine::{MetricAdapter, MetricOutput};
+use crate::collection_engine::{MetricAdapter, MetricAdapterDyn, MetricOutputDyn};
 
 /// NRI Adapter wrapper
 pub struct NRIMetricAdapter {
@@ -27,6 +27,18 @@ impl MetricAdapter for NRIMetricAdapter {
     }
 }
 
+#[async_trait]
+impl MetricAdapterDyn for NRIMetricAdapter {
+    async fn adapt_dyn(&self, metrics: &UnifiedMetrics) -> Result<Box<dyn MetricOutputDyn>, ProcessError> {
+        let output = self.adapt(metrics).await?;
+        Ok(Box::new(output) as Box<dyn MetricOutputDyn>)
+    }
+    
+    fn name(&self) -> &str {
+        "NRI"
+    }
+}
+
 /// OTel Adapter wrapper
 pub struct OTelMetricAdapter {
     inner: OTelAdapter,
@@ -46,5 +58,17 @@ impl MetricAdapter for OTelMetricAdapter {
     
     async fn adapt(&self, metrics: &UnifiedMetrics) -> Result<Self::Output, ProcessError> {
         self.inner.adapt(metrics)
+    }
+}
+
+#[async_trait]
+impl MetricAdapterDyn for OTelMetricAdapter {
+    async fn adapt_dyn(&self, metrics: &UnifiedMetrics) -> Result<Box<dyn MetricOutputDyn>, ProcessError> {
+        let output = self.adapt(metrics).await?;
+        Ok(Box::new(output) as Box<dyn MetricOutputDyn>)
+    }
+    
+    fn name(&self) -> &str {
+        "OpenTelemetry"
     }
 }

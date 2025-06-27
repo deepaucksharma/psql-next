@@ -1,0 +1,23 @@
+apiVersion: v2
+name: postgres-collector
+description: PostgreSQL Unified Collector for New Relic and OpenTelemetry
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - postgresql
+  - monitoring
+  - newrelic
+  - opentelemetry
+  - metrics
+  - observability
+home: https://github.com/newrelic/postgres-unified-collector
+sources:
+  - https://github.com/newrelic/postgres-unified-collector
+maintainers:
+  - name: PostgreSQL Unified Collector Team
+    email: support@newrelic.com
+icon: https://newrelic.com/assets/newrelic/source/NewRelic-logo-square.png
+annotations:
+  category: Database
+  licenses: Apache-2.0

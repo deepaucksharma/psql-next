@@ -1,0 +1,26 @@
+collectorMode: nri
+postgresql:
+  host: postgres-primary.postgres-monitoring.svc.cluster.local
+  port: 5432
+  database: testdb
+  user: postgres
+  password: postgres
+newrelic:
+  licenseKey: "YOUR_NEW_RELIC_LICENSE_KEY"
+image:
+  repository: postgres-unified-collector
+  tag: latest
+  pullPolicy: Never
+nri:
+  enabled: true
+otlp:
+  enabled: false
+deploymentMode: deployment
+replicaCount: 1
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

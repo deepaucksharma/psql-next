@@ -4,6 +4,8 @@ version = "1.0.0"
 edition = "2021"
 authors = ["PostgreSQL Unified Collector Team"]
 description = "Unified PostgreSQL collector supporting both New Relic Infrastructure and OpenTelemetry"
+license = "Apache-2.0"
+repository = "https://github.com/newrelic/postgres-unified-collector"
 
 [workspace]
 members = [
@@ -14,6 +16,10 @@ members = [
     "crates/extensions",
 ]
 
+[[bin]]
+name = "postgres-unified-collector"
+path = "src/bin/unified_collector.rs"
+
 [dependencies]
 # Internal workspace dependencies
 postgres-collector-core = { path = "crates/core" }
@@ -22,41 +28,52 @@ postgres-nri-adapter = { path = "crates/nri-adapter" }
 postgres-otel-adapter = { path = "crates/otel-adapter" }
 postgres-query-engine = { path = "crates/query-engine" }
 
-# Core dependencies
-tokio = { version = "1.35", features = ["full"] }
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
 async-trait = "0.1"
+futures = "0.3"
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
+
+# Database
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
+
+# Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-anyhow = "1.0"
-thiserror = "1.0"
-
-# Configuration
-config = "0.13"
-toml = "0.8"
-clap = { version = "4.4", features = ["derive", "env"] }
-
-# Metrics and observability
 opentelemetry = { version = "0.21", features = ["metrics", "trace"] }
+opentelemetry_sdk = { version = "0.21", features = ["rt-tokio", "metrics", "trace"] }
 opentelemetry-otlp = { version = "0.14", features = ["tonic", "metrics", "trace"] }
 opentelemetry-semantic-conventions = "0.13"
 prometheus = { version = "0.13", features = ["process"] }
 
+# CLI and configuration
+clap = { version = "4.5", features = ["derive", "env"] }
+config = "0.13"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
 # Networking
+hyper = { version = "0.14", features = ["server", "tcp", "http1", "http2"] }
 tonic = "0.10"
-hyper = { version = "0.14", features = ["full"] }
 tower = "0.4"
 
-# Utils
+# Utilities
 regex = "1.10"
 lazy_static = "1.4"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 base64 = "0.21"
 
-# Optional dependencies
+# Pin problematic dependency to avoid edition2024 requirement
+base64ct = "=1.6.0"
+
+# Optional eBPF support
 libbpf-rs = { version = "0.22", optional = true }
 libbpf-cargo = { version = "0.22", optional = true }
 
@@ -74,23 +91,33 @@ ebpf = ["libbpf-rs", "libbpf-cargo"]
 extended-metrics = []
 all = ["nri", "otel", "ebpf", "extended-metrics"]
 
-[[bin]]
-name = "postgres-unified-collector"
-path = "src/bin/unified_collector.rs"
-
-[[bin]]
-name = "nri-postgresql"
-path = "src/bin/nri_postgresql.rs"
-
-[[bin]]
-name = "postgres-otel-collector"
-path = "src/bin/otel_collector.rs"
-
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.test]
+opt-level = 2
+debug = true
 
 [profile.bench]
-debug = true
+opt-level = 3
+debug = false
+
+# Workspace-wide dependency versions
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.40", features = ["full"] }
+async-trait = "0.1"
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono"] }
+chrono = { version = "0.4", features = ["serde"] }

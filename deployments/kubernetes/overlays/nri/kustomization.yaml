@@ -1,0 +1,23 @@
+# NRI Mode Overlay
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: postgres-monitoring
+
+bases:
+  - ../../base
+
+namePrefix: nri-
+
+commonLabels:
+  mode: nri
+
+patchesStrategicMerge:
+  - deployment-patch.yaml
+  - configmap-patch.yaml
+
+configMapGenerator:
+  - name: collector-config
+    behavior: merge
+    literals:
+      - mode=nri

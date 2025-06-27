@@ -1,13 +1,18 @@
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use std::time::Duration;
+use std::sync::Arc;
+use std::net::SocketAddr;
 use tokio::time;
-use tracing::{error, info};
+use tokio::sync::RwLock;
+use tokio::signal;
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use postgres_unified_collector::{
     UnifiedCollectionEngine, CollectorConfig, CollectionMode,
     adapters::{NRIMetricAdapter, OTelMetricAdapter},
+    health::{HealthServer, HealthStatus},
 };
 
 #[derive(Parser, Debug)]
@@ -28,6 +33,10 @@ struct Args {
     /// Dry run mode (collect but don't send)
     #[arg(long)]
     dry_run: bool,
+    
+    /// Health check server address
+    #[arg(long, default_value = "0.0.0.0:8080")]
+    health_addr: String,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -73,7 +82,7 @@ async fn main() -> Result<()> {
     }
     
     // Validate configuration
-    config.validate()?;
+    config.validate().map_err(|e| anyhow::anyhow!(e))?;
     
     info!("Configuration loaded successfully");
     info!("Collection mode: {:?}", config.collection_mode);
@@ -127,15 +136,28 @@ async fn main() -> Result<()> {
         // ASH sampler is started internally by the engine
     }
     
-    // Start collection loop
+    // Start health check server
+    let health_status = Arc::new(RwLock::new(HealthStatus::default()));
+    let health_server = HealthServer::new(health_status.clone());
+    let health_addr: SocketAddr = args.health_addr.parse()?;
+    
+    tokio::spawn(async move {
+        if let Err(e) = health_server.start(health_addr).await {
+            error!("Health server error: {}", e);
+        }
+    });
+    
+    info!("Health check server started on {}", args.health_addr);
+    
+    // Start collection loop with graceful shutdown
     let mut interval = time::interval(Duration::from_secs(config.collection_interval_secs));
     info!("Starting collection loop with {}s interval", config.collection_interval_secs);
     
     loop {
-        interval.tick().await;
-        
-        match engine.collect_all_metrics().await {
-            Ok(metrics) => {
+        tokio::select! {
+            _ = interval.tick() => {
+                match engine.collect_all_metrics().await {
+                    Ok(metrics) => {
                 info!(
                     "Collected metrics: {} slow queries, {} wait events, {} blocking sessions",
                     metrics.slow_queries.len(),
@@ -143,19 +165,56 @@ async fn main() -> Result<()> {
                     metrics.blocking_sessions.len()
                 );
                 
+                // Update health status
+                {
+                    let mut status = health_status.write().await;
+                    status.last_collection_time = Some(chrono::Utc::now());
+                    status.is_healthy = true;
+                    status.last_collection_error = None;
+                }
+                
                 if !args.dry_run {
                     // Send metrics through adapters
-                    // This would be implemented in the engine
-                    info!("Metrics sent successfully");
+                    match engine.send_metrics(&metrics).await {
+                        Ok(_) => {
+                            info!("Metrics sent successfully through all adapters");
+                            let mut status = health_status.write().await;
+                            status.metrics_sent += 1;
+                        }
+                        Err(e) => {
+                            error!("Failed to send metrics: {}", e);
+                            let mut status = health_status.write().await;
+                            status.metrics_failed += 1;
+                        }
+                    }
                 } else {
                     info!("Dry run mode - metrics not sent");
+                    info!("Would have sent metrics to {} adapters", 
+                        match config.collection_mode {
+                            CollectionMode::Nri => 1,
+                            CollectionMode::Otel => 1,
+                            CollectionMode::Hybrid => 2,
+                        }
+                    );
+                }
+                    }
+                    Err(e) => {
+                error!("Failed to collect metrics: {}", e);
+                let mut status = health_status.write().await;
+                status.is_healthy = false;
+                status.last_collection_error = Some(e.to_string());
+                    }
                 }
             }
-            Err(e) => {
-                error!("Failed to collect metrics: {}", e);
+            _ = signal::ctrl_c() => {
+                info!("Received shutdown signal, gracefully stopping...");
+                break;
             }
         }
     }
+    
+    info!("PostgreSQL Unified Collector shutdown complete");
+    Ok(())
 }
 
 fn expand_variables(template: &str, config: &CollectorConfig) -> String {

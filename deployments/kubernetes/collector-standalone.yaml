@@ -1,0 +1,169 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-collector-config
+data:
+  config.toml: |
+    connection_string = "postgresql://monitoring:monitoring@postgres-primary:5432/testdb"
+    host = "postgres-primary"
+    port = 5432
+    databases = ["testdb"]
+    collection_interval_secs = 30
+    collection_mode = "hybrid"
+    
+    [outputs.nri]
+    enabled = true
+    integration_name = "com.newrelic.postgresql"
+    
+    [outputs.otlp]
+    enabled = true
+    endpoint = "http://otlp.nr-data.net:4318"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-collector
+  labels:
+    app: postgres-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-collector
+  template:
+    metadata:
+      labels:
+        app: postgres-collector
+    spec:
+      containers:
+      - name: collector
+        image: busybox
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            echo "PostgreSQL Unified Collector - Mock Implementation"
+            echo "Collector Mode: Hybrid (NRI + OTLP)"
+            echo "Target: postgres-primary:5432"
+            echo "Collection Interval: 30s"
+            echo ""
+            
+            # Mock collector that outputs NRI metrics every 30 seconds
+            while true; do
+              echo "--- Collection Cycle Started ---"
+              
+              # Simulate metric collection from PostgreSQL
+              CONNECTIONS=$(( $RANDOM % 50 + 10 ))
+              BACKENDS=$(( $RANDOM % 10 + 1 ))
+              COMMITS=$(( $RANDOM % 100 ))
+              
+              # Output NRI format to stdout
+              cat <<EOF
+            {
+              "name": "com.newrelic.postgresql",
+              "protocol_version": "3",
+              "integration_version": "1.0.0",
+              "data": [
+                {
+                  "entity": {
+                    "name": "postgres-primary:5432",
+                    "type": "postgresql",
+                    "id_attributes": [
+                      {"key": "host", "value": "postgres-primary"},
+                      {"key": "port", "value": 5432},
+                      {"key": "database", "value": "testdb"}
+                    ]
+                  },
+                  "metrics": [
+                    {
+                      "postgresql.deadlocks": 0,
+                      "postgresql.numbackends": $BACKENDS,
+                      "postgresql.connections": $CONNECTIONS,
+                      "postgresql.maxconnections": 100,
+                      "postgresql.commitsPerSecond": $COMMITS.$(( $RANDOM % 10 )),
+                      "postgresql.rollbacksPerSecond": 0.$(( $RANDOM % 10 )),
+                      "postgresql.tuplesDeletedPerSecond": $(( $RANDOM % 10 )).$(( $RANDOM % 10 )),
+                      "postgresql.tuplesInsertedPerSecond": $(( $RANDOM % 50 )).$(( $RANDOM % 10 )),
+                      "postgresql.tuplesReturnedPerSecond": $(( $RANDOM % 200 )).$(( $RANDOM % 10 )),
+                      "postgresql.tuplesUpdatedPerSecond": $(( $RANDOM % 20 )).$(( $RANDOM % 10 )),
+                      "postgresql.blocksReadPerSecond": $(( $RANDOM % 1000 )).$(( $RANDOM % 10 )),
+                      "postgresql.blocksHitPerSecond": $(( $RANDOM % 5000 )).$(( $RANDOM % 10 )),
+                      "event_type": "PostgresqlInstanceSample",
+                      "entityName": "postgres-primary:5432"
+                    }
+                  ],
+                  "inventory": {
+                    "version": "15.13",
+                    "data_directory": "/var/lib/postgresql/data",
+                    "max_connections": "100",
+                    "shared_buffers": "128MB",
+                    "effective_cache_size": "4GB",
+                    "maintenance_work_mem": "64MB",
+                    "checkpoint_completion_target": "0.9",
+                    "wal_buffers": "4MB",
+                    "default_statistics_target": "100",
+                    "random_page_cost": "4",
+                    "effective_io_concurrency": "1",
+                    "work_mem": "4MB",
+                    "min_wal_size": "80MB",
+                    "max_wal_size": "1GB"
+                  },
+                  "events": []
+                },
+                {
+                  "entity": {
+                    "name": "postgres-primary:5432:testdb",
+                    "type": "postgresql_database",
+                    "id_attributes": [
+                      {"key": "host", "value": "postgres-primary"},
+                      {"key": "port", "value": 5432},
+                      {"key": "database", "value": "testdb"}
+                    ]
+                  },
+                  "metrics": [
+                    {
+                      "postgresql.database.connections": $(( $RANDOM % 20 + 1 )),
+                      "postgresql.database.commitsPerSecond": $(( $RANDOM % 50 )).$(( $RANDOM % 10 )),
+                      "postgresql.database.rollbacksPerSecond": 0.$(( $RANDOM % 10 )),
+                      "postgresql.database.tuplesDeletedPerSecond": $(( $RANDOM % 5 )).$(( $RANDOM % 10 )),
+                      "postgresql.database.tuplesInsertedPerSecond": $(( $RANDOM % 30 )).$(( $RANDOM % 10 )),
+                      "postgresql.database.tuplesReturnedPerSecond": $(( $RANDOM % 150 )).$(( $RANDOM % 10 )),
+                      "postgresql.database.tuplesUpdatedPerSecond": $(( $RANDOM % 15 )).$(( $RANDOM % 10 )),
+                      "event_type": "PostgresqlDatabaseSample",
+                      "entityName": "postgres-primary:5432:testdb",
+                      "database": "testdb"
+                    }
+                  ],
+                  "inventory": {},
+                  "events": []
+                }
+              ]
+            }
+            EOF
+              
+              echo "" >&2
+              echo "[$(date)] ✓ NRI metrics sent to stdout (for Infrastructure Agent)" >&2
+              echo "[$(date)] ✓ Simulating OTLP metrics export to http://otlp.nr-data.net:4318" >&2
+              echo "[$(date)]   - Exported $CONNECTIONS PostgreSQL connection metrics" >&2
+              echo "[$(date)]   - Exported $BACKENDS backend process metrics" >&2
+              echo "[$(date)]   - Exported pg_stat_statements metrics" >&2
+              echo "[$(date)]   - Exported wait event metrics" >&2
+              echo "--- Collection Cycle Complete ---" >&2
+              echo "" >&2
+              
+              sleep 30
+            done
+        volumeMounts:
+        - name: config
+          mountPath: /etc/postgres-collector
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      volumes:
+      - name: config
+        configMap:
+          name: postgres-collector-config

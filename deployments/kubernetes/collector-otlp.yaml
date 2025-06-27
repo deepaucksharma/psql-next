@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-collector-otlp
+  labels:
+    app: postgres-collector-otlp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-collector-otlp
+  template:
+    metadata:
+      labels:
+        app: postgres-collector-otlp
+    spec:
+      containers:
+      - name: collector
+        image: busybox
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            echo "PostgreSQL Unified Collector - OTLP Mode"
+            echo "Sending metrics to: ${OTLP_ENDPOINT}"
+            
+            while true; do
+              # Generate metrics
+              TIMESTAMP=$(date +%s)
+              CONNECTIONS=$(( $RANDOM % 50 + 10 ))
+              BACKENDS=$(( $RANDOM % 10 + 1 ))
+              COMMITS=$(( $RANDOM % 100 ))
+              
+              # Create OTLP JSON payload
+              cat > /tmp/metrics.json <<EOF
+            {
+              "resource_metrics": [{
+                "resource": {
+                  "attributes": [{
+                    "key": "service.name",
+                    "value": { "string_value": "postgresql" }
+                  }, {
+                    "key": "host.name",
+                    "value": { "string_value": "postgres-primary" }
+                  }, {
+                    "key": "db.system",
+                    "value": { "string_value": "postgresql" }
+                  }]
+                },
+                "scope_metrics": [{
+                  "scope": {
+                    "name": "postgres-unified-collector",
+                    "version": "1.0.0"
+                  },
+                  "metrics": [{
+                    "name": "postgresql.connections",
+                    "unit": "connections",
+                    "gauge": {
+                      "data_points": [{
+                        "time_unix_nano": ${TIMESTAMP}000000000,
+                        "as_int": $CONNECTIONS,
+                        "attributes": [{
+                          "key": "database",
+                          "value": { "string_value": "testdb" }
+                        }]
+                      }]
+                    }
+                  }, {
+                    "name": "postgresql.backends",
+                    "unit": "processes",
+                    "gauge": {
+                      "data_points": [{
+                        "time_unix_nano": ${TIMESTAMP}000000000,
+                        "as_int": $BACKENDS
+                      }]
+                    }
+                  }, {
+                    "name": "postgresql.commits",
+                    "unit": "commits/s",
+                    "gauge": {
+                      "data_points": [{
+                        "time_unix_nano": ${TIMESTAMP}000000000,
+                        "as_double": $COMMITS.$(( $RANDOM % 10 ))
+                      }]
+                    }
+                  }]
+                }]
+              }]
+            }
+            EOF
+              
+              echo "[$(date)] Generated OTLP metrics:"
+              echo "  - Connections: $CONNECTIONS"
+              echo "  - Backends: $BACKENDS"
+              echo "  - Commits/s: $COMMITS"
+              
+              # Simulate sending to OTLP endpoint
+              if [ ! -z "${NEW_RELIC_LICENSE_KEY}" ]; then
+                echo "[$(date)] Sending metrics to New Relic OTLP endpoint..."
+                # In real implementation, would use curl/wget with proper headers
+                # curl -X POST ${OTLP_ENDPOINT}/v1/metrics \
+                #   -H "api-key: ${NEW_RELIC_LICENSE_KEY}" \
+                #   -H "Content-Type: application/json" \
+                #   -d @/tmp/metrics.json
+                echo "[$(date)] ✓ Metrics sent successfully (simulated)"
+              else
+                echo "[$(date)] ⚠ No license key, skipping OTLP export"
+              fi
+              
+              sleep 30
+            done
+        env:
+        - name: OTLP_ENDPOINT
+          value: "https://otlp.nr-data.net"
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-license
+              key: license-key
+              optional: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"

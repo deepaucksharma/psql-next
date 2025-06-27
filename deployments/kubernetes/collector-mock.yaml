@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-collector-config
+data:
+  config.toml: |
+    connection_string = "postgresql://monitoring:monitoring@postgres-primary:5432/testdb"
+    host = "postgres-primary"
+    port = 5432
+    databases = ["testdb"]
+    collection_interval_secs = 30
+    collection_mode = "hybrid"
+    
+    [outputs.nri]
+    enabled = true
+    integration_name = "com.newrelic.postgresql"
+    
+    [outputs.otlp]
+    enabled = true
+    endpoint = "http://otlp.nr-data.net:4318"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-collector
+  template:
+    metadata:
+      labels:
+        app: postgres-collector
+    spec:
+      containers:
+      - name: collector
+        image: busybox
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            # Mock collector that outputs NRI metrics every 30 seconds
+            while true; do
+              cat <<EOF
+            {
+              "name": "com.newrelic.postgresql",
+              "protocol_version": "3",
+              "integration_version": "1.0.0",
+              "data": [
+                {
+                  "entity": {
+                    "name": "postgres-primary:5432",
+                    "type": "postgresql",
+                    "id_attributes": [
+                      {"key": "host", "value": "postgres-primary"},
+                      {"key": "port", "value": 5432}
+                    ]
+                  },
+                  "metrics": [
+                    {
+                      "postgresql.deadlocks": 0,
+                      "postgresql.numbackends": $(( $RANDOM % 10 + 1 )),
+                      "postgresql.connections": $(( $RANDOM % 50 + 10 )),
+                      "postgresql.maxconnections": 100,
+                      "postgresql.commitsPerSecond": $(( $RANDOM % 100 )).$(( $RANDOM % 10 )),
+                      "postgresql.rollbacksPerSecond": 0.$(( $RANDOM % 10 )),
+                      "postgresql.tuplesDeletedPerSecond": $(( $RANDOM % 10 )).$(( $RANDOM % 10 )),
+                      "postgresql.tuplesInsertedPerSecond": $(( $RANDOM % 50 )).$(( $RANDOM % 10 )),
+                      "postgresql.tuplesReturnedPerSecond": $(( $RANDOM % 200 )).$(( $RANDOM % 10 )),
+                      "postgresql.tuplesUpdatedPerSecond": $(( $RANDOM % 20 )).$(( $RANDOM % 10 )),
+                      "event_type": "PostgresqlInstanceSample",
+                      "entityName": "postgres-primary:5432"
+                    }
+                  ],
+                  "inventory": {},
+                  "events": []
+                }
+              ]
+            }
+            EOF
+              echo "[$(date)] NRI metrics sent to stdout" >&2
+              echo "[$(date)] Would send OTLP metrics to http://otlp.nr-data.net:4318" >&2
+              sleep 30
+            done
+        env:
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-license
+              key: license-key
+              optional: true
+        volumeMounts:
+        - name: config
+          mountPath: /etc/postgres-collector
+      volumes:
+      - name: config
+        configMap:
+          name: postgres-collector-config
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: postgres-collector-nri
+spec:
+  selector:
+    matchLabels:
+      app: postgres-collector-nri
+  template:
+    metadata:
+      labels:
+        app: postgres-collector-nri
+    spec:
+      hostNetwork: true
+      containers:
+      - name: newrelic-infra
+        image: newrelic/infrastructure:latest
+        env:
+        - name: NRIA_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-license
+              key: license-key
+              optional: true
+        volumeMounts:
+        - name: host-root
+          mountPath: /host
+          readOnly: true
+        - name: var-db
+          mountPath: /var/db/newrelic-infra
+        securityContext:
+          privileged: true
+      volumes:
+      - name: host-root
+        hostPath:
+          path: /
+      - name: var-db
+        hostPath:
+          path: /var/db/newrelic-infra
+          type: DirectoryOrCreate

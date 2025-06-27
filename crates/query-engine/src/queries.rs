@@ -7,9 +7,9 @@ pub mod ohi_queries {
             pd.datname AS database_name,
             current_schema() AS schema_name,
             pss.calls AS execution_count,
-            ROUND((pss.total_time / pss.calls)::numeric, 3) AS avg_elapsed_time_ms,
-            pss.shared_blks_read / pss.calls AS avg_disk_reads,
-            pss.shared_blks_written / pss.calls AS avg_disk_writes,
+            (pss.total_time / pss.calls) AS avg_elapsed_time_ms,
+            (pss.shared_blks_read::float8 / pss.calls) AS avg_disk_reads,
+            (pss.shared_blks_written::float8 / pss.calls) AS avg_disk_writes,
             CASE
                 WHEN pss.query ILIKE 'SELECT%%' THEN 'SELECT'
                 WHEN pss.query ILIKE 'INSERT%%' THEN 'INSERT'
@@ -17,7 +17,8 @@ pub mod ohi_queries {
                 WHEN pss.query ILIKE 'DELETE%%' THEN 'DELETE'
                 ELSE 'OTHER'
             END AS statement_type,
-            to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS collection_timestamp
+            to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS collection_timestamp,
+            NULL::text AS individual_query
         FROM pg_stat_statements pss
         JOIN pg_database pd ON pss.dbid = pd.oid
         WHERE pd.datname in (%s)
@@ -39,9 +40,9 @@ pub mod ohi_queries {
             pd.datname AS database_name,
             current_schema() AS schema_name,
             pss.calls AS execution_count,
-            ROUND((pss.total_exec_time / pss.calls)::numeric, 3) AS avg_elapsed_time_ms,
-            pss.shared_blks_read / pss.calls AS avg_disk_reads,
-            pss.shared_blks_written / pss.calls AS avg_disk_writes,
+            (pss.total_exec_time / pss.calls) AS avg_elapsed_time_ms,
+            (pss.shared_blks_read::float8 / pss.calls) AS avg_disk_reads,
+            (pss.shared_blks_written::float8 / pss.calls) AS avg_disk_writes,
             CASE
                 WHEN pss.query ILIKE 'SELECT%%' THEN 'SELECT'
                 WHEN pss.query ILIKE 'INSERT%%' THEN 'INSERT'
@@ -49,7 +50,8 @@ pub mod ohi_queries {
                 WHEN pss.query ILIKE 'DELETE%%' THEN 'DELETE'
                 ELSE 'OTHER'
             END AS statement_type,
-            to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS collection_timestamp
+            to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS collection_timestamp,
+            NULL::text AS individual_query
         FROM pg_stat_statements pss
         JOIN pg_database pd ON pss.dbid = pd.oid
         WHERE pd.datname in (%s)
@@ -138,8 +140,8 @@ pub mod ohi_queries {
             SELECT
                 blocking.pid AS blocking_pid,
                 blocked.pid AS blocked_pid,
-                blocking.queryid AS blocking_queryid,
-                blocked.queryid AS blocked_queryid,
+                blocking.query_id AS blocking_queryid,
+                blocked.query_id AS blocked_queryid,
                 LEFT(blocking.query, 4095) AS blocking_query,
                 LEFT(blocked.query, 4095) AS blocked_query,
                 blocking.datname AS blocking_database,
@@ -194,7 +196,7 @@ pub mod ohi_queries {
     pub const INDIVIDUAL_V12: &str = r#"
         SELECT
             pid,
-            queryid AS query_id,
+            query_id AS query_id,
             LEFT(query, 4095) AS query_text,
             state,
             wait_event_type,
@@ -217,7 +219,7 @@ pub mod ohi_queries {
     pub const INDIVIDUAL_V13_ABOVE: &str = r#"
         SELECT
             pid,
-            queryid AS query_id,
+            query_id AS query_id,
             LEFT(query, 4095) AS query_text,
             state,
             wait_event_type,
@@ -263,7 +265,7 @@ pub mod extended_queries {
     
     pub const PLAN_HISTORY: &str = r#"
         SELECT DISTINCT ON (queryid)
-            queryid AS query_id,
+            query_id AS query_id,
             query,
             plan,
             plans AS plan_count,
@@ -276,7 +278,7 @@ pub mod extended_queries {
     
     pub const BUFFER_STATS_DETAIL: &str = r#"
         SELECT
-            queryid AS query_id,
+            query_id AS query_id,
             shared_blks_hit,
             shared_blks_read,
             shared_blks_dirtied,

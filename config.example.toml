@@ -1,0 +1,74 @@
+# PostgreSQL Unified Collector Configuration
+# This is the canonical example configuration file
+# Copy this file to config.toml and update with your values
+
+# ==== PostgreSQL Connection ====
+connection_string = "postgresql://postgres:password@localhost:5432/postgres"
+host = "localhost"
+port = 5432
+databases = ["postgres"]  # List of databases to monitor
+max_connections = 5
+connect_timeout_secs = 30
+
+# ==== Collection Settings ====
+collection_interval_secs = 30
+collection_mode = "hybrid"  # Options: nri, otel, hybrid
+query_monitoring_count_threshold = 20
+query_monitoring_response_time_threshold = 500  # milliseconds
+max_query_length = 4096
+
+# ==== Feature Flags ====
+enable_extended_metrics = true
+enable_ash = true
+ash_sample_interval_secs = 1
+ash_retention_hours = 1
+ash_max_memory_mb = 100
+enable_ebpf = false
+
+# ==== Query Sanitization ====
+sanitize_query_text = true
+sanitization_mode = "smart"  # Options: full, smart, none
+
+# ==== Sampling Configuration ====
+[sampling]
+mode = "fixed"  # Options: fixed, adaptive
+base_sample_rate = 1.0
+rules = []
+
+# ==== NRI Output (New Relic Infrastructure) ====
+[outputs.nri]
+enabled = true
+entity_key = "${HOSTNAME}:${PORT}"
+integration_name = "com.newrelic.postgresql"
+
+# ==== OTLP Output (OpenTelemetry) ====
+[outputs.otlp]
+enabled = true
+endpoint = "http://otlp.nr-data.net:4318"  # Note: HTTPS requires TLS support
+compression = "gzip"
+timeout_secs = 30
+headers = [["api-key", "${NEW_RELIC_LICENSE_KEY}"]]
+
+# ==== PgBouncer Monitoring (Optional) ====
+[pgbouncer]
+enabled = false
+admin_connection_string = "postgresql://pgbouncer@localhost:6432/pgbouncer"
+collection_interval_secs = 30
+
+# ==== Multi-Instance Support (Optional) ====
+# Uncomment to monitor multiple PostgreSQL instances
+# [[instances]]
+# name = "primary"
+# connection_string = "postgresql://user:pass@primary:5432/db"
+# host = "primary"
+# port = 5432
+# databases = ["myapp"]
+# enabled = true
+
+# [[instances]]
+# name = "replica"
+# connection_string = "postgresql://user:pass@replica:5432/db"
+# host = "replica"
+# port = 5432
+# databases = ["myapp"]
+# enabled = true

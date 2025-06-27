@@ -1,0 +1,46 @@
+# Example values with PgBouncer monitoring enabled
+# Monitor both PostgreSQL and PgBouncer connection pooler
+
+collectorMode: hybrid
+
+# PostgreSQL connection
+postgresql:
+  host: postgres.example.com
+  port: 5432
+  database: postgres
+  user: monitoring
+  password: "postgres-password"
+
+# New Relic configuration
+newrelic:
+  licenseKey: "YOUR_LICENSE_KEY_HERE"
+
+# Enable PgBouncer monitoring
+pgbouncer:
+  enabled: true
+  host: pgbouncer.example.com
+  port: 6432
+  adminUser: pgbouncer
+  password: "pgbouncer-admin-password"
+  # Or use existing secret:
+  # existingSecret: pgbouncer-secret
+  # existingSecretPasswordKey: admin-password
+
+# Collection settings
+collection:
+  intervalSeconds: 30
+  queryMonitoringCountThreshold: 20
+  queryMonitoringResponseTimeThreshold: 500
+
+# Enable all features
+features:
+  extendedMetrics: true
+  individualQueries: true
+  queryPlanCollection: true
+  indexStats: true
+  tableStats: true
+
+# Query sanitization for security
+sanitization:
+  enabled: true
+  mode: smart  # Removes PII while preserving query structure

@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-integration-config
+  namespace: postgres-monitoring
+data:
+  postgresql-config.yaml: |
+    integrations:
+      - name: com.newrelic.postgresql
+        exec:
+          - /bin/sh
+          - -c
+          - |
+            kubectl logs -n postgres-monitoring deployment/postgres-collector --tail=1 | grep -E '^\{' || echo '{}'
+        interval: 30s
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: infra-agent-config
+  namespace: postgres-monitoring
+data:
+  newrelic-infra.yml: |
+    license_key: ${NRIA_LICENSE_KEY}
+    custom_attributes:
+      environment: k8s-test
+      cluster: postgres-collector
+    integrations_config_dir: /etc/newrelic-infra/integrations.d/

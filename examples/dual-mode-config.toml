@@ -1,0 +1,46 @@
+# PostgreSQL connection
+connection_string = "postgresql://postgres:postgres@localhost:5432/testdb"
+host = "localhost"
+port = 5432
+databases = ["testdb"]
+max_connections = 5
+connect_timeout_secs = 30
+
+# Collection settings
+collection_interval_secs = 30
+collection_mode = "hybrid"  # This enables BOTH NRI and OTLP
+query_monitoring_count_threshold = 10
+query_monitoring_response_time_threshold = 100
+max_query_length = 4096
+
+# Features
+enable_extended_metrics = true
+enable_ash = true
+ash_sample_interval_secs = 1
+ash_retention_hours = 1
+ash_max_memory_mb = 100
+enable_ebpf = false
+
+# Query sanitization
+sanitize_query_text = true
+sanitization_mode = "smart"
+
+# Sampling configuration
+[sampling]
+mode = "fixed"
+base_sample_rate = 1.0
+rules = []
+
+# NRI output - sends full metrics to stdout for Infrastructure agent
+[outputs.nri]
+enabled = true
+entity_key = "localhost:5432"
+integration_name = "com.newrelic.postgresql"
+
+# OTLP output - sends full metrics via HTTP to New Relic
+[outputs.otlp]
+enabled = true
+endpoint = "http://otlp.nr-data.net:4318"
+compression = "gzip"
+timeout_secs = 30
+headers = [["api-key", "${NEW_RELIC_LICENSE_KEY}"]]

@@ -1,0 +1,272 @@
+# Default values for postgres-collector
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: newrelic/postgres-unified-collector
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Collector mode: nri, otel, or hybrid
+collectorMode: hybrid
+
+# Deployment mode: deployment, daemonset, or sidecar
+deploymentMode: deployment
+
+# PostgreSQL connection settings
+postgresql:
+  host: postgresql
+  port: 5432
+  database: postgres
+  user: monitoring
+  # Password can be set here or via existingSecret
+  password: ""
+  # Use existing secret for PostgreSQL credentials
+  existingSecret: ""
+  existingSecretPasswordKey: "password"
+  sslMode: prefer
+
+# New Relic configuration
+newrelic:
+  # License key can be set here or via existingSecret
+  licenseKey: ""
+  # Use existing secret for New Relic license
+  existingSecret: ""
+  existingSecretLicenseKey: "license-key"
+  accountId: ""
+  region: "US"  # US or EU
+
+# OpenTelemetry configuration
+otlp:
+  enabled: true
+  endpoint: "http://otel-collector:4317"
+  compression: gzip
+  timeout: 30
+
+# NRI output configuration
+nri:
+  enabled: true
+  entityKey: "${HOSTNAME}:${PORT}"
+  integrationName: "com.newrelic.postgresql"
+
+# Collection settings
+collection:
+  intervalSeconds: 30
+  timeoutSeconds: 10
+  maxConnections: 5
+  queryMonitoringCountThreshold: 20
+  queryMonitoringResponseTimeThreshold: 500
+
+# Query sanitization
+sanitization:
+  enabled: true
+  mode: smart  # full, smart, or none
+
+# Active Session History (ASH)
+ash:
+  enabled: true
+  sampleIntervalSeconds: 1
+  retentionHours: 1
+  maxMemoryMb: 100
+
+# Extended features
+features:
+  extendedMetrics: true
+  individualQueries: true
+  queryPlanCollection: true
+  indexStats: true
+  tableStats: true
+
+# PgBouncer integration
+pgbouncer:
+  enabled: false
+  host: pgbouncer
+  port: 6432
+  adminUser: pgbouncer
+  password: ""
+  existingSecret: ""
+  existingSecretPasswordKey: "password"
+
+# Multi-instance support
+instances: []
+  # - name: primary
+  #   host: primary.example.com
+  #   port: 5432
+  #   database: postgres
+  #   user: monitoring
+  #   password: ""
+  #   enabled: true
+  # - name: replica
+  #   host: replica.example.com
+  #   port: 5432
+  #   database: postgres
+  #   user: monitoring
+  #   password: ""
+  #   enabled: true
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 2000
+  runAsNonRoot: true
+  runAsUser: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: ClusterIP
+  healthPort: 8080
+  metricsPort: 9090
+
+# Health check configuration
+healthCheck:
+  enabled: true
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: health
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: health
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Prometheus metrics
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    selector: {}
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Additional environment variables
+extraEnvVars: []
+  # - name: CUSTOM_VAR
+  #   value: custom_value
+
+# Additional environment variables from secrets or configmaps
+extraEnvFrom: []
+  # - secretRef:
+  #     name: my-secret
+  # - configMapRef:
+  #     name: my-configmap
+
+# Additional volumes
+extraVolumes: []
+  # - name: custom-config
+  #   configMap:
+  #     name: custom-config
+
+# Additional volume mounts
+extraVolumeMounts: []
+  # - name: custom-config
+  #   mountPath: /etc/custom-config
+  #   readOnly: true
+
+# Config file content (will be created as ConfigMap)
+configFile: |
+  # Connection settings
+  connection_string = "postgresql://{{ .Values.postgresql.user }}:{{ .Values.postgresql.password }}@{{ .Values.postgresql.host }}:{{ .Values.postgresql.port }}/{{ .Values.postgresql.database }}"
+  host = "{{ .Values.postgresql.host }}"
+  port = {{ .Values.postgresql.port }}
+  databases = ["{{ .Values.postgresql.database }}"]
+  max_connections = {{ .Values.collection.maxConnections }}
+  connect_timeout_secs = {{ .Values.collection.timeoutSeconds }}
+  
+  # Collection settings
+  collection_interval_secs = {{ .Values.collection.intervalSeconds }}
+  collection_mode = "{{ .Values.collectorMode }}"
+  query_monitoring_count_threshold = {{ .Values.collection.queryMonitoringCountThreshold }}
+  query_monitoring_response_time_threshold = {{ .Values.collection.queryMonitoringResponseTimeThreshold }}
+  
+  # Features
+  enable_extended_metrics = {{ .Values.features.extendedMetrics }}
+  enable_ash = {{ .Values.ash.enabled }}
+  ash_sample_interval_secs = {{ .Values.ash.sampleIntervalSeconds }}
+  ash_retention_hours = {{ .Values.ash.retentionHours }}
+  ash_max_memory_mb = {{ .Values.ash.maxMemoryMb }}
+  
+  # Query sanitization
+  sanitize_query_text = {{ .Values.sanitization.enabled }}
+  sanitization_mode = "{{ .Values.sanitization.mode }}"
+  
+  {{- if .Values.pgbouncer.enabled }}
+  # PgBouncer
+  [pgbouncer]
+  enabled = true
+  admin_connection_string = "postgresql://{{ .Values.pgbouncer.adminUser }}:{{ .Values.pgbouncer.password }}@{{ .Values.pgbouncer.host }}:{{ .Values.pgbouncer.port }}/pgbouncer"
+  {{- end }}
+  
+  # NRI output
+  [outputs.nri]
+  enabled = {{ .Values.nri.enabled }}
+  entity_key = "{{ .Values.nri.entityKey }}"
+  integration_name = "{{ .Values.nri.integrationName }}"
+  
+  # OTLP output
+  [outputs.otlp]
+  enabled = {{ .Values.otlp.enabled }}
+  endpoint = "{{ .Values.otlp.endpoint }}"
+  compression = "{{ .Values.otlp.compression }}"
+  timeout_secs = {{ .Values.otlp.timeout }}
+  
+  {{- range .Values.instances }}
+  [[instances]]
+  name = "{{ .name }}"
+  connection_string = "postgresql://{{ .user }}:{{ .password }}@{{ .host }}:{{ .port }}/{{ .database }}"
+  enabled = {{ .enabled }}
+  {{- end }}

@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: postgres-monitoring
+
+resources:
+  - deployment.yaml
+
+secretGenerator:
+  - name: newrelic-license
+    behavior: replace
+    literals:
+      - key=NEWRELIC_LICENSE_KEY_PLACEHOLDER
+    options:
+      disableNameSuffixHash: true
+
+patchesStrategicMerge:
+  - configmap-patch.yaml
+  - deployment-patch.yaml
+
+images:
+  - name: postgres-unified-collector
+    newName: postgres-unified-collector
+    newTag: latest

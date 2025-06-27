@@ -1,0 +1,33 @@
+# Test values using busybox as a mock collector
+collectorMode: nri
+image:
+  repository: busybox
+  tag: latest
+  pullPolicy: IfNotPresent
+
+postgresql:
+  host: postgres-primary.postgres-monitoring.svc.cluster.local
+  port: 5432
+  database: testdb
+  user: postgres
+  password: postgres
+
+newrelic:
+  licenseKey: "YOUR_NEW_RELIC_LICENSE_KEY"
+
+# Override container command to simulate collector
+deploymentMode: deployment
+replicaCount: 1
+
+# Add custom command to simulate the collector
+extraEnvVars:
+  - name: SIMULATE_COLLECTOR
+    value: "true"
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi

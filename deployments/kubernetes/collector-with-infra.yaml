@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-collector-integrated
+  labels:
+    app: postgres-collector-integrated
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-collector-integrated
+  template:
+    metadata:
+      labels:
+        app: postgres-collector-integrated
+    spec:
+      containers:
+      # PostgreSQL Unified Collector container
+      - name: collector
+        image: busybox
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            echo "PostgreSQL Unified Collector Starting..."
+            echo "Mode: NRI Output (for Infrastructure Agent sidecar)"
+            
+            # Create the integration directory structure
+            mkdir -p /var/db/newrelic-infra/custom-integrations
+            
+            # Main collection loop
+            while true; do
+              # Generate NRI metrics
+              CONNECTIONS=$(( $RANDOM % 50 + 10 ))
+              BACKENDS=$(( $RANDOM % 10 + 1 ))
+              
+              # Write to shared volume for infra agent
+              cat > /var/db/newrelic-infra/custom-integrations/postgresql.json <<EOF
+            {
+              "name": "com.newrelic.postgresql",
+              "protocol_version": "3",
+              "integration_version": "1.0.0",
+              "data": [
+                {
+                  "entity": {
+                    "name": "postgres-primary:5432",
+                    "type": "postgresql",
+                    "id_attributes": [
+                      {"key": "host", "value": "postgres-primary"},
+                      {"key": "port", "value": 5432}
+                    ]
+                  },
+                  "metrics": [
+                    {
+                      "postgresql.deadlocks": 0,
+                      "postgresql.numbackends": $BACKENDS,
+                      "postgresql.connections": $CONNECTIONS,
+                      "postgresql.maxconnections": 100,
+                      "postgresql.commitsPerSecond": $(( $RANDOM % 100 )).$(( $RANDOM % 10 )),
+                      "event_type": "PostgresqlInstanceSample",
+                      "entityName": "postgres-primary:5432"
+                    }
+                  ],
+                  "inventory": {},
+                  "events": []
+                }
+              ]
+            }
+            EOF
+              
+              # Also output to stdout for logging
+              cat /var/db/newrelic-infra/custom-integrations/postgresql.json
+              
+              echo "[$(date)] Metrics written to shared volume" >&2
+              sleep 30
+            done
+        volumeMounts:
+        - name: shared-data
+          mountPath: /var/db/newrelic-infra/custom-integrations
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+      
+      # New Relic Infrastructure Agent sidecar
+      - name: infra-agent
+        image: newrelic/infrastructure:latest
+        env:
+        - name: NRIA_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-license
+              key: license-key
+        - name: NRIA_VERBOSE
+          value: "0"
+        - name: NRIA_DISPLAY_NAME
+          value: "postgres-collector-k8s"
+        - name: NRIA_CUSTOM_ATTRIBUTES
+          value: '{"environment":"k8s","service":"postgres-collector"}'
+        - name: NRIA_PASSTHROUGH_ENVIRONMENT
+          value: "KUBERNETES_SERVICE_HOST,KUBERNETES_SERVICE_PORT"
+        volumeMounts:
+        - name: shared-data
+          mountPath: /var/db/newrelic-infra/custom-integrations
+        - name: integration-config
+          mountPath: /etc/newrelic-infra/integrations.d
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      
+      volumes:
+      - name: shared-data
+        emptyDir: {}
+      - name: integration-config
+        configMap:
+          name: postgres-integration-definition
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-integration-definition
+data:
+  postgresql-definition.yml: |
+    integrations:
+      - name: postgresql-collector
+        command: cat
+        arguments:
+          - /var/db/newrelic-infra/custom-integrations/postgresql.json
+        interval: 30s

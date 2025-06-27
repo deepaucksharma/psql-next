@@ -1,0 +1,46 @@
+# Example: High Security Configuration with Query Sanitization
+
+# Connection with SSL
+connection_string = "postgresql://monitoring:secure_pass@localhost:5432/postgres?sslmode=require"
+host = "localhost"
+port = 5432
+databases = ["postgres", "sensitive_db"]
+max_connections = 2  # Limit connections
+
+# Collection settings
+collection_interval_secs = 60
+collection_mode = "otel"  # Only send to controlled OTLP endpoint
+
+# Query monitoring with lower thresholds
+query_monitoring_count_threshold = 5
+query_monitoring_response_time_threshold = 50
+max_query_length = 1024  # Limit query text length
+
+# Security settings
+sanitize_query_text = true
+sanitization_mode = "full"  # Remove all literals and identifiers
+
+# Disable extended features that might expose sensitive data
+enable_extended_metrics = false
+enable_ash = false
+enable_ebpf = false
+
+# Output only to secure endpoint
+[outputs.otlp]
+enabled = true
+endpoint = "https://secure-collector.internal:4317"
+compression = "gzip"
+timeout_secs = 10
+headers = [
+    ["Authorization", "Bearer ${SECURE_TOKEN}"],
+    ["X-Environment", "production"],
+]
+
+# Strict sampling to reduce data volume
+[sampling]
+mode = "adaptive"
+base_sample_rate = 0.1
+
+[[sampling.rules]]
+condition = "query_duration > 5000"  # Only very slow queries
+sample_rate = 1.0

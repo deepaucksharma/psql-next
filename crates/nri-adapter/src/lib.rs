@@ -1,5 +1,4 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -40,14 +39,14 @@ impl NRIAdapter {
     
     fn adapt_slow_queries(&self, entity: &mut Entity, metrics: &[SlowQueryMetric]) -> Result<(), ProcessError> {
         for metric in metrics {
-            let mut metric_set = entity.new_metric_set("PostgresSlowQueries");
+            let metric_set = entity.new_metric_set("PostgresSlowQueries");
             
             // Set metrics exactly as OHI does
             if let Some(v) = &metric.newrelic {
                 metric_set.set_metric("newrelic", v, MetricType::Attribute)?;
             }
             if let Some(v) = &metric.query_id {
-                metric_set.set_metric("query_id", v, MetricType::Attribute)?;
+                metric_set.set_metric("query_id", &v.to_string(), MetricType::Attribute)?;
             }
             if let Some(v) = &metric.query_text {
                 metric_set.set_metric("query_text", v, MetricType::Attribute)?;
@@ -85,7 +84,7 @@ impl NRIAdapter {
     
     fn adapt_wait_events(&self, entity: &mut Entity, metrics: &[WaitEventMetric]) -> Result<(), ProcessError> {
         for metric in metrics {
-            let mut metric_set = entity.new_metric_set("PostgresWaitEvents");
+            let metric_set = entity.new_metric_set("PostgresWaitEvents");
             
             if let Some(v) = &metric.pid {
                 metric_set.set_metric("pid", v, MetricType::Attribute)?;
@@ -109,7 +108,7 @@ impl NRIAdapter {
                 metric_set.set_metric("database_name", v, MetricType::Attribute)?;
             }
             if let Some(v) = &metric.query_id {
-                metric_set.set_metric("query_id", v, MetricType::Attribute)?;
+                metric_set.set_metric("query_id", &v.to_string(), MetricType::Attribute)?;
             }
             if let Some(v) = &metric.query_text {
                 metric_set.set_metric("query_text", v, MetricType::Attribute)?;
@@ -123,7 +122,7 @@ impl NRIAdapter {
     
     fn adapt_blocking_sessions(&self, entity: &mut Entity, metrics: &[BlockingSessionMetric]) -> Result<(), ProcessError> {
         for metric in metrics {
-            let mut metric_set = entity.new_metric_set("PostgresBlockingSessions");
+            let metric_set = entity.new_metric_set("PostgresBlockingSessions");
             
             if let Some(v) = &metric.blocking_pid {
                 metric_set.set_metric("blocking_pid", v, MetricType::Attribute)?;
@@ -167,13 +166,13 @@ impl NRIAdapter {
     
     fn adapt_individual_queries(&self, entity: &mut Entity, metrics: &[IndividualQueryMetric]) -> Result<(), ProcessError> {
         for metric in metrics {
-            let mut metric_set = entity.new_metric_set("PostgresIndividualQueries");
+            let metric_set = entity.new_metric_set("PostgresIndividualQueries");
             
             if let Some(v) = &metric.pid {
                 metric_set.set_metric("pid", v, MetricType::Attribute)?;
             }
             if let Some(v) = &metric.query_id {
-                metric_set.set_metric("query_id", v, MetricType::Attribute)?;
+                metric_set.set_metric("query_id", &v.to_string(), MetricType::Attribute)?;
             }
             if let Some(v) = &metric.query_text {
                 metric_set.set_metric("query_text", v, MetricType::Attribute)?;
@@ -217,10 +216,10 @@ impl NRIAdapter {
     
     fn adapt_execution_plans(&self, entity: &mut Entity, metrics: &[ExecutionPlanMetric]) -> Result<(), ProcessError> {
         for metric in metrics {
-            let mut metric_set = entity.new_metric_set("PostgresExecutionPlanMetrics");
+            let metric_set = entity.new_metric_set("PostgresExecutionPlanMetrics");
             
             if let Some(v) = &metric.query_id {
-                metric_set.set_metric("query_id", v, MetricType::Attribute)?;
+                metric_set.set_metric("query_id", &v.to_string(), MetricType::Attribute)?;
             }
             if let Some(v) = &metric.query_text {
                 metric_set.set_metric("query_text", v, MetricType::Attribute)?;

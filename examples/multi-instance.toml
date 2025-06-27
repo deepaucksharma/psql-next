@@ -1,0 +1,41 @@
+# Example: Multi-Instance PostgreSQL Monitoring
+
+# Primary instance configuration
+connection_string = "postgresql://postgres:password@primary:5432/postgres"
+host = "primary"
+port = 5432
+databases = ["postgres", "app_db"]
+
+# Collection settings
+collection_interval_secs = 30
+collection_mode = "hybrid"
+
+# Additional instances
+[[instances]]
+name = "replica1"
+connection_string = "postgresql://postgres:password@replica1:5432/postgres"
+host = "replica1"
+port = 5432
+databases = ["postgres", "app_db"]
+enabled = true
+
+[[instances]]
+name = "replica2"
+connection_string = "postgresql://postgres:password@replica2:5432/postgres"
+host = "replica2"
+port = 5432
+databases = ["postgres", "app_db"]
+enabled = true
+
+# Instance-specific overrides
+[[instances]]
+name = "analytics"
+connection_string = "postgresql://postgres:password@analytics:5432/analytics"
+host = "analytics"
+port = 5432
+databases = ["analytics_db"]
+enabled = true
+# Analytics DB has different thresholds
+query_monitoring_count_threshold = 50
+query_monitoring_response_time_threshold = 1000
+enable_extended_metrics = true

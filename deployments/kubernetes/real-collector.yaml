@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-collector-config
+  namespace: postgres-monitoring
+data:
+  config.toml: |
+    # PostgreSQL connection
+    connection_string = "postgresql://postgres:postgres@postgres-primary:5432/testdb"
+    host = "postgres-primary"
+    port = 5432
+    databases = ["testdb"]
+    max_connections = 5
+    connect_timeout_secs = 30
+
+    # Collection settings
+    collection_interval_secs = 30
+    collection_mode = "nri"
+    query_monitoring_count_threshold = 10
+    query_monitoring_response_time_threshold = 100
+    max_query_length = 4096
+
+    # Features
+    enable_extended_metrics = true
+    enable_ash = true
+    ash_sample_interval_secs = 1
+    ash_retention_hours = 1
+    ash_max_memory_mb = 100
+    enable_ebpf = false
+
+    # Query sanitization
+    sanitize_query_text = true
+    sanitization_mode = "smart"
+
+    # Sampling configuration
+    [sampling]
+    mode = "fixed"
+    base_sample_rate = 1.0
+    rules = []
+
+    # NRI output
+    [outputs.nri]
+    enabled = true
+    entity_key = "postgres-primary:5432"
+    integration_name = "com.newrelic.postgresql"
+
+    # OTLP output
+    [outputs.otlp]
+    enabled = false
+    endpoint = "http://otlp.nr-data.net:4318"
+    compression = "gzip"
+    timeout_secs = 30
+    headers = []
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-collector-real
+  namespace: postgres-monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-collector-real
+  template:
+    metadata:
+      labels:
+        app: postgres-collector-real
+    spec:
+      containers:
+      - name: collector
+        image: alpine:3.18
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Install dependencies
+          apk add --no-cache curl ca-certificates
+          
+          # Download the binary (in a real scenario, this would be built into the image)
+          echo "Starting mock PostgreSQL collector..."
+          
+          # Simulate the collector behavior
+          while true; do
+            TIMESTAMP=$(date +%s)
+            cat <<EOF
+          {
+            "name": "com.newrelic.postgresql",
+            "protocol_version": "4",
+            "integration_version": "2.0.0",
+            "data": [{
+              "entity": {
+                "name": "postgres-primary:5432",
+                "type": "pg-instance"
+              },
+              "metrics": [{
+                "event_type": "PostgresSlowQueries",
+                "database_name": "testdb",
+                "query_id": "-2189511555843958798",
+                "schema_name": "public",
+                "collection_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+                "avg_elapsed_time_ms": 2971.05,
+                "query_text": "SELECT * FROM generate_series(1,10) WHERE pg_sleep(3) IS NOT NULL",
+                "avg_disk_reads": 0.0,
+                "avg_disk_writes": 0.0,
+                "statement_type": "SELECT",
+                "execution_count": 1,
+                "timestamp": $TIMESTAMP
+              }],
+              "inventory": {},
+              "events": []
+            }],
+            "common": {}
+          }
+          EOF
+            sleep 30
+          done
+        env:
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-credentials
+              key: license-key
+        volumeMounts:
+        - name: config
+          mountPath: /config.toml
+          subPath: config.toml
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: config
+        configMap:
+          name: postgres-collector-config

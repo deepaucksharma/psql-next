@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use anyhow::Result;
-use async_trait::async_trait;
-use sqlx::{PgConnection, FromRow, Row};
+use sqlx::{PgConnection, FromRow};
 use postgres_collector_core::{CollectorError, CommonParameters, SlowQueryMetric};
 
 use crate::queries;
@@ -9,7 +8,7 @@ use crate::queries;
 #[derive(FromRow)]
 pub struct RawSlowQueryMetric {
     pub newrelic: Option<String>,
-    pub query_id: Option<String>,
+    pub query_id: Option<i64>,
     pub query_text: Option<String>,
     pub database_name: Option<String>,
     pub schema_name: Option<String>,
@@ -230,9 +229,15 @@ impl OHICompatibleQueryExecutor {
     fn post_process_slow_queries(
         &self,
         queries: &mut Vec<SlowQueryMetric>,
-        _params: &CommonParameters,
+        params: &CommonParameters,
     ) {
-        for query in queries {
+        // Filter by response time threshold
+        let threshold = params.query_monitoring_response_time_threshold as f64;
+        queries.retain(|q| {
+            q.avg_elapsed_time_ms.unwrap_or(0.0) >= threshold
+        });
+        
+        for query in queries.iter_mut() {
             // OHI anonymizes ALTER statements
             if let Some(text) = &query.query_text {
                 if text.to_lowercase().contains("alter") {
@@ -240,6 +245,15 @@ impl OHICompatibleQueryExecutor {
                 }
             }
         }
+        
+        // Sort by elapsed time descending and limit to count threshold
+        queries.sort_by(|a, b| {
+            b.avg_elapsed_time_ms.unwrap_or(0.0)
+                .partial_cmp(&a.avg_elapsed_time_ms.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        
+        queries.truncate(params.query_monitoring_count_threshold as usize);
     }
     
     pub async fn execute_wait_events(
