@@ -1,26 +1,7 @@
-# New Relic Infrastructure Agent Configuration
-license_key: ${NRIA_LICENSE_KEY}
-
-# Agent behavior
-enable_process_metrics: true
-payload_compression_level: 6
-
-# Custom attributes
+license_key: ${NEW_RELIC_LICENSE_KEY}
+display_name: postgres-unified-collector
 custom_attributes:
-  environment: test
+  environment: development
   service: postgresql
   collector: unified
-
-# Logging
-log:
-  level: info
-  file: /var/log/newrelic-infra/newrelic-infra.log
-  forward: true
-  stdout: true
-
-# Integration configuration
-integrations_config_refresh: 60s
-
-# Features
-features:
-  docker_enabled: true
+integrations_config_dir: /Users/deepaksharma/syc/psql-next/integrations.d/

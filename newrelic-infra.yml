@@ -1,7 +1,0 @@
-license_key: ${NEW_RELIC_LICENSE_KEY}
-display_name: postgres-unified-collector
-custom_attributes:
-  environment: development
-  service: postgresql
-  collector: unified
-integrations_config_dir: /Users/deepaksharma/syc/psql-next/integrations.d/
