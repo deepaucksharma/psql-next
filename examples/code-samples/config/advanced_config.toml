@@ -1,0 +1,365 @@
+# PostgreSQL Unified Collector - Advanced Configuration Example
+# This file demonstrates all configuration options with explanations
+
+# =============================================================================
+# DATABASE CONNECTION CONFIGURATION
+# =============================================================================
+[database]
+# Primary database connection
+host = "localhost"
+port = 5432
+username = "postgres"
+password = "${POSTGRES_PASSWORD}"  # Environment variable substitution
+database = "postgres"
+
+# SSL Configuration (for production environments)
+sslmode = "require"  # "disable", "allow", "prefer", "require", "verify-ca", "verify-full"
+sslcert = "/etc/ssl/certs/client.crt"
+sslkey = "/etc/ssl/private/client.key"
+sslrootcert = "/etc/ssl/certs/ca.crt"
+
+# Connection Pool Settings
+max_connections = 10           # Maximum concurrent connections
+connect_timeout_secs = 30      # Connection timeout
+idle_timeout_secs = 300        # Idle connection timeout (5 minutes)
+max_lifetime_secs = 3600       # Maximum connection lifetime (1 hour)
+
+# Multiple database support (comma-separated)
+databases = ["postgres", "application_db", "analytics_db"]
+
+# Connection string override (alternative to individual settings)
+# connection_string = "postgresql://user:pass@host:port/db?sslmode=require"
+
+# =============================================================================
+# COLLECTION CONFIGURATION
+# =============================================================================
+[collection]
+# Collection frequency
+interval_secs = 30                              # How often to collect metrics
+enable_extended_metrics = true                  # Enable additional metric collection
+enable_background_writer_metrics = true         # Background writer statistics
+enable_replication_metrics = true               # Replication lag and status
+enable_vacuum_metrics = true                    # Vacuum and autovacuum statistics
+
+# Query Monitoring Thresholds
+query_monitoring_count_threshold = 100          # Minimum execution count
+query_monitoring_response_time_threshold = 1000 # Minimum response time (ms)
+max_slow_queries = 1000                         # Maximum slow queries to collect
+
+# Query Text Handling
+sanitize_query_text = true                      # Enable query sanitization
+sanitization_mode = "smart"                     # "none", "smart", "full"
+max_query_text_length = 4096                   # Truncate long queries
+
+# Performance Settings
+collection_timeout_secs = 60                   # Maximum collection time
+parallel_collection = true                     # Enable parallel metric collection
+batch_size = 100                              # Batch size for query processing
+
+# =============================================================================
+# ACTIVE SESSION HISTORY (ASH) CONFIGURATION
+# =============================================================================
+[ash]
+enabled = true                    # Enable ASH sampling
+sample_interval_secs = 5          # Sample frequency
+retention_hours = 24              # How long to keep samples
+max_memory_mb = 100              # Memory limit for ASH data
+max_samples_per_collection = 1000 # Limit samples per collection cycle
+
+# Advanced ASH settings
+include_idle_sessions = false     # Include idle sessions in sampling
+include_system_processes = false  # Include system processes
+min_duration_ms = 100            # Minimum session duration to sample
+
+# =============================================================================
+# QUERY SANITIZATION CONFIGURATION
+# =============================================================================
+[sanitization]
+# PII Detection Patterns (regular expressions)
+custom_pii_patterns = [
+    "\\b\\d{4}-\\d{4}-\\d{4}-\\d{4}\\b",     # Credit card format
+    "\\b[A-Z]{2}\\d{6}[A-Z]\\b",             # UK National Insurance
+    "\\b\\d{3}-\\d{3}-\\d{4}\\b"             # US Phone number
+]
+
+# Preserve specific patterns from sanitization
+preserve_patterns = [
+    "pg_stat_statements",
+    "information_schema",
+    "pg_catalog"
+]
+
+# Sanitization behavior
+replace_literals_with_params = true  # Replace 'value' with $1
+normalize_whitespace = true          # Normalize query formatting
+remove_comments = true               # Remove SQL comments
+
+# =============================================================================
+# OUTPUT CONFIGURATION
+# =============================================================================
+
+# New Relic Infrastructure (NRI) Output
+[outputs.nri]
+enabled = true
+format_version = "4"              # NRI protocol version
+include_metadata = true           # Include collection metadata
+output_target = "stdout"          # "stdout", "file", or "http"
+
+# Optional file output for NRI
+# file_path = "/var/log/postgres-collector/nri-metrics.json"
+# file_rotation_mb = 100
+# file_retention_days = 7
+
+# OpenTelemetry Protocol (OTLP) Output
+[outputs.otlp]
+enabled = true
+endpoint = "${NEW_RELIC_OTLP_ENDPOINT}"  # Environment variable
+protocol = "http"                         # "http" or "grpc"
+compression = "gzip"                      # "none", "gzip", "deflate"
+timeout_secs = 30                        # Request timeout
+retry_attempts = 3                       # Number of retries
+retry_delay_secs = 5                     # Delay between retries
+
+# OTLP Headers
+[outputs.otlp.headers]
+"Api-Key" = "${NEW_RELIC_API_KEY}"
+"Content-Type" = "application/x-protobuf"
+
+# Optional: Custom OTLP attributes
+[outputs.otlp.resource_attributes]
+"service.name" = "postgres-collector"
+"service.version" = "1.0.0"
+"environment" = "${ENVIRONMENT}"
+"region" = "${NEW_RELIC_REGION}"
+
+# Custom JSON Output (example of additional adapter)
+[outputs.custom_json]
+enabled = false
+endpoint = "https://custom-metrics.example.com/api/v1/metrics"
+format = "custom"
+include_metadata = true
+max_slow_queries = 50
+
+[outputs.custom_json.headers]
+"Authorization" = "Bearer ${CUSTOM_API_TOKEN}"
+"X-Environment" = "${ENVIRONMENT}"
+
+# =============================================================================
+# PGBOUNCER INTEGRATION
+# =============================================================================
+[pgbouncer]
+enabled = true
+admin_connection_string = "${PGBOUNCER_ADMIN_CONNECTION}"
+collect_pool_stats = true
+collect_client_stats = true
+collect_server_stats = true
+
+# PgBouncer-specific thresholds
+max_client_connections = 1000
+max_server_connections = 100
+min_available_connections = 5
+max_wait_time_ms = 5000
+
+# =============================================================================
+# HEALTH AND MONITORING
+# =============================================================================
+[health]
+enabled = true
+bind_address = "0.0.0.0:8080"    # Health check endpoint address
+include_metrics = true            # Expose Prometheus metrics
+enable_pprof = false             # Enable profiling endpoints (debug only)
+
+# Health check intervals
+check_interval_secs = 30         # Internal health check frequency
+unhealthy_threshold = 3          # Failed checks before marking unhealthy
+recovery_threshold = 2          # Successful checks before marking healthy
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+[logging]
+level = "info"                   # "trace", "debug", "info", "warn", "error"
+format = "json"                  # "json" or "pretty"
+include_timestamps = true
+include_line_numbers = false     # Include source file locations (debug only)
+
+# Log output destinations
+outputs = ["stdout"]             # "stdout", "stderr", "file"
+file_path = "/var/log/postgres-collector/collector.log"
+file_rotation_mb = 100
+file_retention_days = 30
+
+# Component-specific log levels
+[logging.components]
+"postgres_collector::collection_engine" = "debug"
+"postgres_collector::adapters" = "info"
+"sqlx" = "warn"
+"hyper" = "warn"
+
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+[security]
+# Credential management
+mask_credentials_in_logs = true   # Mask passwords in log output
+require_ssl = true               # Require SSL for database connections
+validate_certificates = true     # Validate SSL certificates
+
+# Query security
+max_query_complexity = 1000      # Prevent complex queries (basic protection)
+disallow_ddl_statements = true   # Prevent DDL in collected queries
+sanitize_by_default = true      # Default sanitization for all queries
+
+# Network security
+allowed_hosts = [                # Restrict outbound connections
+    "otlp.nr-data.net",
+    "api.newrelic.com",
+    "custom-metrics.example.com"
+]
+
+# =============================================================================
+# PERFORMANCE TUNING
+# =============================================================================
+[performance]
+# Memory management
+max_memory_mb = 500              # Overall memory limit
+gc_threshold_mb = 400            # Trigger cleanup at this memory usage
+enable_memory_profiling = false  # Enable memory usage tracking
+
+# CPU optimization
+worker_threads = 4               # Number of async runtime threads (0 = auto)
+blocking_threads = 4             # Number of blocking operation threads
+enable_cpu_profiling = false     # Enable CPU usage tracking
+
+# Network optimization
+http_pool_max_connections = 50   # HTTP client connection pool
+http_pool_idle_timeout_secs = 30 # HTTP connection idle timeout
+tcp_keepalive_secs = 60         # TCP keepalive interval
+
+# =============================================================================
+# ALERTING CONFIGURATION
+# =============================================================================
+[alerting]
+enabled = true
+
+# Collection health alerts
+[alerting.collection_health]
+max_collection_duration_secs = 120    # Alert if collection takes too long
+max_consecutive_failures = 3          # Alert after N consecutive failures
+min_metrics_threshold = 10            # Alert if too few metrics collected
+
+# Database health alerts
+[alerting.database_health]
+max_connection_time_secs = 10         # Alert on slow connections
+max_query_time_secs = 30             # Alert on slow queries
+min_available_connections = 2         # Alert on connection pool exhaustion
+
+# Memory alerts
+[alerting.memory]
+max_memory_usage_mb = 400            # Alert on high memory usage
+max_memory_growth_rate_mb_per_min = 10 # Alert on memory leaks
+
+# =============================================================================
+# DEVELOPMENT AND DEBUGGING
+# =============================================================================
+[development]
+# Enable development features (should be false in production)
+enable_debug_endpoints = false       # Enable /debug endpoints
+enable_query_logging = false        # Log all executed queries
+enable_metrics_dump = false         # Dump metrics to file for debugging
+metrics_dump_path = "/tmp/metrics-dump.json"
+
+# Performance profiling
+enable_flamegraph = false           # Enable flamegraph generation
+flamegraph_frequency_secs = 300     # Flamegraph capture frequency
+
+# Testing support
+mock_database_responses = false      # Use mock responses (testing only)
+simulate_errors = false             # Simulate random errors (testing only)
+error_simulation_rate = 0.01        # Error rate for simulation (1%)
+
+# =============================================================================
+# REGIONAL CONFIGURATION
+# =============================================================================
+[regional]
+# New Relic region-specific settings
+region = "${NEW_RELIC_REGION}"      # "US", "EU", or custom
+
+# US Region endpoints
+[regional.us]
+otlp_endpoint = "https://otlp.nr-data.net:4318"
+api_endpoint = "https://api.newrelic.com"
+insights_endpoint = "https://insights-collector.newrelic.com"
+
+# EU Region endpoints
+[regional.eu]
+otlp_endpoint = "https://otlp.eu.nr-data.net:4318"
+api_endpoint = "https://api.eu.newrelic.com"
+insights_endpoint = "https://insights-collector.eu.newrelic.com"
+
+# =============================================================================
+# FEATURE FLAGS
+# =============================================================================
+[features]
+# Experimental features (may change or be removed)
+experimental_query_optimization = false    # Experimental query optimizations
+experimental_compression = false          # Experimental compression algorithms
+experimental_caching = false             # Experimental result caching
+experimental_parallel_export = false      # Experimental parallel output export
+
+# Beta features (more stable than experimental)
+beta_enhanced_metrics = false             # Enhanced metric collection
+beta_smart_sampling = false              # Intelligent metric sampling
+beta_adaptive_intervals = false          # Adaptive collection intervals
+
+# =============================================================================
+# CUSTOM EXTENSIONS
+# =============================================================================
+[extensions]
+# Custom extension configuration
+[extensions.custom_pool_monitor]
+enabled = false
+collection_interval_secs = 30
+track_client_connections = true
+track_server_connections = true
+
+[extensions.custom_pool_monitor.alert_thresholds]
+max_client_connections = 1000
+max_server_connections = 100
+min_available_connections = 5
+max_wait_time_ms = 5000
+
+# Example custom extension
+[extensions.query_analyzer]
+enabled = false
+analyze_query_patterns = true
+detect_performance_regressions = true
+baseline_collection_hours = 168  # 1 week baseline
+
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+
+# These sections allow environment-specific configuration overrides
+# Use with: --config-profile production
+
+[profiles.development]
+collection.interval_secs = 10
+logging.level = "debug"
+development.enable_debug_endpoints = true
+outputs.otlp.enabled = false
+
+[profiles.staging]
+collection.interval_secs = 30
+logging.level = "info"
+alerting.enabled = true
+security.require_ssl = true
+
+[profiles.production]
+collection.interval_secs = 60
+logging.level = "warn"
+logging.format = "json"
+security.require_ssl = true
+security.validate_certificates = true
+performance.max_memory_mb = 200
+features.experimental_query_optimization = false

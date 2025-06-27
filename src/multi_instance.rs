@@ -7,7 +7,7 @@ use tracing::{info, warn, error};
 
 use crate::collection_engine::UnifiedCollectionEngine;
 use crate::config::{CollectorConfig, InstanceConfig};
-use postgres_collector_core::{UnifiedMetrics, CollectorError};
+use postgres_collector_core::UnifiedMetrics;
 
 /// Manages multiple PostgreSQL instance collectors
 pub struct MultiInstanceManager {
@@ -57,7 +57,7 @@ impl MultiInstanceManager {
     }
     
     /// Create instance config from base configuration
-    fn create_instance_config_from_base(&self, name: &str) -> CollectorConfig {
+    fn create_instance_config_from_base(&self, _name: &str) -> CollectorConfig {
         let mut config = self.base_config.clone();
         // Clear instances to avoid recursion
         config.instances = None;

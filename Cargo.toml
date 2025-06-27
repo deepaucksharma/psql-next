@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["PostgreSQL Unified Collector Team"]
 description = "Unified PostgreSQL collector supporting both New Relic Infrastructure and OpenTelemetry"
 license = "Apache-2.0"
-repository = "https://github.com/newrelic/postgres-unified-collector"
+repository = "https://github.com/YOUR_ORG/postgres-unified-collector"
 
 [workspace]
 members = [

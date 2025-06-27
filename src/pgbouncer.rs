@@ -1,6 +1,5 @@
 use anyhow::Result;
-use async_trait::async_trait;
-use sqlx::{postgres::PgPoolOptions, PgConnection, PgPool, Row};
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::time::Duration;
 use tracing::{info, warn, error};
 use serde::{Deserialize, Serialize};

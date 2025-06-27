@@ -11,9 +11,9 @@ keywords:
   - opentelemetry
   - metrics
   - observability
-home: https://github.com/newrelic/postgres-unified-collector
+home: https://github.com/YOUR_ORG/postgres-unified-collector
 sources:
-  - https://github.com/newrelic/postgres-unified-collector
+  - https://github.com/YOUR_ORG/postgres-unified-collector
 maintainers:
   - name: PostgreSQL Unified Collector Team
     email: support@newrelic.com
