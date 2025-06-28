@@ -1,46 +1,35 @@
-#!/bin/sh
+#!/bin/bash
 # Database Intelligence MVP - Docker Entrypoint Script
 # Handles initialization and safety checks before starting collector
 
 set -euo pipefail
+
+# Get script directory and source common functions
+# Note: In Docker, we'll copy the common.sh to /usr/local/lib/
+if [ -f "/usr/local/lib/common.sh" ]; then
+    source "/usr/local/lib/common.sh"
+else
+    # Fallback if common.sh not available in container
+    log() { echo "[$(date '+%H:%M:%S')] $1" >&2; }
+    log_info() { echo "[INFO] $1" >&2; }
+    success() { echo "[SUCCESS] $1" >&2; }
+    warning() { echo "[WARNING] $1" >&2; }
+    error() { echo "[ERROR] $1" >&2; }
+fi
 
 # Configuration
 OTEL_CONFIG_PATH="/etc/otel/config.yaml"
 STATE_DIR="/var/lib/otel/storage"
 LOG_DIR="/var/log/otel"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Logging functions
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1" >&2
-}
-
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" >&2
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1" >&2
-}
-
 # Check if running as correct user
 check_user() {
     current_uid=$(id -u)
     if [ "$current_uid" -ne 10001 ]; then
-        log_error "Container must run as user 10001, currently running as $current_uid"
+        error "Container must run as user 10001, currently running as $current_uid"
         exit 1
     fi
-    log_success "Running as correct user (10001)"
+    success "Running as correct user (10001)"
 }
 
 # Validate required environment variables
@@ -52,28 +41,28 @@ validate_environment() {
     
     for var in $required_vars; do
         if [ -z "${!var:-}" ]; then
-            log_error "Required environment variable $var is not set"
+            error "Required environment variable $var is not set"
             exit 1
         fi
     done
     
     # Validate New Relic license key format
     if ! echo "$NEW_RELIC_LICENSE_KEY" | grep -q "^NRAL-"; then
-        log_warning "New Relic license key doesn't start with NRAL-. Please verify."
+        warning "New Relic license key doesn't start with NRAL-. Please verify."
     fi
     
     # Validate PostgreSQL DSN format
     if ! echo "$PG_REPLICA_DSN" | grep -q "postgres://"; then
-        log_error "PostgreSQL DSN must start with postgres://"
+        error "PostgreSQL DSN must start with postgres://"
         exit 1
     fi
     
     # Check for replica indicators in DSN
     if ! echo "$PG_REPLICA_DSN" | grep -E "(replica|readonly|read-only)" > /dev/null; then
-        log_warning "PostgreSQL DSN doesn't contain 'replica' or 'readonly'. Ensure you're connecting to a read replica!"
+        warning "PostgreSQL DSN doesn't contain 'replica' or 'readonly'. Ensure you're connecting to a read replica!"
     fi
     
-    log_success "Environment variables validated"
+    success "Environment variables validated"
 }
 
 # Test database connectivity
@@ -83,13 +72,13 @@ test_database_connectivity() {
     # Test PostgreSQL connection
     if command -v psql > /dev/null; then
         if psql "$PG_REPLICA_DSN" -c "SELECT 1;" > /dev/null 2>&1; then
-            log_success "PostgreSQL connection successful"
+            success "PostgreSQL connection successful"
         else
-            log_error "Failed to connect to PostgreSQL. Check your PG_REPLICA_DSN"
+            error "Failed to connect to PostgreSQL. Check your PG_REPLICA_DSN"
             return 1
         fi
     else
-        log_warning "psql not available, skipping PostgreSQL connection test"
+        warning "psql not available, skipping PostgreSQL connection test"
     fi
     
     # Test MySQL connection if configured

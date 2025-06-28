@@ -57,13 +57,20 @@ Trace ID      Lost Here            Lost Here    Not Propagated
 
 **Current Capability**: 
 - Query digest metadata only
-- No execution plan details
-- No index usage information
+- Performance schema statistics
+- Row examination metrics
+- No actual execution plan details
 
 **Workaround**:
 - Use slow query log with full logging
+- Performance schema events_statements_history
 - Periodic manual EXPLAIN during maintenance
 - Third-party tools (pt-query-digest)
+
+**Future Enhancement**: 
+- Safe stored procedure approach (Phase 2)
+- MySQL 8.0+ specific optimizations
+- Query rewrite suggestions
 
 ## Functional Limitations
 

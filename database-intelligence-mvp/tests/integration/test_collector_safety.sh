@@ -4,6 +4,13 @@
 
 set -euo pipefail
 
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+
+# Source common functions
+source "${PROJECT_ROOT}/scripts/lib/common.sh"
+
 # Configuration
 TEST_DB_HOST="${TEST_DB_HOST:-localhost}"
 TEST_DB_PORT="${TEST_DB_PORT:-5432}"
@@ -18,11 +25,7 @@ TEST_COUNT=0
 PASS_COUNT=0
 FAIL_COUNT=0
 
-# Helper functions
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
-
+# Test helper functions
 test_start() {
     TEST_COUNT=$((TEST_COUNT + 1))
     log "TEST $TEST_COUNT: $1"
@@ -30,36 +33,42 @@ test_start() {
 
 test_pass() {
     PASS_COUNT=$((PASS_COUNT + 1))
-    log "✓ PASS: $1"
+    success "PASS: $1"
 }
 
 test_fail() {
     FAIL_COUNT=$((FAIL_COUNT + 1))
-    log "✗ FAIL: $1"
+    error "FAIL: $1"
 }
 
 check_prerequisites() {
-    log "Checking prerequisites..."
+    log "Checking test prerequisites..."
+    
+    # Check required commands
+    if ! check_required_commands "psql" "curl"; then
+        exit 1
+    fi
     
     # Check if PostgreSQL is accessible
-    if ! psql "postgresql://$TEST_DB_USER:$TEST_DB_PASS@$TEST_DB_HOST:$TEST_DB_PORT/$TEST_DB_NAME" -c "SELECT 1;" >/dev/null 2>&1; then
-        log "ERROR: Cannot connect to test database"
+    local test_dsn="postgresql://$TEST_DB_USER:$TEST_DB_PASS@$TEST_DB_HOST:$TEST_DB_PORT/$TEST_DB_NAME"
+    if ! test_postgresql_connection "$test_dsn"; then
+        error "Cannot connect to test database"
         exit 1
     fi
     
     # Check if pg_stat_statements is available
-    if ! psql "postgresql://$TEST_DB_USER:$TEST_DB_PASS@$TEST_DB_HOST:$TEST_DB_PORT/$TEST_DB_NAME" -c "SELECT * FROM pg_stat_statements LIMIT 1;" >/dev/null 2>&1; then
-        log "ERROR: pg_stat_statements not available"
+    if ! check_postgresql_prerequisites "$test_dsn"; then
+        error "PostgreSQL prerequisites not met"
         exit 1
     fi
     
     # Check if collector is running
-    if ! curl -f "$COLLECTOR_HEALTH_URL" >/dev/null 2>&1; then
-        log "ERROR: Collector health check failed"
+    if ! wait_for_service "$COLLECTOR_HEALTH_URL" 5; then
+        error "Collector health check failed"
         exit 1
     fi
     
-    log "Prerequisites OK"
+    success "Prerequisites OK"
 }
 
 test_query_timeout() {

@@ -1,0 +1,427 @@
+# Database Intelligence MVP - High Availability Deployment
+# FIXED: Addresses single instance limitation with leader election
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: db-intelligence
+  labels:
+    name: db-intelligence
+
+---
+# ConfigMap for HA configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-intelligence-ha-config
+  namespace: db-intelligence
+data:
+  config.yaml: |
+    # HA-enabled collector configuration
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      
+      # Leader election for HA
+      leader_election:
+        lease_name: db-intelligence-leader
+        lease_namespace: db-intelligence
+        lease_duration: 30s
+        renew_deadline: 20s
+        retry_period: 5s
+        
+      memory_ballast:
+        size_mib: 128
+
+    receivers:
+      # PostgreSQL with leader-only collection
+      sqlquery/postgresql_plans:
+        driver: postgres
+        dsn: "${env:PG_REPLICA_DSN}"
+        collection_interval: 300s
+        timeout: 10s
+        
+        # Only leader should collect
+        enabled_when_leader: true
+        
+        max_open_connections: 2
+        max_idle_connections: 1
+        connection_max_lifetime: 300s
+        
+        queries:
+          - sql: |
+              -- Safety timeouts
+              SET LOCAL statement_timeout = '3000ms';
+              SET LOCAL lock_timeout = '100ms';
+              
+              -- Get worst query metadata (no custom functions)
+              WITH worst_query AS (
+                SELECT 
+                  queryid,
+                  query,
+                  mean_exec_time,
+                  calls,
+                  total_exec_time,
+                  CASE 
+                    WHEN length(query) > 1000 THEN 
+                      left(query, 1000) || '...[TRUNCATED]'
+                    ELSE query 
+                  END as safe_query,
+                  (mean_exec_time * calls) as impact_score
+                FROM pg_stat_statements
+                WHERE 
+                  mean_exec_time > 50
+                  AND calls > 5
+                  AND query NOT LIKE '%pg_%'
+                  AND query NOT LIKE '%EXPLAIN%'
+                  AND query NOT LIKE '%SET LOCAL%'
+                  AND length(query) > 20
+                  AND length(query) < 5000
+                ORDER BY impact_score DESC
+                LIMIT 1
+              )
+              SELECT 
+                queryid::text as query_id,
+                safe_query as query_text,
+                round(mean_exec_time::numeric, 2) as avg_duration_ms,
+                calls as execution_count,
+                round(total_exec_time::numeric, 2) as total_duration_ms,
+                round(impact_score::numeric, 2) as impact_score,
+                json_build_object(
+                  'system', 'postgresql',
+                  'collection_time', now()::text,
+                  'database', current_database(),
+                  'collector_instance', '${env:HOSTNAME}',
+                  'leader_status', 'active',
+                  'plan_available', false,
+                  'approach', 'metadata_only'
+                ) as plan_metadata
+              FROM worst_query;
+
+    processors:
+      memory_limiter:
+        check_interval: 2s
+        limit_mib: 1024
+        spike_limit_mib: 256
+
+      # Enhanced PII sanitization
+      transform/sanitize_pii:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - replace_all_patterns(body, "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "[EMAIL]")
+              - replace_all_patterns(body, "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[SSN]")
+              - replace_all_patterns(attributes["query_text"], "'[^']*'", "'[REDACTED]'")
+
+      # Add instance metadata
+      transform/add_metadata:
+        log_statements:
+          - context: log
+            statements:
+              - set(attributes["collector.instance"], "${env:HOSTNAME}")
+              - set(attributes["collector.namespace"], "${env:POD_NAMESPACE}")
+              - set(attributes["collector.version"], "mvp-1.0-ha")
+              - set(attributes["deployment.type"], "kubernetes-ha")
+
+      # Stateless sampling for HA
+      probabilistic_sampler:
+        hash_seed: 22
+        sampling_percentage: 25
+
+      batch:
+        timeout: 30s
+        send_batch_size: 50
+        send_batch_max_size: 100
+
+    exporters:
+      otlp/newrelic:
+        endpoint: "${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}"
+        headers:
+          api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+        compression: gzip
+        timeout: 30s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 120s
+        sending_queue:
+          enabled: true
+          num_consumers: 2
+          queue_size: 256
+
+    service:
+      extensions: [health_check, leader_election, memory_ballast]
+      
+      pipelines:
+        logs/database_intelligence:
+          receivers: [sqlquery/postgresql_plans]
+          processors: [memory_limiter, transform/sanitize_pii, transform/add_metadata, probabilistic_sampler, batch]
+          exporters: [otlp/newrelic]
+
+      telemetry:
+        logs:
+          level: info
+          encoding: json
+        metrics:
+          level: detailed
+          address: 0.0.0.0:8888
+
+---
+# ServiceAccount for leader election
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: db-intelligence-collector
+  namespace: db-intelligence
+
+---
+# ClusterRole for leader election
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: db-intelligence-leader-election
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "create", "update", "patch", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: db-intelligence-leader-election
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: db-intelligence-leader-election
+subjects:
+- kind: ServiceAccount
+  name: db-intelligence-collector
+  namespace: db-intelligence
+
+---
+# HA Deployment (instead of StatefulSet)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-intelligence-collector
+  namespace: db-intelligence
+  labels:
+    app: db-intelligence
+    component: collector
+spec:
+  replicas: 3  # HA: Multiple replicas with leader election
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+      
+  selector:
+    matchLabels:
+      app: db-intelligence
+      component: collector
+      
+  template:
+    metadata:
+      labels:
+        app: db-intelligence
+        component: collector
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8888"
+        prometheus.io/path: "/metrics"
+        
+    spec:
+      serviceAccountName: db-intelligence-collector
+      
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        
+      # Anti-affinity for HA
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: db-intelligence
+                component: collector
+            topologyKey: kubernetes.io/hostname
+            
+      containers:
+      - name: collector
+        image: otel/opentelemetry-collector-contrib:0.88.0
+        args: ["--config=/etc/otel/config.yaml"]
+        
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 300m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+            
+        env:
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+              
+        envFrom:
+        - secretRef:
+            name: db-intelligence-secrets
+            
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+          
+        ports:
+        - name: health
+          containerPort: 13133
+        - name: metrics
+          containerPort: 8888
+          
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+          
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          
+      volumes:
+      - name: config
+        configMap:
+          name: db-intelligence-ha-config
+      - name: tmp
+        emptyDir: {}
+
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-intelligence-service
+  namespace: db-intelligence
+  labels:
+    app: db-intelligence
+spec:
+  selector:
+    app: db-intelligence
+    component: collector
+  ports:
+  - name: health
+    port: 13133
+    targetPort: 13133
+  - name: metrics
+    port: 8888
+    targetPort: 8888
+
+---
+# ServiceMonitor for Prometheus
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: db-intelligence-metrics
+  namespace: db-intelligence
+  labels:
+    app: db-intelligence
+spec:
+  selector:
+    matchLabels:
+      app: db-intelligence
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+
+---
+# Secret for credentials (to be filled by user)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-intelligence-secrets
+  namespace: db-intelligence
+type: Opaque
+stringData:
+  PG_REPLICA_DSN: "postgres://user:pass@host:5432/db?sslmode=require"
+  MYSQL_READONLY_DSN: "user:pass@tcp(host:3306)/db?tls=true"
+  NEW_RELIC_LICENSE_KEY: "your-license-key"
+  OTLP_ENDPOINT: "https://otlp.nr-data.net:4317"
+
+---
+# NetworkPolicy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-intelligence-network-policy
+  namespace: db-intelligence
+spec:
+  podSelector:
+    matchLabels:
+      app: db-intelligence
+  policyTypes:
+  - Egress
+  - Ingress
+  
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 13133
+    - protocol: TCP
+      port: 8888
+      
+  egress:
+  # Database access
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 3306
+  # New Relic access
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 4317
+  # DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53

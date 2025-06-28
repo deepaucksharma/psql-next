@@ -4,64 +4,24 @@
 
 set -euo pipefail
 
-# Configuration
+# Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions
+source "${SCRIPT_DIR}/scripts/lib/common.sh"
+
+# Configuration
 INSTALL_DIR="${INSTALL_DIR:-/opt/db-intelligence}"
 CONFIG_FILE="${SCRIPT_DIR}/config/collector-improved.yaml"
 COMPOSE_FILE="${SCRIPT_DIR}/deploy/docker/docker-compose.yaml"
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Helper functions
-log() {
-    echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} $1"
-}
-
-success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
-
-warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
-}
-
-error() {
-    echo -e "${RED}✗${NC} $1"
-}
 
 # Check prerequisites
 check_prerequisites() {
     log "Checking prerequisites..."
     
-    local missing_deps=()
-    
-    # Check Docker
-    if ! command -v docker &> /dev/null; then
-        missing_deps+=("docker")
-    fi
-    
-    # Check Docker Compose
-    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
-        missing_deps+=("docker-compose")
-    fi
-    
-    # Check curl
-    if ! command -v curl &> /dev/null; then
-        missing_deps+=("curl")
-    fi
-    
-    # Check psql (optional but recommended)
-    if ! command -v psql &> /dev/null; then
-        warning "psql not found - database testing will be limited"
-    fi
-    
-    if [ ${#missing_deps[@]} -ne 0 ]; then
-        error "Missing dependencies: ${missing_deps[*]}"
+    # Check required tools
+    local required_tools=("docker" "curl")
+    if ! check_required_commands "${required_tools[@]}"; then
         echo ""
         echo "Please install the missing dependencies and run this script again."
         echo ""
@@ -75,6 +35,18 @@ check_prerequisites() {
         exit 1
     fi
     
+    # Check Docker Compose separately
+    if ! command_exists docker-compose && ! docker compose version &> /dev/null; then
+        error "Docker Compose not found"
+        echo "Please install docker-compose or ensure Docker includes compose plugin"
+        exit 1
+    fi
+    
+    # Check optional tools
+    if ! command_exists psql; then
+        warning "psql not found - database testing will be limited"
+    fi
+    
     success "All prerequisites satisfied"
 }
 
@@ -82,121 +54,39 @@ check_prerequisites() {
 configure_environment() {
     log "Setting up environment configuration..."
     
-    local env_file="${SCRIPT_DIR}/.env"
-    
-    # Check if .env already exists
-    if [ -f "$env_file" ]; then
-        read -p "Configuration file exists. Overwrite? (y/N): " -r
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log "Using existing configuration"
-            return 0
-        fi
-    fi
-    
-    echo "# Database Intelligence MVP Configuration" > "$env_file"
-    echo "# Generated on $(date)" >> "$env_file"
-    echo "" >> "$env_file"
-    
-    # New Relic configuration
-    echo ""
-    echo "🔧 New Relic Configuration"
-    echo "=========================="
-    read -p "New Relic License Key: " -r nr_license_key
-    if [ -z "$nr_license_key" ]; then
-        error "New Relic License Key is required"
+    # Use the init-env.sh script for configuration
+    if [ -x "${SCRIPT_DIR}/scripts/init-env.sh" ]; then
+        "${SCRIPT_DIR}/scripts/init-env.sh" setup
+    else
+        error "init-env.sh script not found or not executable"
         exit 1
     fi
-    echo "NEW_RELIC_LICENSE_KEY=${nr_license_key}" >> "$env_file"
-    
-    read -p "New Relic OTLP Endpoint (default: https://otlp.nr-data.net:4317): " -r nr_endpoint
-    nr_endpoint="${nr_endpoint:-https://otlp.nr-data.net:4317}"
-    echo "OTLP_ENDPOINT=${nr_endpoint}" >> "$env_file"
-    
-    # Database configuration
-    echo ""
-    echo "🗄️ Database Configuration"
-    echo "========================="
-    
-    # PostgreSQL
-    read -p "Configure PostgreSQL? (Y/n): " -r
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        read -p "PostgreSQL Host (default: localhost): " -r pg_host
-        pg_host="${pg_host:-localhost}"
-        
-        read -p "PostgreSQL Port (default: 5432): " -r pg_port
-        pg_port="${pg_port:-5432}"
-        
-        read -p "PostgreSQL Database: " -r pg_db
-        read -p "PostgreSQL User: " -r pg_user
-        read -p "PostgreSQL Password: " -s -r pg_pass
-        echo ""
-        
-        echo "PG_REPLICA_DSN=postgres://${pg_user}:${pg_pass}@${pg_host}:${pg_port}/${pg_db}?sslmode=prefer" >> "$env_file"
-    fi
-    
-    # MySQL
-    echo ""
-    read -p "Configure MySQL? (y/N): " -r
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        read -p "MySQL Host (default: localhost): " -r mysql_host
-        mysql_host="${mysql_host:-localhost}"
-        
-        read -p "MySQL Port (default: 3306): " -r mysql_port
-        mysql_port="${mysql_port:-3306}"
-        
-        read -p "MySQL Database: " -r mysql_db
-        read -p "MySQL User: " -r mysql_user
-        read -p "MySQL Password: " -s -r mysql_pass
-        echo ""
-        
-        echo "MYSQL_READONLY_DSN=${mysql_user}:${mysql_pass}@tcp(${mysql_host}:${mysql_port})/${mysql_db}?tls=true" >> "$env_file"
-    fi
-    
-    success "Configuration saved to $env_file"
 }
 
 # Database setup validation
 validate_database_setup() {
     log "Validating database setup..."
     
-    local env_file="${SCRIPT_DIR}/.env"
-    if [ ! -f "$env_file" ]; then
-        error "No configuration found. Run configure first."
+    # Load environment
+    if ! load_env_file "${SCRIPT_DIR}/.env"; then
+        error "Failed to load environment"
         return 1
     fi
     
-    source "$env_file"
-    
-    # Test PostgreSQL if configured
-    if [ -n "${PG_REPLICA_DSN:-}" ]; then
-        log "Testing PostgreSQL connection..."
-        
-        if command -v psql &> /dev/null; then
-            if psql "$PG_REPLICA_DSN" -c "SELECT 1;" &> /dev/null; then
-                success "PostgreSQL connection OK"
-                
-                # Check pg_stat_statements
-                if psql "$PG_REPLICA_DSN" -c "SELECT * FROM pg_stat_statements LIMIT 1;" &> /dev/null; then
-                    success "pg_stat_statements extension available"
-                else
-                    warning "pg_stat_statements extension not found"
-                    echo "         To enable it, run as superuser:"
-                    echo "         CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
-                fi
-            else
-                warning "PostgreSQL connection failed"
-                echo "         Please check your connection parameters"
-            fi
-        else
-            warning "psql not available - cannot test PostgreSQL connection"
+    # Use the validate-all.sh script if available
+    if [ -x "${SCRIPT_DIR}/scripts/validate-all.sh" ]; then
+        "${SCRIPT_DIR}/scripts/validate-all.sh" databases
+    else
+        # Fallback to direct testing
+        if [ -n "${PG_REPLICA_DSN:-}" ]; then
+            test_postgresql_connection
+            check_postgresql_prerequisites
         fi
-    fi
-    
-    # Test MySQL if configured
-    if [ -n "${MYSQL_READONLY_DSN:-}" ]; then
-        log "Testing MySQL connection..."
-        # Add MySQL testing here if mysql client is available
-        warning "MySQL validation not implemented in quickstart"
+        
+        if [ -n "${MYSQL_READONLY_DSN:-}" ]; then
+            test_mysql_connection
+            check_mysql_prerequisites
+        fi
     fi
 }
 
@@ -218,18 +108,13 @@ start_services() {
     docker-compose up -d db-intelligence-primary
     
     # Wait for startup
-    log "Waiting for collector to start..."
-    local retries=30
-    while [ $retries -gt 0 ]; do
-        if curl -f http://localhost:13133 &> /dev/null; then
-            success "Collector is running"
-            break
-        fi
-        
-        echo -n "."
-        sleep 2
-        retries=$((retries - 1))
-    done
+    if wait_for_service "http://localhost:13133" 60; then
+        success "Collector is running"
+    else
+        error "Collector failed to start"
+        echo "Check logs with: docker logs db-intel-primary"
+        return 1
+    fi
     
     if [ $retries -eq 0 ]; then
         error "Collector failed to start"

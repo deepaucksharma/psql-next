@@ -101,6 +101,11 @@ func newAdaptiveSampler(cfg *Config, logger *zap.Logger, consumer consumer.Logs)
 	return processor, nil
 }
 
+// Capabilities returns the capabilities of the processor
+func (p *adaptiveSampler) Capabilities() consumer.Capabilities {
+	return consumer.Capabilities{MutatesData: false}
+}
+
 // Start starts the processor
 func (p *adaptiveSampler) Start(ctx context.Context, host component.Host) error {
 	p.logger.Info("Starting adaptive sampler processor")

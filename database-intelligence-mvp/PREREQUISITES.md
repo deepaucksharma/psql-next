@@ -50,27 +50,15 @@
    auto_explain.log_nested_statements = true
    ```
 
-2. **Custom Plan Function** (if not using auto_explain)
+2. **Custom Plan Function** (DEPRECATED - not required for MVP)
    ```sql
-   -- Create safe EXPLAIN wrapper
-   CREATE OR REPLACE FUNCTION pg_get_json_plan(query_text text)
-   RETURNS json AS $$
-   DECLARE
-     plan json;
-   BEGIN
-     -- Safety timeout at function level
-     SET LOCAL statement_timeout = '2s';
-     
-     EXECUTE 'EXPLAIN (FORMAT JSON, BUFFERS true) ' || query_text INTO plan;
-     RETURN plan;
-   EXCEPTION
-     WHEN OTHERS THEN
-       RETURN json_build_object('error', SQLERRM);
-   END;
-   $$ LANGUAGE plpgsql SECURITY DEFINER;
-
-   -- Grant execution
-   GRANT EXECUTE ON FUNCTION pg_get_json_plan(text) TO newrelic_monitor;
+   -- DEPRECATED: Custom function no longer required
+   -- The MVP now uses metadata-only collection for safety
+   -- Direct EXPLAIN queries are avoided to prevent
+   -- privilege escalation and database impact
+   
+   -- If you previously created this function, you can remove it:
+   -- DROP FUNCTION IF EXISTS pg_get_json_plan(text);
    ```
 
 ### Validation Checklist

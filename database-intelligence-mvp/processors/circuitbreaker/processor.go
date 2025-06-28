@@ -37,68 +37,6 @@ func (s State) String() string {
 	}
 }
 
-// Config represents the circuit breaker processor configuration
-type Config struct {
-	// FailureThreshold is the number of failures that will open the circuit
-	FailureThreshold int `mapstructure:"failure_threshold"`
-
-	// SuccessThreshold is the number of successes needed to close the circuit from half-open
-	SuccessThreshold int `mapstructure:"success_threshold"`
-
-	// OpenStateTimeout is how long to wait before transitioning from open to half-open
-	OpenStateTimeout time.Duration `mapstructure:"open_state_timeout"`
-
-	// HealthCheckInterval is how often to check system health
-	HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`
-
-	// MaxConcurrentRequests limits concurrent processing
-	MaxConcurrentRequests int `mapstructure:"max_concurrent_requests"`
-
-	// MemoryThresholdMB opens circuit if memory usage exceeds this
-	MemoryThresholdMB int `mapstructure:"memory_threshold_mb"`
-
-	// CPUThresholdPercent opens circuit if CPU usage exceeds this
-	CPUThresholdPercent float64 `mapstructure:"cpu_threshold_percent"`
-
-	// EnableAdaptiveTimeout enables dynamic timeout adjustment
-	EnableAdaptiveTimeout bool `mapstructure:"enable_adaptive_timeout"`
-
-	// BaseTimeout is the base timeout for processing
-	BaseTimeout time.Duration `mapstructure:"base_timeout"`
-
-	// MaxTimeout is the maximum timeout allowed
-	MaxTimeout time.Duration `mapstructure:"max_timeout"`
-}
-
-// Validate checks the processor configuration
-func (cfg *Config) Validate() error {
-	if cfg.FailureThreshold <= 0 {
-		return fmt.Errorf("failure_threshold must be positive, got %d", cfg.FailureThreshold)
-	}
-
-	if cfg.SuccessThreshold <= 0 {
-		return fmt.Errorf("success_threshold must be positive, got %d", cfg.SuccessThreshold)
-	}
-
-	if cfg.OpenStateTimeout <= 0 {
-		return fmt.Errorf("open_state_timeout must be positive, got %v", cfg.OpenStateTimeout)
-	}
-
-	if cfg.MaxConcurrentRequests <= 0 {
-		return fmt.Errorf("max_concurrent_requests must be positive, got %d", cfg.MaxConcurrentRequests)
-	}
-
-	if cfg.BaseTimeout <= 0 {
-		return fmt.Errorf("base_timeout must be positive, got %v", cfg.BaseTimeout)
-	}
-
-	if cfg.MaxTimeout < cfg.BaseTimeout {
-		return fmt.Errorf("max_timeout must be >= base_timeout")
-	}
-
-	return nil
-}
-
 // circuitBreakerProcessor implements the circuit breaker pattern for database safety
 type circuitBreakerProcessor struct {
 	config   *Config
@@ -120,8 +58,8 @@ type circuitBreakerProcessor struct {
 	timeoutMutex   sync.RWMutex
 
 	// Metrics
-	totalRequests   int64
-	failedRequests  int64
+	totalRequests    int64
+	failedRequests   int64
 	rejectedRequests int64
 
 	// Shutdown
@@ -140,6 +78,11 @@ func newCircuitBreakerProcessor(cfg *Config, logger *zap.Logger, consumer consum
 		currentTimeout: cfg.BaseTimeout,
 		shutdownChan:   make(chan struct{}),
 	}
+}
+
+// Capabilities returns the capabilities of the processor
+func (p *circuitBreakerProcessor) Capabilities() consumer.Capabilities {
+	return consumer.Capabilities{MutatesData: false}
 }
 
 // Start starts the processor
@@ -397,20 +340,4 @@ func (p *circuitBreakerProcessor) getCPUUsagePercent() float64 {
 	// This is a simplified implementation
 	// In production, you might want to use more sophisticated CPU monitoring
 	return 0.0 // Placeholder
-}
-
-// createDefaultConfig creates a default configuration
-func createDefaultConfig() component.Config {
-	return &Config{
-		FailureThreshold:        5,
-		SuccessThreshold:        3,
-		OpenStateTimeout:        30 * time.Second,
-		HealthCheckInterval:     10 * time.Second,
-		MaxConcurrentRequests:   10,
-		MemoryThresholdMB:       800, // 800MB
-		CPUThresholdPercent:     80.0, // 80%
-		EnableAdaptiveTimeout:   true,
-		BaseTimeout:             5 * time.Second,
-		MaxTimeout:              30 * time.Second,
-	}
 }

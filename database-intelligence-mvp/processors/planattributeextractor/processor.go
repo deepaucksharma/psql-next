@@ -9,16 +9,13 @@ import (
 	"fmt"
 	"hash"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
-	"go.opentelemetry.io/collector/processor"
 	"go.uber.org/zap"
 )
 
@@ -41,6 +38,11 @@ func newPlanAttributeExtractor(cfg *Config, logger *zap.Logger, consumer consume
 		logger:   logger,
 		consumer: consumer,
 	}
+}
+
+// Capabilities returns the capabilities of the processor
+func (p *planAttributeExtractor) Capabilities() consumer.Capabilities {
+	return consumer.Capabilities{MutatesData: true}
 }
 
 // Start starts the processor

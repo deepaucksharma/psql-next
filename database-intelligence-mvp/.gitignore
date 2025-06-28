@@ -1,0 +1,79 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Secrets
+*.key
+*.pem
+*.crt
+secrets/
+credentials/
+
+# State and data
+/var/lib/otel/storage/
+/var/log/
+*.log
+*.db
+*.sqlite
+
+# Test outputs
+test-results/
+coverage/
+*.test
+*.out
+
+# Build artifacts
+bin/
+build/
+dist/
+*.tar.gz
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+.project
+.settings/
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.cache
+tmp/
+temp/
+
+# Collector specific
+collector-storage/
+sampling_state/
+zpages.debug
+
+# Documentation build
+docs/_build/
+site/
+
+# Monitoring data
+prometheus-data/
+grafana-data/
+
+# But keep these
+!.gitignore
+!.env.example
+!.gitkeep
