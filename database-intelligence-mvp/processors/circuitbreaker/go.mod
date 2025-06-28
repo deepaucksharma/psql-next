@@ -1,6 +1,8 @@
 module github.com/newrelic/database-intelligence-mvp/processors/circuitbreaker
 
-go 1.21
+go 1.23.0
+
+toolchain go1.24.3
 
 require (
 	go.opentelemetry.io/collector/component v1.34.0
