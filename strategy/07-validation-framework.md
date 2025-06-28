@@ -298,6 +298,63 @@ class ValidationSuite:
             
             assert legacy_fired == otel_fired, \
                 f"Alert {alert_name} firing mismatch: legacy={legacy_fired}, otel={otel_fired}"
+    
+    @pytest.mark.asyncio
+    async def test_postgresql_specific_metrics(self):
+        """Test PostgreSQL-specific metric requirements"""
+        
+        # Test replication metrics on primary
+        primary_query = "pg_stat_replication_count"
+        result = self.otel_prom.custom_query(primary_query)
+        if result and float(result[0]['value'][1]) > 0:
+            # Verify lag metrics exist
+            lag_query = "postgresql_replication_lag_bytes"
+            lag_result = self.otel_prom.custom_query(lag_query)
+            assert len(lag_result) > 0, "Replication lag metrics missing"
+        
+        # Test WAL metrics
+        wal_query = "postgresql_wal_bytes_generated"
+        wal_result = self.otel_prom.custom_query(wal_query)
+        assert len(wal_result) > 0, "WAL generation metrics missing"
+        
+        # Test vacuum metrics
+        vacuum_query = "postgresql_vacuum_dead_tuples"
+        vacuum_result = self.otel_prom.custom_query(vacuum_query)
+        assert len(vacuum_result) > 0, "Vacuum metrics missing"
+        
+        # Test connection pool metrics
+        conn_query = "sum by (database) (postgresql_database_connections)"
+        conn_result = self.otel_prom.custom_query(conn_query)
+        assert len(conn_result) > 0, "Connection metrics missing"
+    
+    @pytest.mark.asyncio
+    async def test_database_query_performance(self):
+        """Test that monitoring queries don't impact database performance"""
+        
+        # Measure baseline query performance
+        baseline_query = "SELECT 1"
+        baseline_times = []
+        
+        for _ in range(10):
+            start = time.time()
+            self.postgres_conn.execute(baseline_query)
+            baseline_times.append(time.time() - start)
+        
+        baseline_avg = sum(baseline_times) / len(baseline_times)
+        
+        # Enable monitoring and measure again
+        monitoring_times = []
+        
+        for _ in range(10):
+            start = time.time()
+            self.postgres_conn.execute(baseline_query)
+            monitoring_times.append(time.time() - start)
+        
+        monitoring_avg = sum(monitoring_times) / len(monitoring_times)
+        
+        # Performance impact should be minimal
+        impact_percent = ((monitoring_avg - baseline_avg) / baseline_avg) * 100
+        assert impact_percent < 5, f"Monitoring impact {impact_percent}% exceeds 5% threshold"
 ```
 
 ### 3. Validation Configuration

@@ -79,6 +79,44 @@ network_topology:
         path: /metrics-bucket
 ```
 
+## PostgreSQL Monitoring User Setup
+
+### Required Permissions
+
+```sql
+-- Create dedicated monitoring user
+CREATE USER otel_monitor WITH PASSWORD 'CHANGE_ME_USE_SECRETS_MANAGER';
+
+-- Grant necessary permissions for monitoring
+GRANT pg_monitor TO otel_monitor;
+GRANT CONNECT ON DATABASE postgres TO otel_monitor;
+
+-- For each database to monitor:
+\c your_database
+GRANT CONNECT ON DATABASE your_database TO otel_monitor;
+GRANT USAGE ON SCHEMA pg_catalog TO otel_monitor;
+GRANT SELECT ON ALL TABLES IN SCHEMA pg_catalog TO otel_monitor;
+
+-- For custom monitoring queries
+GRANT SELECT ON pg_stat_statements TO otel_monitor;
+GRANT SELECT ON pg_stat_kcache TO otel_monitor;
+
+-- For replication monitoring
+GRANT SELECT ON pg_stat_replication TO otel_monitor;
+
+-- Connection limits to prevent exhaustion
+ALTER USER otel_monitor CONNECTION LIMIT 10;
+```
+
+### pg_hba.conf Configuration
+
+```
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+host    all            otel_monitor    10.0.0.0/8              md5
+host    all            otel_monitor    172.16.0.0/12           md5
+hostssl all            otel_monitor    0.0.0.0/0               cert
+```
+
 ## Collector Configuration
 
 ### Base Configuration
@@ -138,6 +176,12 @@ processors:
         action: insert
       - key: db.cluster
         value: ${env:CLUSTER_NAME}
+        action: insert
+      - key: db.version
+        from_attribute: postgresql.version
+        action: insert
+      - key: db.role
+        value: ${env:DB_ROLE}  # primary, replica, standby
         action: insert
 
   # Batch for efficiency
@@ -422,30 +466,81 @@ postgresql_receiver:
 
 ```yaml
 custom_queries:
-  # Connection pool statistics
+  # Critical: WAL generation rate (for capacity planning)
   - query: |
       SELECT 
-        datname as database,
-        numbackends as connections,
-        xact_commit as commits,
-        xact_rollback as rollbacks,
-        blks_read as blocks_read,
-        blks_hit as blocks_hit,
-        tup_returned as tuples_returned,
-        tup_fetched as tuples_fetched,
-        tup_inserted as tuples_inserted,
-        tup_updated as tuples_updated,
-        tup_deleted as tuples_deleted
-      FROM pg_stat_database
-      WHERE datname NOT IN ('template0', 'template1')
+        CASE 
+          WHEN pg_is_in_recovery() THEN 'replica'
+          ELSE 'primary'
+        END as server_role,
+        pg_current_wal_lsn() as current_lsn,
+        pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0') as total_wal_bytes
     metrics:
-      - name: "custom.database.stats"
-        value_column: "connections"
-        data_type: gauge
-        unit: "1"
+      - name: "postgresql.wal.bytes_generated"
+        value_column: "total_wal_bytes"
+        data_type: counter
+        unit: "bytes"
         attributes:
-          - column: "database"
-            name: "database_name"
+          - column: "server_role"
+  
+  # Critical: Replication slot lag (prevents WAL removal)
+  - query: |
+      SELECT
+        slot_name,
+        slot_type,
+        active,
+        pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) as lag_bytes,
+        EXTRACT(epoch FROM (now() - last_confirmed_at)) as seconds_since_confirm
+      FROM pg_replication_slots
+      WHERE slot_type = 'logical'
+    metrics:
+      - name: "postgresql.replication_slot.lag_bytes"
+        value_column: "lag_bytes"
+        data_type: gauge
+        unit: "bytes"
+        attributes:
+          - column: "slot_name"
+          - column: "active"
+  
+  # Critical: Lock monitoring
+  - query: |
+      SELECT 
+        wait_event_type,
+        wait_event,
+        COUNT(*) as waiting_sessions
+      FROM pg_stat_activity
+      WHERE wait_event IS NOT NULL
+      GROUP BY wait_event_type, wait_event
+    metrics:
+      - name: "postgresql.locks.waiting_sessions"
+        value_column: "waiting_sessions"
+        data_type: gauge
+        unit: "sessions"
+        attributes:
+          - column: "wait_event_type"
+          - column: "wait_event"
+  
+  # Critical: Vacuum progress
+  - query: |
+      SELECT
+        schemaname,
+        tablename,
+        n_dead_tup,
+        n_live_tup,
+        EXTRACT(epoch FROM (now() - last_vacuum)) as seconds_since_vacuum,
+        EXTRACT(epoch FROM (now() - last_autovacuum)) as seconds_since_autovacuum
+      FROM pg_stat_user_tables
+      WHERE n_dead_tup > 1000
+      ORDER BY n_dead_tup DESC
+      LIMIT 50
+    metrics:
+      - name: "postgresql.vacuum.dead_tuples"
+        value_column: "n_dead_tup"
+        data_type: gauge
+        unit: "rows"
+        attributes:
+          - column: "schemaname"
+          - column: "tablename"
   
   # Table bloat estimation
   - query: |
@@ -1135,52 +1230,292 @@ remote_write:
 ```yaml
 # alerting-rules.yaml
 groups:
-  - name: postgresql_alerts
+  - name: postgresql_critical
     interval: 30s
     rules:
-      # Connection alerts
-      - alert: PostgreSQLTooManyConnections
-        expr: postgresql_connections_active > 0.8 * postgresql_settings_max_connections
-        for: 5m
+      # Database Down
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 1m
         labels:
-          severity: warning
+          severity: critical
           team: database
+          page: true
         annotations:
-          summary: "High connection usage on {{$labels.instance}}"
-          description: "Connection usage is above 80% (current: {{$value}})"
+          summary: "PostgreSQL instance {{$labels.instance}} is down"
+          description: "PostgreSQL has been down for more than 1 minute"
+          runbook: "https://wiki/runbooks/postgresql-down"
       
-      # Performance alerts
-      - alert: PostgreSQLSlowQueries
-        expr: rate(postgresql_slow_queries[5m]) > 10
-        for: 5m
-        labels:
-          severity: warning
-          team: database
-        annotations:
-          summary: "High rate of slow queries on {{$labels.instance}}"
-          description: "Slow query rate: {{$value}} queries/sec"
-      
-      # Replication alerts
-      - alert: PostgreSQLReplicationLag
-        expr: postgresql_replication_lag_seconds > 10
+      # Replication broken
+      - alert: PostgreSQLReplicationBroken
+        expr: pg_stat_replication_count == 0 and pg_is_in_recovery() == 0
         for: 5m
         labels:
           severity: critical
           team: database
         annotations:
-          summary: "High replication lag on {{$labels.instance}}"
-          description: "Replication lag: {{$value}} seconds"
+          summary: "PostgreSQL replication is broken on {{$labels.instance}}"
+          description: "Primary server has no connected replicas"
       
-      # Resource alerts
-      - alert: PostgreSQLHighIOWait
-        expr: rate(postgresql_bgwriter_buffers_backend[5m]) > 1000
+      # WAL accumulation (disk space risk)
+      - alert: PostgreSQLWALAccumulation
+        expr: pg_wal_count > 100
+        for: 10m
+        labels:
+          severity: critical
+          team: database
+        annotations:
+          summary: "WAL files accumulating on {{$labels.instance}}"
+          description: "{{$value}} WAL files present, check replication slots"
+      
+      # Transaction wraparound warning
+      - alert: PostgreSQLTransactionWraparound
+        expr: pg_database_age > 1500000000
+        for: 5m
+        labels:
+          severity: critical
+          team: database
+          page: true
+        annotations:
+          summary: "Transaction ID wraparound risk on {{$labels.database}}"
+          description: "Database age: {{$value}}, autovacuum may be failing"
+
+  - name: postgresql_performance
+    interval: 30s
+    rules:
+      # Cache hit ratio
+      - alert: PostgreSQLLowCacheHitRatio
+        expr: |
+          (sum by (instance, database) (pg_stat_database_blks_hit)) /
+          (sum by (instance, database) (pg_stat_database_blks_hit + pg_stat_database_blks_read)) < 0.9
+        for: 15m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "Low cache hit ratio on {{$labels.database}}"
+          description: "Cache hit ratio: {{$value | humanizePercentage}}"
+      
+      # Connection saturation
+      - alert: PostgreSQLConnectionSaturation
+        expr: |
+          sum by (instance) (pg_stat_database_numbackends) / 
+          pg_settings_max_connections > 0.8
         for: 5m
         labels:
           severity: warning
           team: database
         annotations:
-          summary: "High IO wait on {{$labels.instance}}"
-          description: "Backend buffer writes: {{$value}}/sec"
+          summary: "Connection pool near saturation on {{$labels.instance}}"
+          description: "{{$value | humanizePercentage}} of max connections used"
+      
+      # Long running transactions
+      - alert: PostgreSQLLongRunningTransaction
+        expr: pg_stat_activity_max_tx_duration > 3600
+        for: 5m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "Long running transaction on {{$labels.instance}}"
+          description: "Transaction running for {{$value}} seconds"
+      
+      # Table bloat
+      - alert: PostgreSQLTableBloat
+        expr: pg_stat_user_tables_n_dead_tup > 100000
+        for: 30m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "Table {{$labels.schemaname}}.{{$labels.tablename}} has high bloat"
+          description: "{{$value}} dead tuples, consider vacuum"
+
+  - name: postgresql_resources
+    interval: 30s
+    rules:
+      # Disk space
+      - alert: PostgreSQLLowDiskSpace
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/var/lib/postgresql"} / 
+           node_filesystem_size_bytes{mountpoint="/var/lib/postgresql"}) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          team: database
+        annotations:
+          summary: "Low disk space for PostgreSQL on {{$labels.instance}}"
+          description: "Only {{$value | humanizePercentage}} disk space remaining"
+      
+      # Checkpoint frequency
+      - alert: PostgreSQLFrequentCheckpoints
+        expr: rate(pg_stat_bgwriter_checkpoints_req[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "Frequent checkpoints on {{$labels.instance}}"
+          description: "{{$value}} checkpoints per second, consider increasing checkpoint_segments"
+```
+
+## Production Deployment Examples
+
+### Kubernetes DaemonSet for PostgreSQL Monitoring
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: monitoring
+data:
+  config.yaml: |
+    receivers:
+      postgresql:
+        endpoint: ${env:POSTGRES_ENDPOINT}
+        username: ${env:POSTGRES_USER}
+        password: ${env:POSTGRES_PASSWORD}
+        databases: []  # Empty means all databases
+        collection_interval: 15s
+        tls:
+          insecure_skip_verify: false
+          ca_file: /etc/postgresql/ca.crt
+    
+    processors:
+      batch:
+        send_batch_size: 5000
+        timeout: 10s
+      
+      memory_limiter:
+        limit_mib: 512
+        spike_limit_mib: 128
+        check_interval: 5s
+    
+    exporters:
+      prometheusremotewrite:
+        endpoint: http://prometheus:9090/api/v1/write
+        resource_to_telemetry_conversion:
+          enabled: true
+    
+    service:
+      pipelines:
+        metrics:
+          receivers: [postgresql]
+          processors: [memory_limiter, batch]
+          exporters: [prometheusremotewrite]
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-collector-postgresql
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: otel-collector-postgresql
+  template:
+    metadata:
+      labels:
+        app: otel-collector-postgresql
+    spec:
+      serviceAccountName: otel-collector
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:0.88.0
+        args: ["--config=/etc/otel/config.yaml"]
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        env:
+        - name: POSTGRES_ENDPOINT
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-monitoring
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-monitoring
+              key: password
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel
+        - name: postgres-ca
+          mountPath: /etc/postgresql
+      volumes:
+      - name: config
+        configMap:
+          name: otel-collector-config
+      - name: postgres-ca
+        secret:
+          secretName: postgres-ca-cert
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+```
+
+### Docker Compose for Development
+
+```yaml
+version: '3.8'
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.88.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-config.yaml:/etc/otel/config.yaml
+      - ./certs:/etc/ssl/certs
+    environment:
+      - POSTGRES_ENDPOINT=postgres:5432
+      - POSTGRES_USER=otel_monitor
+      - POSTGRES_PASSWORD_FILE=/run/secrets/pg_password
+      - ENVIRONMENT=development
+    secrets:
+      - pg_password
+    networks:
+      - monitoring
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_PASSWORD_FILE=/run/secrets/pg_root_password
+      - POSTGRES_INITDB_ARGS=--data-checksums
+    volumes:
+      - ./init-monitoring-user.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    secrets:
+      - pg_root_password
+    networks:
+      - monitoring
+    command: >
+      postgres
+      -c shared_preload_libraries='pg_stat_statements'
+      -c pg_stat_statements.track=all
+      -c track_io_timing=on
+
+secrets:
+  pg_password:
+    file: ./secrets/pg_password.txt
+  pg_root_password:
+    file: ./secrets/pg_root_password.txt
+
+volumes:
+  postgres_data:
+
+networks:
+  monitoring:
 ```
 
 ## Troubleshooting Guide
