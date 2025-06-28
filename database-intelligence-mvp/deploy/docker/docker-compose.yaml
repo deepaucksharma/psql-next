@@ -22,7 +22,7 @@ services:
     
     # Configuration
     volumes:
-      - ../../config/collector-improved.yaml:/etc/otel/config.yaml:ro
+      - ../../config/collector-newrelic-optimized.yaml:/etc/otel/config.yaml:ro
       - collector-storage:/var/lib/otel/storage
       - /var/log:/var/log:ro  # For log file access
     
@@ -68,7 +68,7 @@ services:
     
     # Same config as primary but different ports
     volumes:
-      - ../../config/collector-improved.yaml:/etc/otel/config.yaml:ro
+      - ../../config/collector-newrelic-optimized.yaml:/etc/otel/config.yaml:ro
       - collector-storage-secondary:/var/lib/otel/storage
       - /var/log:/var/log:ro
     
@@ -112,6 +112,7 @@ services:
     
     volumes:
       - ./scripts:/scripts:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     
     environment:
       - PRIMARY_URL=http://db-intel-primary:13133
@@ -131,10 +132,6 @@ services:
       '
     
     restart: unless-stopped
-    
-    # Access to Docker socket for container management
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
 
   # PostgreSQL test database (for development)
   postgres-test:

@@ -50,6 +50,10 @@ type circuitBreakerProcessor struct {
 	lastFailure  time.Time
 	stateMutex   sync.RWMutex
 
+	// Per-database circuit breakers
+	databaseStates map[string]*databaseCircuitState
+	dbStatesMutex  sync.RWMutex
+
 	// Concurrency control
 	semaphore chan struct{}
 
@@ -62,9 +66,24 @@ type circuitBreakerProcessor struct {
 	failedRequests   int64
 	rejectedRequests int64
 
+	// New Relic integration tracking
+	nrErrors           int64
+	cardinalityWarnings int64
+
 	// Shutdown
 	shutdownChan chan struct{}
 	wg           sync.WaitGroup
+}
+
+// databaseCircuitState tracks circuit state per database
+type databaseCircuitState struct {
+	state        State
+	failureCount int
+	successCount int
+	lastFailure  time.Time
+	errorRate    float64
+	avgDuration  time.Duration
+	mutex        sync.RWMutex
 }
 
 // newCircuitBreakerProcessor creates a new circuit breaker processor
@@ -74,6 +93,7 @@ func newCircuitBreakerProcessor(cfg *Config, logger *zap.Logger, consumer consum
 		logger:         logger,
 		consumer:       consumer,
 		state:          Closed,
+		databaseStates: make(map[string]*databaseCircuitState),
 		semaphore:      make(chan struct{}, cfg.MaxConcurrentRequests),
 		currentTimeout: cfg.BaseTimeout,
 		shutdownChan:   make(chan struct{}),
@@ -112,13 +132,34 @@ func (p *circuitBreakerProcessor) Shutdown(ctx context.Context) error {
 func (p *circuitBreakerProcessor) ConsumeLogs(ctx context.Context, logs plog.Logs) error {
 	p.totalRequests++
 
-	// Check circuit state
+	// Extract database information and check for New Relic errors
+	databases := p.extractDatabaseInfo(logs)
+	
+	// Check global circuit state
 	if !p.allowRequest() {
 		p.rejectedRequests++
-		p.logger.Warn("Circuit breaker open, rejecting request",
+		p.logger.Warn("Global circuit breaker open, rejecting request",
 			zap.String("state", p.getState().String()),
 			zap.Int64("rejected_requests", p.rejectedRequests))
 		return fmt.Errorf("circuit breaker open")
+	}
+
+	// Check per-database circuit states
+	for _, dbName := range databases {
+		if !p.allowDatabaseRequest(dbName) {
+			p.rejectedRequests++
+			p.logger.Warn("Database circuit breaker open, rejecting request",
+				zap.String("database", dbName),
+				zap.Int64("rejected_requests", p.rejectedRequests))
+			
+			// Remove logs for this database
+			p.filterLogsForDatabase(logs, dbName)
+		}
+	}
+
+	// If all logs were filtered out, return early
+	if logs.LogRecordCount() == 0 {
+		return nil
 	}
 
 	// Acquire semaphore for concurrency control
@@ -148,6 +189,19 @@ func (p *circuitBreakerProcessor) ConsumeLogs(ctx context.Context, logs plog.Log
 		p.onFailure(err)
 		p.failedRequests++
 		
+		// Update per-database states
+		for _, dbName := range databases {
+			p.onDatabaseFailure(dbName, err, duration)
+		}
+		
+		// Check for New Relic specific errors
+		if p.isNewRelicError(err) {
+			p.nrErrors++
+			p.logger.Error("New Relic integration error detected",
+				zap.Error(err),
+				zap.Int64("nr_errors", p.nrErrors))
+		}
+		
 		// Adjust timeout if adaptive timeout is enabled
 		if p.config.EnableAdaptiveTimeout {
 			p.adjustTimeout(duration, false)
@@ -157,6 +211,11 @@ func (p *circuitBreakerProcessor) ConsumeLogs(ctx context.Context, logs plog.Log
 	}
 
 	p.onSuccess()
+	
+	// Update per-database states
+	for _, dbName := range databases {
+		p.onDatabaseSuccess(dbName, duration)
+	}
 	
 	// Adjust timeout if adaptive timeout is enabled
 	if p.config.EnableAdaptiveTimeout {
@@ -317,6 +376,18 @@ func (p *circuitBreakerProcessor) checkSystemHealth() {
 		}
 	}
 
+	// Check New Relic error rate
+	if p.nrErrors > 10 { // More than 10 NR errors
+		p.logger.Error("High New Relic error rate detected",
+			zap.Int64("nr_errors", p.nrErrors),
+			zap.Int64("cardinality_warnings", p.cardinalityWarnings))
+		
+		// Open circuit if too many NR errors
+		if p.nrErrors > 50 {
+			p.onFailure(fmt.Errorf("excessive New Relic errors: %d", p.nrErrors))
+		}
+	}
+
 	// Log current state periodically
 	state := p.getState()
 	if state != Closed {
@@ -324,8 +395,25 @@ func (p *circuitBreakerProcessor) checkSystemHealth() {
 			zap.String("state", state.String()),
 			zap.Int("failure_count", p.failureCount),
 			zap.Int("success_count", p.successCount),
-			zap.Duration("current_timeout", p.getCurrentTimeout()))
+			zap.Duration("current_timeout", p.getCurrentTimeout()),
+			zap.Int64("nr_errors", p.nrErrors))
 	}
+	
+	// Log per-database states
+	p.dbStatesMutex.RLock()
+	for dbName, dbState := range p.databaseStates {
+		dbState.mutex.RLock()
+		if dbState.state != Closed {
+			p.logger.Info("Database circuit breaker status",
+				zap.String("database", dbName),
+				zap.String("state", dbState.state.String()),
+				zap.Int("failure_count", dbState.failureCount),
+				zap.Float64("error_rate", dbState.errorRate),
+				zap.Duration("avg_duration", dbState.avgDuration))
+		}
+		dbState.mutex.RUnlock()
+	}
+	p.dbStatesMutex.RUnlock()
 }
 
 // getMemoryUsageMB returns current memory usage in MB
@@ -340,4 +428,218 @@ func (p *circuitBreakerProcessor) getCPUUsagePercent() float64 {
 	// This is a simplified implementation
 	// In production, you might want to use more sophisticated CPU monitoring
 	return 0.0 // Placeholder
+}
+
+// extractDatabaseInfo extracts database names from logs
+func (p *circuitBreakerProcessor) extractDatabaseInfo(logs plog.Logs) []string {
+	databases := make(map[string]bool)
+	
+	for i := 0; i < logs.ResourceLogs().Len(); i++ {
+		rl := logs.ResourceLogs().At(i)
+		for j := 0; j < rl.ScopeLogs().Len(); j++ {
+			sl := rl.ScopeLogs().At(j)
+			for k := 0; k < sl.LogRecords().Len(); k++ {
+				lr := sl.LogRecords().At(k)
+				if dbName, exists := lr.Attributes().Get("database_name"); exists {
+					databases[dbName.Str()] = true
+				}
+			}
+		}
+	}
+	
+	result := make([]string, 0, len(databases))
+	for db := range databases {
+		result = append(result, db)
+	}
+	return result
+}
+
+// allowDatabaseRequest checks if requests for a specific database should be allowed
+func (p *circuitBreakerProcessor) allowDatabaseRequest(dbName string) bool {
+	p.dbStatesMutex.RLock()
+	state, exists := p.databaseStates[dbName]
+	p.dbStatesMutex.RUnlock()
+	
+	if !exists {
+		return true // No state means allow
+	}
+	
+	state.mutex.RLock()
+	defer state.mutex.RUnlock()
+	
+	switch state.state {
+	case Closed:
+		return true
+	case Open:
+		if time.Since(state.lastFailure) > p.config.OpenStateTimeout {
+			// Transition to half-open
+			state.mutex.RUnlock()
+			state.mutex.Lock()
+			if state.state == Open && time.Since(state.lastFailure) > p.config.OpenStateTimeout {
+				state.state = HalfOpen
+				state.successCount = 0
+				p.logger.Info("Database circuit breaker transitioning to half-open",
+					zap.String("database", dbName))
+			}
+			state.mutex.Unlock()
+			state.mutex.RLock()
+			return state.state == HalfOpen
+		}
+		return false
+	case HalfOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// filterLogsForDatabase removes logs for a specific database
+func (p *circuitBreakerProcessor) filterLogsForDatabase(logs plog.Logs, dbName string) {
+	for i := 0; i < logs.ResourceLogs().Len(); i++ {
+		rl := logs.ResourceLogs().At(i)
+		for j := 0; j < rl.ScopeLogs().Len(); j++ {
+			sl := rl.ScopeLogs().At(j)
+			
+			// Filter log records
+			filtered := sl.LogRecords()
+			for k := filtered.Len() - 1; k >= 0; k-- {
+				lr := filtered.At(k)
+				if db, exists := lr.Attributes().Get("database_name"); exists && db.Str() == dbName {
+					filtered.RemoveIf(func(record plog.LogRecord) bool {
+						if recordDB, ok := record.Attributes().Get("database_name"); ok {
+							return recordDB.Str() == dbName
+						}
+						return false
+					})
+				}
+			}
+		}
+	}
+}
+
+// onDatabaseFailure handles failures for a specific database
+func (p *circuitBreakerProcessor) onDatabaseFailure(dbName string, err error, duration time.Duration) {
+	p.dbStatesMutex.Lock()
+	state, exists := p.databaseStates[dbName]
+	if !exists {
+		state = &databaseCircuitState{
+			state: Closed,
+		}
+		p.databaseStates[dbName] = state
+	}
+	p.dbStatesMutex.Unlock()
+	
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+	
+	state.failureCount++
+	state.lastFailure = time.Now()
+	
+	// Update error rate
+	state.errorRate = float64(state.failureCount) / float64(state.failureCount+state.successCount)
+	
+	switch state.state {
+	case Closed:
+		if state.failureCount >= p.config.FailureThreshold {
+			state.state = Open
+			p.logger.Error("Database circuit breaker opened due to failures",
+				zap.String("database", dbName),
+				zap.Int("failure_count", state.failureCount),
+				zap.Float64("error_rate", state.errorRate),
+				zap.Error(err))
+		}
+	case HalfOpen:
+		state.state = Open
+		state.successCount = 0
+		p.logger.Error("Database circuit breaker reopened after failure in half-open state",
+			zap.String("database", dbName),
+			zap.Error(err))
+	}
+}
+
+// onDatabaseSuccess handles successful requests for a specific database
+func (p *circuitBreakerProcessor) onDatabaseSuccess(dbName string, duration time.Duration) {
+	p.dbStatesMutex.RLock()
+	state, exists := p.databaseStates[dbName]
+	p.dbStatesMutex.RUnlock()
+	
+	if !exists {
+		return // No state to update
+	}
+	
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+	
+	// Update average duration
+	if state.avgDuration == 0 {
+		state.avgDuration = duration
+	} else {
+		state.avgDuration = (state.avgDuration + duration) / 2
+	}
+	
+	switch state.state {
+	case Closed:
+		state.failureCount = 0
+		state.successCount++
+	case HalfOpen:
+		state.successCount++
+		if state.successCount >= p.config.SuccessThreshold {
+			state.state = Closed
+			state.failureCount = 0
+			state.successCount = 0
+			p.logger.Info("Database circuit breaker closed after successful recovery",
+				zap.String("database", dbName),
+				zap.Duration("avg_duration", state.avgDuration))
+		}
+	}
+	
+	// Update error rate
+	if state.failureCount+state.successCount > 0 {
+		state.errorRate = float64(state.failureCount) / float64(state.failureCount+state.successCount)
+	}
+}
+
+// isNewRelicError checks if the error is related to New Relic integration
+func (p *circuitBreakerProcessor) isNewRelicError(err error) bool {
+	if err == nil {
+		return false
+	}
+	
+	errStr := err.Error()
+	nrErrorPatterns := []string{
+		"cardinality",
+		"NrIntegrationError",
+		"api-key",
+		"rate limit",
+		"quota exceeded",
+		"unique time series",
+	}
+	
+	for _, pattern := range nrErrorPatterns {
+		if contains(errStr, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// contains checks if a string contains a substring (case-insensitive)
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && 
+		(s == substr || 
+		 len(s) > len(substr) && 
+		 (s[:len(substr)] == substr || 
+		  s[len(s)-len(substr):] == substr ||
+		  len(substr) > 0 && len(s) > len(substr) && 
+		  containsMiddle(s, substr)))
+}
+
+// containsMiddle checks if substring exists in the middle of string
+func containsMiddle(s, substr string) bool {
+	for i := 1; i < len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

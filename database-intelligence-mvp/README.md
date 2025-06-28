@@ -15,6 +15,9 @@ A production-ready OpenTelemetry Collector configuration that safely collects da
 - 🔒 **Security First**: PII sanitization, credential management, network policies
 - 📊 **Observable**: Comprehensive metrics, alerts, and SLO tracking
 - 🎯 **Easy Setup**: One-click quickstart with interactive configuration
+- 🔍 **Silent Failure Detection**: Monitors NrIntegrationError events for data loss
+- 📈 **Cardinality Management**: Multi-stage query normalization and fingerprinting
+- 🔗 **Entity Correlation**: Automatic database entity synthesis in New Relic
 
 ### Current Capabilities
 
@@ -75,9 +78,12 @@ We follow three core principles:
 - **Processors**: 
   - `memory_limiter`: OOM protection
   - `transform/sanitize_pii`: Security hardening
-  - `probabilistic_sampler`: Intelligent data reduction
+  - `transform/query_normalization`: Cardinality reduction
+  - `resource/entity_synthesis`: New Relic entity creation
+  - `circuitbreaker`: Per-database failure isolation
+  - `adaptivesampler`: Priority-based intelligent sampling
 - **Exporters**: 
-  - `otlp/newrelic`: Reliable data delivery with retry logic
+  - `otlp/newrelic`: HTTP/protobuf with zstd compression
 
 ### Implementation Status
 
@@ -124,6 +130,26 @@ helm install db-intelligence ./deploy/helm
 | Collector (each) | 500m-1000m | 512Mi-1Gi | 10Gi | <10Mbps |
 | Database Impact | <1% | - | - | 1 connection |
 
+## New Relic Integration Monitoring
+
+### Critical Validation Query
+```sql
+-- Monitor for silent failures (run every 5 minutes)
+SELECT count(*) FROM NrIntegrationError 
+WHERE newRelicFeature = 'Metrics' 
+  AND message LIKE '%database%'
+SINCE 5 minutes ago
+```
+
+### Key Metrics to Monitor
+- **NrIntegrationError Events**: Silent failure detection
+- **Cardinality Warnings**: Query pattern explosion
+- **Entity Synthesis**: Database entity creation
+- **Circuit Breaker State**: Per-database health
+- **Sampling Effectiveness**: Data reduction rates
+
+Import `monitoring/dashboard-config.json` for comprehensive monitoring.
+
 ## Documentation
 
 ### Essential Guides
@@ -135,6 +161,7 @@ helm install db-intelligence ./deploy/helm
 - 📊 [OPERATIONS.md](OPERATIONS.md) - Daily operations & monitoring
 - ⚠️ [LIMITATIONS.md](LIMITATIONS.md) - Known limitations & workarounds
 - 🔍 [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues & solutions
+- 🔗 [NEWRELIC_INTEGRATION.md](docs/NEWRELIC_INTEGRATION.md) - New Relic integration guide
 
 ### Additional Resources
 
