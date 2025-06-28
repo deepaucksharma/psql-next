@@ -33,13 +33,45 @@
 
 ## Component Architecture
 
-### Data Flow
+### Data Flow with Integrated Verification
 
 ```
-Database → Receiver → Memory Limiter → PII Sanitizer → Attribute Extractor → Sampler → Batch → New Relic
-            ↓                                                                      ↑
+Database → Receiver → Memory Limiter → PII Sanitizer → Attribute Extractor → 
+                                                            ↓
+                                                      Entity Synthesis
+                                                            ↓
+                                                    Circuit Breaker
+                                                            ↓
+                                                    VERIFICATION ← Real-time Feedback
+                                                            ↓       ↓
+                                                        Sampler     NR Monitoring
+                                                            ↓
+                                                         Batch → New Relic
+                                                            ↑
             └────────────── File Storage (State Persistence) ───────────────────┘
 ```
+
+### Verification Layer
+
+**New Addition**: Integrated verification processor that provides real-time feedback on:
+
+1. **Data Quality Verification**
+   - Entity synthesis validation
+   - Query normalization effectiveness
+   - PII sanitization confirmation
+   - Cardinality monitoring
+
+2. **Integration Health Monitoring**
+   - NrIntegrationError detection
+   - Data freshness tracking
+   - Circuit breaker state monitoring
+   - Export success rates
+
+3. **Feedback Mechanisms**
+   - Real-time alerts via logs
+   - Health report generation
+   - Remediation suggestions
+   - Metrics export for dashboards
 
 ### Receiver Layer
 

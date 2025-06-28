@@ -1,0 +1,201 @@
+# Attribute Mapping Configuration
+# This file defines the standardized attribute names and mappings
+# to ensure consistency across receivers, processors, and exporters
+
+# Standard attribute names used throughout the pipeline
+standard_attributes:
+  # Query identification
+  query_id: "query_id"
+  query_hash: "query.hash"
+  query_text: "db.statement"
+  
+  # Database identification
+  database_name: "db.name"
+  database_system: "db.system"
+  database_user: "db.user"
+  
+  # Performance metrics
+  mean_duration_ms: "query.mean_duration_ms"
+  total_duration_ms: "query.total_duration_ms"
+  execution_count: "query.execution_count"
+  rows_affected: "query.rows_affected"
+  
+  # Resource metrics
+  shared_blocks_hit: "query.shared_blocks_hit"
+  shared_blocks_read: "query.shared_blocks_read"
+  temp_blocks_written: "query.temp_blocks_written"
+  
+  # Query plan attributes
+  plan_json: "query.plan.json"
+  plan_hash: "query.plan.hash"
+  plan_total_cost: "query.plan.total_cost"
+  plan_rows: "query.plan.rows"
+  plan_has_seq_scan: "query.plan.has_seq_scan"
+  plan_has_index_scan: "query.plan.has_index_scan"
+  plan_efficiency: "query.plan.efficiency"
+  
+  # Performance categories
+  performance_category: "query.performance_category"
+  
+  # Circuit breaker attributes
+  circuit_breaker_status: "circuit.breaker.status"
+  health_score: "db.health.score"
+  error_count: "error.count"
+  
+  # Collection metadata
+  collection_timestamp: "collection.timestamp"
+  collector_version: "collector.version"
+  
+  # Environment attributes
+  environment: "deployment.environment"
+  region: "cloud.region"
+  cloud_provider: "cloud.provider"
+
+# Receiver-specific mappings
+receiver_mappings:
+  postgresql:
+    # Map PostgreSQL receiver attributes to standard names
+    "postgresql.query.mean_time": "query.mean_duration_ms"
+    "postgresql.query.total_time": "query.total_duration_ms"
+    "postgresql.query.calls": "query.execution_count"
+    "postgresql.query.rows": "query.rows_affected"
+    "postgresql.query.shared_blks_hit": "query.shared_blocks_hit"
+    "postgresql.query.shared_blks_read": "query.shared_blocks_read"
+    "postgresql.query.temp_blks_written": "query.temp_blocks_written"
+    "postgresql.query.stddev_time": "query.stddev_duration_ms"
+    "postgresql.query.min_time": "query.min_duration_ms"
+    "postgresql.query.max_time": "query.max_duration_ms"
+    
+  mysql:
+    # Map MySQL receiver attributes to standard names
+    "mysql.query.mean_time": "query.mean_duration_ms"
+    "mysql.query.total_time": "query.total_duration_ms"
+    "mysql.query.calls": "query.execution_count"
+    
+  mongodb:
+    # Map MongoDB receiver attributes to standard names
+    "mongodb.operation.duration": "query.mean_duration_ms"
+    "mongodb.operation.count": "query.execution_count"
+
+# Processor-specific mappings
+processor_mappings:
+  adaptive_sampler:
+    # Attributes expected by adaptive sampler
+    expects:
+      - "query.mean_duration_ms"
+      - "query.performance_category"
+      - "query_id"
+      - "db.name"
+    # Backward compatibility mappings
+    compatibility:
+      "avg_duration_ms": "query.mean_duration_ms"
+      "mean_time_ms": "query.mean_duration_ms"
+      "database_name": "db.name"
+      
+  circuit_breaker:
+    # Attributes expected by circuit breaker
+    expects:
+      - "db.name"
+      - "query.mean_duration_ms"
+      - "error.count"
+    # Backward compatibility mappings
+    compatibility:
+      "database_name": "db.name"
+      
+  plan_attribute_extractor:
+    # Attributes expected by plan extractor
+    expects:
+      - "query.plan.json"
+    # Output attributes
+    produces:
+      - "query.plan.hash"
+      - "query.plan.total_cost"
+      - "query.plan.rows"
+      - "query.plan.has_seq_scan"
+      - "query.plan.has_index_scan"
+      - "query.plan.efficiency"
+    # Backward compatibility mappings
+    compatibility:
+      "plan_json": "query.plan.json"
+      "db.query.plan.hash": "query.plan.hash"
+
+# Exporter-specific mappings
+exporter_mappings:
+  newrelic:
+    # Attributes required by New Relic
+    required:
+      - "db.statement"
+      - "db.system"
+      - "db.name"
+    # New Relic specific attribute names
+    mappings:
+      "query.mean_duration_ms": "duration.ms"
+      "query.execution_count": "db.operation.count"
+      "db.statement": "db.query"
+
+# Validation rules
+validation_rules:
+  # Required attributes that must be present
+  required_attributes:
+    - "query_id"
+    - "db.name"
+    - "db.system"
+    - "query.mean_duration_ms"
+    
+  # Attribute type validations
+  attribute_types:
+    "query.mean_duration_ms": "float"
+    "query.execution_count": "int"
+    "query.rows_affected": "int"
+    "error.count": "int"
+    "db.health.score": "int"
+    "query.plan.efficiency": "float"
+    "query.plan.has_seq_scan": "bool"
+    "collection.timestamp": "float"
+    
+  # Value range validations
+  value_ranges:
+    "db.health.score":
+      min: 0
+      max: 100
+    "query.mean_duration_ms":
+      min: 0
+    "error.count":
+      min: 0
+
+# Transformation rules for the attribute mapper processor
+transformation_rules:
+  - description: "Map PostgreSQL attributes to standard names"
+    conditions:
+      - 'attributes["db.system"] == "postgresql"'
+    mappings:
+      - from: "postgresql.query.mean_time"
+        to: "query.mean_duration_ms"
+      - from: "postgresql.query.calls"
+        to: "query.execution_count"
+        
+  - description: "Map MySQL attributes to standard names"
+    conditions:
+      - 'attributes["db.system"] == "mysql"'
+    mappings:
+      - from: "mysql.query.mean_time"
+        to: "query.mean_duration_ms"
+      - from: "mysql.query.calls"
+        to: "query.execution_count"
+        
+  - description: "Ensure backward compatibility for processors"
+    conditions:
+      - 'true'  # Always apply
+    mappings:
+      - from: "query.mean_duration_ms"
+        to: "avg_duration_ms"
+        copy: true  # Keep both attributes
+      - from: "query.mean_duration_ms"
+        to: "mean_time_ms"
+        copy: true
+      - from: "db.name"
+        to: "database_name"
+        copy: true
+      - from: "query.plan.json"
+        to: "plan_json"
+        copy: true

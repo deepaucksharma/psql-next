@@ -3,6 +3,7 @@ package circuitbreaker
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -70,6 +71,12 @@ type circuitBreakerProcessor struct {
 	nrErrors           int64
 	cardinalityWarnings int64
 
+	// Performance tracking
+	throughputMonitor  *ThroughputMonitor
+	latencyTracker    *LatencyTracker
+	errorClassifier   *ErrorClassifier
+	memoryMonitor     *MemoryMonitor
+
 	// Shutdown
 	shutdownChan chan struct{}
 	wg           sync.WaitGroup
@@ -89,14 +96,18 @@ type databaseCircuitState struct {
 // newCircuitBreakerProcessor creates a new circuit breaker processor
 func newCircuitBreakerProcessor(cfg *Config, logger *zap.Logger, consumer consumer.Logs) *circuitBreakerProcessor {
 	return &circuitBreakerProcessor{
-		config:         cfg,
-		logger:         logger,
-		consumer:       consumer,
-		state:          Closed,
-		databaseStates: make(map[string]*databaseCircuitState),
-		semaphore:      make(chan struct{}, cfg.MaxConcurrentRequests),
-		currentTimeout: cfg.BaseTimeout,
-		shutdownChan:   make(chan struct{}),
+		config:            cfg,
+		logger:            logger,
+		consumer:          consumer,
+		state:             Closed,
+		databaseStates:    make(map[string]*databaseCircuitState),
+		semaphore:         make(chan struct{}, cfg.MaxConcurrentRequests),
+		currentTimeout:    cfg.BaseTimeout,
+		shutdownChan:      make(chan struct{}),
+		throughputMonitor: NewThroughputMonitor(time.Minute),
+		latencyTracker:    NewLatencyTracker(1000),
+		errorClassifier:   NewErrorClassifier(),
+		memoryMonitor:     NewMemoryMonitor(cfg.MemoryThresholdMB),
 	}
 }
 
@@ -131,6 +142,25 @@ func (p *circuitBreakerProcessor) Shutdown(ctx context.Context) error {
 // ConsumeLogs processes logs through the circuit breaker
 func (p *circuitBreakerProcessor) ConsumeLogs(ctx context.Context, logs plog.Logs) error {
 	p.totalRequests++
+	p.throughputMonitor.RecordRequest()
+
+	// Check throughput limits
+	if p.throughputMonitor.IsOverloaded() {
+		p.rejectedRequests++
+		p.logger.Warn("Throughput limit exceeded, rejecting request",
+			zap.Float64("current_rate", p.throughputMonitor.GetRate()),
+			zap.Int64("rejected_requests", p.rejectedRequests))
+		return fmt.Errorf("throughput limit exceeded")
+	}
+
+	// Check memory pressure
+	if p.memoryMonitor.IsUnderPressure() {
+		p.rejectedRequests++
+		p.logger.Warn("Memory pressure detected, rejecting request",
+			zap.Float64("memory_usage_percent", p.memoryMonitor.GetUsagePercent()),
+			zap.Int64("rejected_requests", p.rejectedRequests))
+		return fmt.Errorf("memory pressure detected")
+	}
 
 	// Extract database information and check for New Relic errors
 	databases := p.extractDatabaseInfo(logs)
@@ -184,8 +214,14 @@ func (p *circuitBreakerProcessor) ConsumeLogs(ctx context.Context, logs plog.Log
 	err := p.consumer.ConsumeLogs(timeoutCtx, logs)
 	duration := time.Since(start)
 
+	// Record latency
+	p.latencyTracker.RecordLatency(duration)
+
 	// Handle result
 	if err != nil {
+		// Classify error
+		errorType := p.errorClassifier.ClassifyError(err)
+		
 		p.onFailure(err)
 		p.failedRequests++
 		
@@ -199,6 +235,7 @@ func (p *circuitBreakerProcessor) ConsumeLogs(ctx context.Context, logs plog.Log
 			p.nrErrors++
 			p.logger.Error("New Relic integration error detected",
 				zap.Error(err),
+				zap.String("error_type", errorType),
 				zap.Int64("nr_errors", p.nrErrors))
 		}
 		
@@ -206,6 +243,13 @@ func (p *circuitBreakerProcessor) ConsumeLogs(ctx context.Context, logs plog.Log
 		if p.config.EnableAdaptiveTimeout {
 			p.adjustTimeout(duration, false)
 		}
+		
+		// Log error with classification
+		p.logger.Error("Request failed",
+			zap.Error(err),
+			zap.String("error_type", errorType),
+			zap.Duration("duration", duration),
+			zap.Int64("failed_requests", p.failedRequests))
 		
 		return err
 	}
@@ -388,18 +432,29 @@ func (p *circuitBreakerProcessor) checkSystemHealth() {
 		}
 	}
 
-	// Log current state periodically
+	// Update memory usage (in production, get actual memory stats)
+	// p.memoryMonitor.UpdateUsage(getCurrentMemoryUsage())
+
+	// Get performance metrics
+	p50, p95, p99 := p.latencyTracker.GetPercentiles()
+	errorStats := p.errorClassifier.GetErrorStats()
+
+	// Log comprehensive status
 	state := p.getState()
-	if state != Closed {
-		p.logger.Info("Circuit breaker status",
-			zap.String("state", state.String()),
-			zap.Int("failure_count", p.failureCount),
-			zap.Int("success_count", p.successCount),
-			zap.Duration("current_timeout", p.getCurrentTimeout()),
-			zap.Int64("nr_errors", p.nrErrors))
-	}
+	p.logger.Info("Circuit breaker health check",
+		zap.String("state", state.String()),
+		zap.Int("failure_count", p.failureCount),
+		zap.Int("success_count", p.successCount),
+		zap.Duration("current_timeout", p.getCurrentTimeout()),
+		zap.Int64("nr_errors", p.nrErrors),
+		zap.Float64("throughput_rate", p.throughputMonitor.GetRate()),
+		zap.Float64("memory_usage_percent", p.memoryMonitor.GetUsagePercent()),
+		zap.Duration("latency_p50", p50),
+		zap.Duration("latency_p95", p95),
+		zap.Duration("latency_p99", p99),
+		zap.Any("error_stats", errorStats))
 	
-	// Log per-database states
+	// Log per-database states if any are not closed
 	p.dbStatesMutex.RLock()
 	for dbName, dbState := range p.databaseStates {
 		dbState.mutex.RLock()
@@ -414,6 +469,17 @@ func (p *circuitBreakerProcessor) checkSystemHealth() {
 		dbState.mutex.RUnlock()
 	}
 	p.dbStatesMutex.RUnlock()
+
+	// Check if we should open circuit based on error patterns
+	if errorStats["total"] > 100 {
+		criticalErrors := errorStats["memory"] + errorStats["disk"] + errorStats["authentication"]
+		if criticalErrors > 10 {
+			p.logger.Error("Critical errors detected, opening circuit breaker",
+				zap.Int64("critical_errors", criticalErrors),
+				zap.Any("error_breakdown", errorStats))
+			p.onFailure(fmt.Errorf("too many critical errors: %d", criticalErrors))
+		}
+	}
 }
 
 // getMemoryUsageMB returns current memory usage in MB
@@ -642,4 +708,224 @@ func containsMiddle(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// ThroughputMonitor tracks request throughput
+type ThroughputMonitor struct {
+	mu              sync.RWMutex
+	windowSize      time.Duration
+	requests        []time.Time
+	maxThroughput   float64
+	currentRate     float64
+}
+
+// NewThroughputMonitor creates a new throughput monitor
+func NewThroughputMonitor(windowSize time.Duration) *ThroughputMonitor {
+	return &ThroughputMonitor{
+		windowSize:    windowSize,
+		requests:      make([]time.Time, 0, 1000),
+		maxThroughput: 1000, // Default max 1000 requests per window
+	}
+}
+
+// RecordRequest records a new request
+func (tm *ThroughputMonitor) RecordRequest() {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	now := time.Now()
+	tm.requests = append(tm.requests, now)
+
+	// Clean old requests
+	cutoff := now.Add(-tm.windowSize)
+	i := 0
+	for i < len(tm.requests) && tm.requests[i].Before(cutoff) {
+		i++
+	}
+	tm.requests = tm.requests[i:]
+
+	// Calculate current rate
+	tm.currentRate = float64(len(tm.requests)) / tm.windowSize.Seconds()
+}
+
+// GetRate returns the current throughput rate
+func (tm *ThroughputMonitor) GetRate() float64 {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return tm.currentRate
+}
+
+// IsOverloaded checks if throughput exceeds threshold
+func (tm *ThroughputMonitor) IsOverloaded() bool {
+	return tm.GetRate() > tm.maxThroughput
+}
+
+// LatencyTracker tracks request latencies
+type LatencyTracker struct {
+	mu         sync.RWMutex
+	latencies  []time.Duration
+	maxSize    int
+	p50        time.Duration
+	p95        time.Duration
+	p99        time.Duration
+}
+
+// NewLatencyTracker creates a new latency tracker
+func NewLatencyTracker(maxSize int) *LatencyTracker {
+	return &LatencyTracker{
+		latencies: make([]time.Duration, 0, maxSize),
+		maxSize:   maxSize,
+	}
+}
+
+// RecordLatency records a request latency
+func (lt *LatencyTracker) RecordLatency(latency time.Duration) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+
+	lt.latencies = append(lt.latencies, latency)
+	if len(lt.latencies) > lt.maxSize {
+		lt.latencies = lt.latencies[1:]
+	}
+
+	// Calculate percentiles
+	if len(lt.latencies) > 0 {
+		sorted := make([]time.Duration, len(lt.latencies))
+		copy(sorted, lt.latencies)
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i] < sorted[j]
+		})
+
+		lt.p50 = sorted[len(sorted)*50/100]
+		lt.p95 = sorted[len(sorted)*95/100]
+		lt.p99 = sorted[len(sorted)*99/100]
+	}
+}
+
+// GetPercentiles returns latency percentiles
+func (lt *LatencyTracker) GetPercentiles() (p50, p95, p99 time.Duration) {
+	lt.mu.RLock()
+	defer lt.mu.RUnlock()
+	return lt.p50, lt.p95, lt.p99
+}
+
+// ErrorClassifier classifies errors by type
+type ErrorClassifier struct {
+	mu           sync.RWMutex
+	errorCounts  map[string]int64
+	totalErrors  int64
+	classifiers  []ErrorClassification
+}
+
+// ErrorClassification defines an error classification rule
+type ErrorClassification struct {
+	Name      string
+	Pattern   string
+	Severity  string
+	Retryable bool
+}
+
+// NewErrorClassifier creates a new error classifier
+func NewErrorClassifier() *ErrorClassifier {
+	return &ErrorClassifier{
+		errorCounts: make(map[string]int64),
+		classifiers: []ErrorClassification{
+			{Name: "timeout", Pattern: "context deadline exceeded", Severity: "warning", Retryable: true},
+			{Name: "connection", Pattern: "connection refused", Severity: "error", Retryable: true},
+			{Name: "authentication", Pattern: "authentication failed", Severity: "critical", Retryable: false},
+			{Name: "cardinality", Pattern: "cardinality", Severity: "warning", Retryable: false},
+			{Name: "rate_limit", Pattern: "rate limit", Severity: "warning", Retryable: true},
+			{Name: "memory", Pattern: "out of memory", Severity: "critical", Retryable: false},
+			{Name: "disk", Pattern: "disk full", Severity: "critical", Retryable: false},
+		},
+	}
+}
+
+// ClassifyError classifies an error
+func (ec *ErrorClassifier) ClassifyError(err error) string {
+	if err == nil {
+		return "none"
+	}
+
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+
+	errStr := err.Error()
+	for _, classifier := range ec.classifiers {
+		if contains(errStr, classifier.Pattern) {
+			ec.errorCounts[classifier.Name]++
+			ec.totalErrors++
+			return classifier.Name
+		}
+	}
+
+	ec.errorCounts["unknown"]++
+	ec.totalErrors++
+	return "unknown"
+}
+
+// GetErrorStats returns error statistics
+func (ec *ErrorClassifier) GetErrorStats() map[string]int64 {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+
+	stats := make(map[string]int64)
+	for k, v := range ec.errorCounts {
+		stats[k] = v
+	}
+	stats["total"] = ec.totalErrors
+	return stats
+}
+
+// MemoryMonitor monitors memory usage
+type MemoryMonitor struct {
+	mu                sync.RWMutex
+	maxMemoryBytes    int64
+	currentBytes      int64
+	highWaterMark     int64
+	pressureThreshold float64
+}
+
+// NewMemoryMonitor creates a new memory monitor
+func NewMemoryMonitor(maxMemoryMB int) *MemoryMonitor {
+	return &MemoryMonitor{
+		maxMemoryBytes:    int64(maxMemoryMB) * 1024 * 1024,
+		pressureThreshold: 0.8, // Alert at 80% usage
+	}
+}
+
+// UpdateUsage updates current memory usage
+func (mm *MemoryMonitor) UpdateUsage(bytes int64) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	mm.currentBytes = bytes
+	if bytes > mm.highWaterMark {
+		mm.highWaterMark = bytes
+	}
+}
+
+// IsUnderPressure checks if memory is under pressure
+func (mm *MemoryMonitor) IsUnderPressure() bool {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+
+	if mm.maxMemoryBytes <= 0 {
+		return false
+	}
+
+	usage := float64(mm.currentBytes) / float64(mm.maxMemoryBytes)
+	return usage > mm.pressureThreshold
+}
+
+// GetUsagePercent returns memory usage percentage
+func (mm *MemoryMonitor) GetUsagePercent() float64 {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+
+	if mm.maxMemoryBytes <= 0 {
+		return 0
+	}
+
+	return float64(mm.currentBytes) / float64(mm.maxMemoryBytes) * 100
 }

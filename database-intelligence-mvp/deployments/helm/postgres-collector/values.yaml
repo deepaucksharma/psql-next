@@ -1,0 +1,214 @@
+# Default values for postgres-collector
+replicaCount: 2
+
+image:
+  repository: postgres-unified-collector
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# PostgreSQL databases to monitor
+databases:
+  - name: production
+    dsn: ""  # Set via secret
+    maxOpenConnections: 10
+    maxIdleConnections: 5
+    collectionInterval: 60s
+    slowQueryThresholdMs: 100
+  - name: staging
+    dsn: ""  # Set via secret
+    maxOpenConnections: 5
+    maxIdleConnections: 2
+    collectionInterval: 120s
+
+# Active Session History configuration
+ash:
+  enabled: true
+  samplingInterval: 1s
+  bufferSize: 3600
+
+# Plan analysis configuration
+planAnalysis:
+  enabled: true
+  cacheSize: 10000
+  analyzeSlowQueries: true
+  minCallsForAnalysis: 10
+
+# Adaptive sampling configuration
+adaptiveSampling:
+  enabled: true
+  defaultRate: 1.0
+  maxQueriesPerMinute: 10000
+  maxMemoryMB: 512
+  rules:
+    - name: critical_queries
+      priority: 100
+      sampleRate: 1.0
+      conditions:
+        - attribute: mean_time_ms
+          operator: gt
+          value: 1000
+    - name: high_frequency
+      priority: 90
+      sampleRate: 0.1
+      conditions:
+        - attribute: calls
+          operator: gt
+          value: 1000
+
+# Circuit breaker configuration
+circuitBreaker:
+  failureThreshold: 5
+  successThreshold: 3
+  openStateTimeout: 30s
+  maxConcurrentRequests: 100
+  baseTimeout: 5s
+  maxTimeout: 30s
+  enableAdaptiveTimeout: true
+  memoryThresholdMB: 1024
+  cpuThresholdPercent: 80.0
+  healthCheckInterval: 10s
+
+# OTLP exporter configuration
+otlp:
+  endpoint: ""  # Required
+  headers: {}
+  compression: gzip
+  insecure: false
+  retry:
+    enabled: true
+    initialInterval: 1s
+    maxInterval: 30s
+    maxElapsedTime: 5m
+  transform:
+    addDatabaseLabels: true
+    normalizeQueryText: true
+    includeQueryPlans: true
+    sanitizeSensitiveData: true
+    metricPrefix: "postgresql."
+
+# New Relic configuration
+newrelic:
+  apiKey: ""  # Required - set via secret
+  region: "US"  # US or EU
+
+# Cloud provider configuration
+cloud:
+  provider: ""  # aws, azure, gcp, or empty for self-managed
+  region: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8888"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 10001
+
+service:
+  type: ClusterIP
+  metricsPort: 8888
+  healthPort: 13133
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - postgres-collector
+        topologyKey: kubernetes.io/hostname
+
+# Persistence for caching
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  mountPath: /var/cache/postgres-collector
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /
+    port: health
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: health
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Monitoring
+monitoring:
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+# Log level
+logLevel: info
+
+# Extra environment variables
+extraEnvVars: []
+
+# Extra volumes
+extraVolumes: []
+
+# Extra volume mounts
+extraVolumeMounts: []
