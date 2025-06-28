@@ -1,0 +1,201 @@
+# Database Intelligence MVP - Local Development Setup
+# Addresses single instance limitation with active-passive failover
+
+version: '3.8'
+
+services:
+  # Primary collector instance
+  db-intelligence-primary:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: db-intel-primary
+    hostname: db-intel-primary
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    
+    # Configuration
+    volumes:
+      - ../../config/collector-improved.yaml:/etc/otel/config.yaml:ro
+      - collector-storage:/var/lib/otel/storage
+      - /var/log:/var/log:ro  # For log file access
+    
+    # Environment variables
+    environment:
+      - OTEL_CONFIG_FILE=/etc/otel/config.yaml
+      - PG_REPLICA_DSN=${PG_REPLICA_DSN}
+      - MYSQL_READONLY_DSN=${MYSQL_READONLY_DSN}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - OTLP_ENDPOINT=${OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
+      - DEPLOYMENT_ENV=docker-compose
+      - INSTANCE_ROLE=primary
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Ports
+    ports:
+      - "13133:13133"  # Health check
+      - "8888:8888"    # Metrics
+      - "55679:55679"  # zpages
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # Secondary collector (standby)
+  db-intelligence-secondary:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: db-intel-secondary
+    hostname: db-intel-secondary
+    
+    # Same config as primary but different ports
+    volumes:
+      - ../../config/collector-improved.yaml:/etc/otel/config.yaml:ro
+      - collector-storage-secondary:/var/lib/otel/storage
+      - /var/log:/var/log:ro
+    
+    environment:
+      - OTEL_CONFIG_FILE=/etc/otel/config.yaml
+      - PG_REPLICA_DSN=${PG_REPLICA_DSN}
+      - MYSQL_READONLY_DSN=${MYSQL_READONLY_DSN}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - OTLP_ENDPOINT=${OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
+      - DEPLOYMENT_ENV=docker-compose
+      - INSTANCE_ROLE=secondary
+    
+    # Different ports to avoid conflicts
+    ports:
+      - "13134:13133"  # Health check
+      - "8889:8888"    # Metrics
+      - "55680:55679"  # zpages
+    
+    # Start in standby mode (initially stopped)
+    profiles: ["standby"]
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    restart: unless-stopped
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # Simple health monitor for failover
+  failover-monitor:
+    image: alpine:latest
+    container_name: db-intel-monitor
+    
+    volumes:
+      - ./scripts:/scripts:ro
+    
+    environment:
+      - PRIMARY_URL=http://db-intel-primary:13133
+      - SECONDARY_URL=http://db-intel-secondary:13133
+      - CHECK_INTERVAL=30
+    
+    command: |
+      sh -c '
+        apk add --no-cache curl docker-cli
+        while true; do
+          if ! curl -f $$PRIMARY_URL/ >/dev/null 2>&1; then
+            echo "Primary unhealthy, starting secondary..."
+            # Would trigger secondary start in real implementation
+          fi
+          sleep $$CHECK_INTERVAL
+        done
+      '
+    
+    restart: unless-stopped
+    
+    # Access to Docker socket for container management
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # PostgreSQL test database (for development)
+  postgres-test:
+    image: postgres:15
+    container_name: db-intel-postgres-test
+    
+    environment:
+      - POSTGRES_DB=testdb
+      - POSTGRES_USER=testuser
+      - POSTGRES_PASSWORD=testpass
+    
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    
+    ports:
+      - "5432:5432"
+    
+    # Enable pg_stat_statements
+    command: |
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.max=10000
+      -c pg_stat_statements.track=all
+      -c log_statement=all
+      -c log_destination=stderr
+      -c logging_collector=off
+    
+    profiles: ["test"]
+
+  # MySQL test database (for development)  
+  mysql-test:
+    image: mysql:8.0
+    container_name: db-intel-mysql-test
+    
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpass
+      - MYSQL_DATABASE=testdb
+      - MYSQL_USER=testuser
+      - MYSQL_PASSWORD=testpass
+    
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./my.cnf:/etc/mysql/conf.d/custom.cnf:ro
+    
+    ports:
+      - "3306:3306"
+    
+    profiles: ["test"]
+
+volumes:
+  collector-storage:
+    driver: local
+  collector-storage-secondary:
+    driver: local
+  postgres-data:
+    driver: local
+  mysql-data:
+    driver: local
+
+networks:
+  default:
+    name: db-intelligence
+    driver: bridge

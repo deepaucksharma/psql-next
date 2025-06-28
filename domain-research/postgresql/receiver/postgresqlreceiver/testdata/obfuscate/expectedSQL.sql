@@ -1,1 +1,0 @@
-SELECT * FROM pg_catalog.pg_class WHERE relname = ? AND relkind = ?
