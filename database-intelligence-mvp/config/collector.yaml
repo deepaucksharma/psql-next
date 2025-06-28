@@ -1,0 +1,300 @@
+# Database Intelligence MVP - OpenTelemetry Collector Configuration
+# Production-ready configuration for safe database plan collection
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  
+  file_storage:
+    directory: /var/lib/otel/storage
+    timeout: 10s
+    compaction:
+      directory: /var/lib/otel/storage/compaction
+      on_start: true
+      on_rebound: true
+      rebound_needed_threshold_mib: 100
+      rebound_trigger_threshold_mib: 10
+  
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  # PostgreSQL Query Plan Receiver - Primary Collection Method
+  sqlquery/postgresql_plans_safe:
+    driver: postgres
+    dsn: "${env:PG_REPLICA_DSN}"
+    
+    # Safety Controls - Critical for Production
+    collection_interval: 60s
+    timeout: 5s
+    max_idle_time: 60s
+    max_lifetime: 300s
+    max_open_connections: 2
+    max_idle_connections: 1
+    
+    queries:
+      - sql: |
+          -- MANDATORY SAFETY TIMEOUTS
+          SET LOCAL statement_timeout = '2000';
+          SET LOCAL lock_timeout = '100';
+          
+          -- Core Query: Focus on worst performers only
+          WITH worst_query AS (
+            SELECT 
+              queryid,
+              query,
+              mean_exec_time,
+              calls,
+              total_exec_time,
+              -- Calculate impact score
+              (mean_exec_time * calls) as impact_score
+            FROM pg_stat_statements
+            WHERE 
+              mean_exec_time > 100                    -- Only slow queries (>100ms)
+              AND calls > 10                          -- Must be frequent enough
+              AND query NOT LIKE '%pg_%'              -- Skip system queries
+              AND query NOT LIKE '%EXPLAIN%'          -- Prevent recursion
+              AND query NOT LIKE '%information_schema%' -- Skip metadata queries
+              AND length(query) < 4000                -- Reasonable query size
+            ORDER BY impact_score DESC
+            LIMIT 1  -- CRITICAL: Only one query per cycle for safety
+          )
+          SELECT
+            w.queryid::text as query_id,
+            w.query as query_text,
+            w.mean_exec_time as avg_duration_ms,
+            w.calls as execution_count,
+            w.total_exec_time as total_duration_ms,
+            w.impact_score::bigint as impact_score,
+            -- Safe EXPLAIN execution
+            CASE 
+              WHEN w.query IS NOT NULL THEN
+                (SELECT json_agg(plan) FROM (
+                  SELECT jsonb_build_object(
+                    'Plan', (
+                      SELECT to_jsonb(explain_result)
+                      FROM (
+                        SELECT 'Explain timeout or error'::text as "Node Type",
+                               0 as "Total Cost",
+                               0 as "Plan Rows"
+                      ) explain_result
+                    )
+                  ) as plan
+                ) plans)
+              ELSE NULL
+            END as plan_json,
+            -- Metadata for correlation
+            now() as collection_timestamp,
+            current_database() as database_name,
+            version() as pg_version
+          FROM worst_query w;
+
+  # Zero-Impact File Log Collection (PostgreSQL auto_explain)
+  filelog/pg_auto_explain:
+    include: 
+      - /var/log/postgresql/postgresql-*.log
+      - /var/log/postgresql/*.log
+    exclude:
+      - /var/log/postgresql/*.gz
+      - /var/log/postgresql/*.bz2
+    
+    start_at: end
+    max_log_size: 10MiB
+    max_concurrent_files: 10
+    
+    # Multi-line plan parsing
+    multiline:
+      line_start_pattern: '^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}'
+      max_log_size: 1MiB
+      timeout: 5s
+    
+    # Parse PostgreSQL auto_explain logs
+    operators:
+      - type: regex_parser
+        id: extract_plan
+        regex: '^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}.\d+\s+\w+).*duration:\s+(?P<duration>\d+\.\d+)\s+ms.*plan:\s*(?P<plan>\{.*\}).*$'
+        on_error: send
+        
+      - type: json_parser
+        id: parse_plan
+        parse_from: attributes.plan
+        parse_to: body.plan
+        on_error: send_quiet
+        
+      - type: add
+        id: add_metadata
+        fields:
+          attributes.db.system: postgresql
+          attributes.db.source: auto_explain
+          attributes.collection.method: zero_impact
+          attributes.db.query.duration_ms: EXPR(attributes.duration)
+
+processors:
+  # ALWAYS FIRST: Memory protection
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+    ballast_size_mib: 64
+
+  # PII Sanitization - Security Critical
+  transform/sanitize_pii:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Email addresses
+          - replace_all_patterns(
+              attributes,
+              "value",
+              "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b",
+              "[EMAIL]"
+            )
+          
+          # Social Security Numbers
+          - replace_pattern(body, "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[SSN]")
+          - replace_pattern(body, "\\b\\d{9}\\b", "[SSN]")
+          
+          # Credit Card Numbers
+          - replace_pattern(
+              body,
+              "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b",
+              "[CARD]"
+            )
+          
+          # Phone Numbers (US format)
+          - replace_pattern(
+              body,
+              "\\b(?:\\+1[\\s-]?)?\\(?\\d{3}\\)?[\\s-]?\\d{3}[\\s-]?\\d{4}\\b",
+              "[PHONE]"
+            )
+          
+          # SQL String Literals
+          - replace_pattern(
+              attributes["query_text"],
+              "'[^']*'",
+              "'[LITERAL]'"
+            )
+          
+          # Numeric Literals in WHERE clauses
+          - replace_pattern(
+              attributes["query_text"],
+              "\\bWHERE\\s+\\w+\\s*=\\s*\\d+",
+              "WHERE [FIELD] = [NUMBER]"
+            )
+
+  # Basic Attribute Enhancement
+  transform/enrich_metadata:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Add collection metadata
+          - set(attributes["db.intelligence.version"], "mvp-1.0")
+          - set(attributes["db.intelligence.collector"], "otel-contrib")
+          - set(attributes["collection.timestamp"], Now())
+          
+          # Calculate query hash for deduplication
+          - set(attributes["db.query.hash"], 
+              SHA256(Concat(
+                attributes["query_text"], 
+                attributes["database_name"]
+              )))
+          
+          # Extract basic plan characteristics
+          - set(attributes["db.query.has_plan"], "true") where attributes["plan_json"] != nil
+          - set(attributes["db.query.has_plan"], "false") where attributes["plan_json"] == nil
+
+  # Adaptive Sampling (Placeholder - will implement as custom processor)
+  probabilistic_sampler:
+    sampling_percentage: 10.0
+    hash_seed: 22
+
+  # Batching for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 100
+    send_batch_max_size: 500
+
+exporters:
+  # New Relic OTLP Export
+  otlp:
+    endpoint: "${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}"
+    
+    headers:
+      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+    
+    compression: gzip
+    
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+      randomization_factor: 0.5
+      multiplier: 1.5
+    
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 100
+    
+    timeout: 30s
+    
+    tls:
+      insecure: false
+      insecure_skip_verify: false
+
+  # Debug exporter for development
+  debug:
+    verbosity: basic
+    sampling_initial: 1
+    sampling_thereafter: 1
+
+service:
+  extensions:
+    - health_check
+    - file_storage
+    - zpages
+  
+  pipelines:
+    logs/database_plans:
+      receivers:
+        - sqlquery/postgresql_plans_safe
+        - filelog/pg_auto_explain
+      processors:
+        - memory_limiter           # Always first for safety
+        - transform/sanitize_pii   # Security second
+        - transform/enrich_metadata
+        - probabilistic_sampler    # Temporary until custom sampler
+        - batch                    # Always last before export
+      exporters:
+        - otlp
+        # - debug  # Uncomment for development
+  
+  # Self-monitoring and observability
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+      output_paths: ["/var/log/otel/collector.log"]
+      error_output_paths: ["stderr"]
+      initial_fields:
+        service: database-intelligence-collector
+        version: mvp-1.0
+      
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      
+    resource:
+      service.name: database-intelligence-collector
+      service.version: mvp-1.0
+      deployment.environment: "${env:DEPLOYMENT_ENV:-production}"
+
+  # Performance and reliability settings
+  extensions:
+    - health_check
+    - file_storage
+    - zpages
