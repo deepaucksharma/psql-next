@@ -18,7 +18,7 @@ maintainers:
     email: database-team@newrelic.com
 dependencies:
   - name: opentelemetry-collector
-    version: "0.69.0"
+    version: "0.96.0"
     repository: https://open-telemetry.github.io/opentelemetry-helm-charts
     condition: opentelemetry-collector.enabled
 annotations:
@@ -32,3 +32,14 @@ annotations:
     - Cloud provider optimization (RDS, Aurora, Azure, GCP)
     - Circuit breaker for safety
     - OTLP export to New Relic
+
+# Common labels
+commonLabels:
+  app.kubernetes.io/name: postgres-collector
+  app.kubernetes.io/instance: {{ .Release.Name }}
+  app.kubernetes.io/managed-by: {{ .Release.Service }}
+
+# Selector labels
+selectorLabels:
+  app.kubernetes.io/name: postgres-collector
+  app.kubernetes.io/instance: {{ .Release.Name }}

@@ -1,129 +1,135 @@
-# Technical Architecture Deep Dive
+# Technical Architecture
 
-## Core Design Decisions
+## Overview
 
-### The Single-Instance Constraint
+This document provides a deep dive into the technical architecture of the Database Intelligence MVP. The project follows a safety-first, iterative approach, beginning with a robust, production-ready collector that uses standard OpenTelemetry components and evolving toward a more advanced solution with custom-built processors.
 
-**Decision**: Use file storage for processor state management
+## v1.0.0: Production Architecture
 
-**Rationale**: Simplicity for MVP, avoiding external dependencies
+The current production release (v1.0.0) provides a highly available and scalable solution for collecting database metadata.
 
-**Critical Constraint**: This creates a fundamental scaling limitation. The collector MUST run as a single instance. Multiple instances will have inconsistent state, leading to:
-- Duplicate data ingestion
-- Inconsistent sampling behavior
-- Unpredictable deduplication
+### Core Design Principles
 
-**Future Path**: External state store (Redis/Memcached) is required before horizontal scaling.
+- **Safety and Stability**: The collector is built on standard, battle-tested OpenTelemetry components. There is no custom Go code in the critical data path for the production release, which minimizes risk and ensures stability.
+- **High Availability**: The architecture is designed for horizontal scalability. It uses a leader election mechanism in Kubernetes to ensure that only one collector instance is actively querying databases at a time, preventing data duplication and unnecessary load.
+- **Metadata, Not Plans**: To ensure safety and avoid performance degradation on production databases, the collector **does not** collect full query execution plans. Instead, it gathers query metadata and performance metrics from `pg_stat_statements` and Performance Schema.
 
-### The Correlation Gap
-
-**Reality**: Database queries and APM traces live in separate worlds. 
-
-**Why It's Hard**:
-1. Database connections are pooled - trace context is lost
-2. SQL has no standard for context propagation
-3. Requires changes to every database driver
-
-**Interim Solution**: Manual correlation based on:
-- Timestamp alignment
-- Query fingerprint matching
-- Duration correlation
-
-**Long-term Solution**: Industry-wide effort to propagate trace context through SQL comments.
-
-## Component Architecture
-
-### Data Flow with Integrated Verification
+### Production Data Flow
 
 ```
-Database → Receiver → Memory Limiter → PII Sanitizer → Attribute Extractor → 
-                                                            ↓
-                                                      Entity Synthesis
-                                                            ↓
-                                                    Circuit Breaker
-                                                            ↓
-                                                    VERIFICATION ← Real-time Feedback
-                                                            ↓       ↓
-                                                        Sampler     NR Monitoring
-                                                            ↓
-                                                         Batch → New Relic
-                                                            ↑
-            └────────────── File Storage (State Persistence) ───────────────────┘
+┌─────────────────┐      ┌─────────────────┐
+│   PostgreSQL    │      │      MySQL      │
+│  (Read Replica) │      │ (Read Replica)  │
+└────────┬────────┘      └────────┬────────┘
+         │                        │
+         │      SQL Queries       │
+         ▼                        ▼
+┌──────────────────────────────────────────┐
+│     OpenTelemetry Collector (HA)         │
+│  - Leader election for active collection │
+│  - Multiple replicas for availability    │
+├──────────────────────────────────────────┤
+│ ┌──────────────────────────────────────┐ │
+│ │      Standard `sqlquery` Receiver    │ │
+│ │   - Safety timeouts (e.g., 3000ms)   │ │
+│ │   - Connection pooling (e.g., 2 max) │ │
+│ └──────────────────────────────────────┘ │
+│                    │                     │
+│                    ▼                     │
+│ ┌──────────────────────────────────────┐ │
+│ │          `memory_limiter`            │ │
+│ │   - Prevents Out-of-Memory errors    │ │
+│ └──────────────────────────────────────┘ │
+│                    │                     │
+│                    ▼                     │
+│ ┌──────────────────────────────────────┐ │
+│ │      `transform/sanitize_pii`        │ │
+│ │   - PII sanitization with regex      │ │
+│ └──────────────────────────────────────┘ │
+│                    │                     │
+│                    ▼                     │
+│ ┌──────────────────────────────────────┐ │
+│ │      `probabilistic_sampler`         │ │
+│ │   - Reduces data volume (e.g., 25%)  │ │
+│ └──────────────────────────────────────┘ │
+│                    │                     │
+│                    ▼                     │
+│ ┌──────────────────────────────────────┐ │
+│ │              `batch`                 │ │
+│ │   - Optimizes network efficiency     │ │
+│ └──────────────────────────────────────┘ │
+│                    │                     │
+│                    ▼                     │
+│ ┌──────────────────────────────────────┐ │
+│ │          `otlp` Exporter             │ │
+│ │   - Securely sends data to New Relic │ │
+│ └──────────────────────────────────────┘ │
+└──────────────────────────────────────────┘
+                 │
+                 ▼
+          ┌──────────────┐
+          │  New Relic   │
+          └──────────────┘
 ```
-
-### Verification Layer
-
-**New Addition**: Integrated verification processor that provides real-time feedback on:
-
-1. **Data Quality Verification**
-   - Entity synthesis validation
-   - Query normalization effectiveness
-   - PII sanitization confirmation
-   - Cardinality monitoring
-
-2. **Integration Health Monitoring**
-   - NrIntegrationError detection
-   - Data freshness tracking
-   - Circuit breaker state monitoring
-   - Export success rates
-
-3. **Feedback Mechanisms**
-   - Real-time alerts via logs
-   - Health report generation
-   - Remediation suggestions
-   - Metrics export for dashboards
-
-### Receiver Layer
-
-**Philosophy**: Configure standard receivers with safety constraints rather than building custom ones.
-
-**Key Safety Mechanisms**:
-1. Statement-level timeouts (PostgreSQL: `SET LOCAL`)
-2. Query result limits (`LIMIT 1`)
-3. Read-replica enforcement (connection string)
-4. Circuit breaker patterns (receiver timeout)
-
-### Processor Pipeline
-
-**Order Matters**: The pipeline order is critical for safety and efficiency.
-
-1. **memory_limiter**: First line of defense against OOM
-2. **transform/sanitize_pii**: Security before processing
-3. **plan_attribute_extractor**: Lightweight parsing only
-4. **plan_context_enricher**: Heavy lifting (disabled in MVP)
-5. **adaptive_sampler**: Intelligent data reduction
-6. **batch**: Network efficiency
 
 ### State Management
 
-**Current**: File storage with these characteristics:
-- Survives collector restarts
-- Requires persistent volume
-- Single-instance only
-- No cross-node coordination
+In the v1.0.0 HA architecture, state management is simplified:
 
-**Implications**:
-- Deploy as StatefulSet with `replicas: 1`
-- Or DaemonSet (one per node)
-- Never as Deployment with `replicas > 1`
+- **Stateless Processors**: The processors in the pipeline (sampler, batch, etc.) are stateless. This allows for safe horizontal scaling, as any collector instance can process any data.
+- **Leader Election**: The `leader_election` extension for Kubernetes ensures that only one collector instance is the "leader" at any given time. The leader is responsible for executing the `sqlquery` receiver, which prevents multiple collectors from querying the same database simultaneously.
+- **No `file_storage` for State**: Unlike the earlier MVP, the HA architecture does not rely on `file_storage` for processor state, which was the primary cause of the single-instance constraint.
+
+### Deployment
+
+The recommended deployment pattern for the production architecture is the Kubernetes `Deployment` with multiple replicas, as defined in `deploy/k8s/ha-deployment.yaml`. This provides both high availability and scalability.
+
+```yaml
+# Recommended HA Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-intelligence-collector
+spec:
+  replicas: 3 # Multiple replicas for HA
+  ...
+```
+
+## Future Vision: Advanced Capabilities
+
+The project includes experimental, custom-built Go components that represent the future vision for Database Intelligence. These components are **not enabled** in the v1.0.0 production configuration but are under active development.
+
+### Custom Components (Not in Production Pipeline)
+
+- **`planattributeextractor`**: A processor to parse detailed attributes from JSON execution plans.
+- **`adaptivesampler`**: An intelligent, stateful sampler that can make more sophisticated sampling decisions based on query characteristics.
+- **`circuitbreaker`**: A processor to automatically halt data collection from a database that is unhealthy or under duress.
+- **`postgresqlquery` receiver**: An advanced receiver with built-in support for Active Session History (ASH) sampling and deeper PostgreSQL integration.
+
+### Visionary Data Flow
+
+This is the target architecture that will be enabled as the custom components are integrated and production-hardened.
+
+```
+Database → Advanced Receiver → Memory Limiter → PII Sanitizer → Plan Attribute Extractor → 
+                                                                         ↓
+                                                                   Entity Synthesis
+                                                                         ↓
+                                                                   Circuit Breaker
+                                                                         ↓
+                                                                 Adaptive Sampler
+                                                                         ↓
+                                                                      Batch → New Relic
+                                                                         ↑
+                                     └────────────── Redis (External State Store) ───────────────────┘
+```
 
 ## Security Architecture
 
-### Defense in Depth
+The project follows a defense-in-depth security model:
 
-1. **Network**: Read-replica endpoints only
-2. **Authentication**: Read-only database users
-3. **Authorization**: Minimal required permissions
-4. **Data**: PII sanitization before processing
-5. **Transport**: TLS to New Relic
-
-### PII Protection
-
-**Sanitization Patterns**:
-- Email addresses → `[EMAIL]`
-- SSNs → `[SSN]`
-- Credit cards → `[CARD]`
-- Phone numbers → `[PHONE]`
-- SQL literals → Removed entirely
-
-**Hash-based Correlation**: Sanitized values are hashed deterministically for correlation without exposing data.
+1.  **Network**: The collector is designed to connect to read-replica endpoints only. Kubernetes `NetworkPolicy` objects are provided to restrict traffic to and from the collector.
+2.  **Authentication**: Database connections should be made with dedicated, read-only users.
+3.  **Authorization**: The principle of least privilege is applied. The monitoring user should only have the minimum necessary permissions to query performance views.
+4.  **Data**: PII sanitization is a standard component in the pipeline, redacting sensitive information like emails, SSNs, and credit card numbers from query text.
+5.  **Transport**: All data is sent to New Relic over a secure TLS connection.

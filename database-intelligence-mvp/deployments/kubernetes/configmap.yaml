@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: postgres-collector-config
+  name: otel-collector-config
   namespace: monitoring
 data:
   collector-config.yaml: |
@@ -89,7 +89,7 @@ data:
       otlp/postgresql:
         endpoint: "${env:OTLP_ENDPOINT}"
         headers:
-          api-key: "${env:NEW_RELIC_API_KEY}"
+          api-key: "${env:NEW_RELIC_LICENSE_KEY}"
         compression: gzip
         insecure: false
         retry:

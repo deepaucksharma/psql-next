@@ -1,0 +1,39 @@
+# Prometheus configuration for monitoring experimental components
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Scrape experimental collector metrics
+  - job_name: 'experimental-collector'
+    static_configs:
+      - targets: ['db-intelligence-experimental:8888']
+    metric_relabel_configs:
+      # Keep only relevant metrics
+      - source_labels: [__name__]
+        regex: '(otelcol_.*|go_.*|db_intelligence_.*|process_.*)'
+        action: keep
+
+  # Scrape production collector for comparison
+  - job_name: 'production-collector'
+    static_configs:
+      - targets: ['db-intelligence-primary:8888']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: '(otelcol_.*|go_.*|process_.*)'
+        action: keep
+
+  # Scrape Redis if using external state
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+# Alerting rules for experimental components
+rule_files:
+  - '/etc/prometheus/rules/*.yml'
+
+# Alert manager configuration (if deployed)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []

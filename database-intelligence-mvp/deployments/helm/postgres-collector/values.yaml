@@ -2,9 +2,9 @@
 replicaCount: 2
 
 image:
-  repository: postgres-unified-collector
+  repository: otel/opentelemetry-collector-contrib
   pullPolicy: IfNotPresent
-  tag: "latest"
+  tag: "0.96.0"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -136,12 +136,7 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-autoscaling:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 10
-  targetCPUUtilizationPercentage: 70
-  targetMemoryUtilizationPercentage: 80
+
 
 nodeSelector: {}
 

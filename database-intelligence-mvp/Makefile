@@ -49,16 +49,10 @@ clean: ## Clean build artifacts
 	@go clean -cache
 	@echo "Clean completed"
 
-.PHONY: deps
-deps: ## Download and verify dependencies
-	@echo "Downloading dependencies..."
-	@cd processors/planattributeextractor && go mod download && go mod verify
-	@cd processors/adaptivesampler && go mod download && go mod verify
-	@cd processors/circuitbreaker && go mod download && go mod verify
-	@echo "Dependencies ready"
+
 
 .PHONY: build
-build: deps ## Build all custom processors
+build: ## Build all custom processors
 	@echo "Building custom processors..."
 	@mkdir -p $(BINARY_DIR)
 	
@@ -112,6 +106,7 @@ test: ## Run all unit tests
 	@cd processors/planattributeextractor && go test -v -timeout $(TEST_TIMEOUT) ./...
 	@cd processors/adaptivesampler && go test -v -timeout $(TEST_TIMEOUT) ./...
 	@cd processors/circuitbreaker && go test -v -timeout $(TEST_TIMEOUT) ./...
+	@cd processors/verification && go test -v -timeout $(TEST_TIMEOUT) ./...
 	@cd tests/unit && go test -v -timeout $(TEST_TIMEOUT) ./...
 	@echo "Unit tests completed"
 
@@ -163,6 +158,7 @@ lint: ## Run code linting
 		cd processors/planattributeextractor && golangci-lint run; \
 		cd ../adaptivesampler && golangci-lint run; \
 		cd ../circuitbreaker && golangci-lint run; \
+		cd ../verification && golangci-lint run; \
 	else \
 		echo "golangci-lint not installed, skipping lint"; \
 	fi
@@ -173,6 +169,7 @@ fmt: ## Format code
 	@cd processors/planattributeextractor && go fmt ./...
 	@cd processors/adaptivesampler && go fmt ./...
 	@cd processors/circuitbreaker && go fmt ./...
+	@cd processors/verification && go fmt ./...
 	@echo "Code formatting completed"
 
 .PHONY: vet
@@ -181,6 +178,7 @@ vet: ## Run go vet
 	@cd processors/planattributeextractor && go vet ./...
 	@cd processors/adaptivesampler && go vet ./...
 	@cd processors/circuitbreaker && go vet ./...
+	@cd processors/verification && go vet ./...
 	@echo "Vet completed"
 
 .PHONY: security-scan
@@ -190,6 +188,7 @@ security-scan: ## Run security scanning
 		cd processors/planattributeextractor && gosec ./...; \
 		cd ../adaptivesampler && gosec ./...; \
 		cd ../circuitbreaker && gosec ./...; \
+		cd ../verification && gosec ./...; \
 	else \
 		echo "gosec not installed, skipping security scan"; \
 	fi
@@ -259,11 +258,11 @@ k8s-logs: ## Show Kubernetes pod logs
 .PHONY: k8s-delete
 k8s-delete: ## Delete Kubernetes deployment
 	@echo "Deleting Kubernetes deployment..."
-	@kubectl delete -f deployments/kubernetes/statefulset.yaml || true
-	@kubectl delete -f deployments/kubernetes/configmap.yaml || true
-	@kubectl delete -f deployments/kubernetes/secrets.yaml || true
-	@kubectl delete -f deployments/kubernetes/rbac.yaml || true
-	@kubectl delete -f deployments/kubernetes/network-policy.yaml || true
+	@kubectl delete -f deploy/k8s/statefulset.yaml || true
+	@kubectl delete -f deploy/k8s/configmap.yaml || true
+	@kubectl delete -f deploy/k8s/secrets.yaml || true
+	@kubectl delete -f deploy/k8s/rbac.yaml || true
+	@kubectl delete -f deploy/k8s/network-policy.yaml || true
 	@echo "Kubernetes resources deleted"
 
 # ============================================================================

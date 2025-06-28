@@ -41,6 +41,9 @@ type Config struct {
 
 	// EnableDebugLogging enables detailed debug output
 	EnableDebugLogging bool `mapstructure:"enable_debug_logging"`
+
+	// NewRelicErrorPatterns is a list of strings that indicate a New Relic integration error
+	NewRelicErrorPatterns []string `mapstructure:"new_relic_error_patterns"`
 }
 
 // Validate checks the processor configuration
@@ -102,5 +105,13 @@ func createDefaultConfig() component.Config {
 		MemoryThresholdMB:     512, // 512MB
 		CPUThresholdPercent:   80.0, // 80%
 		EnableDebugLogging:    false,
+		NewRelicErrorPatterns: []string{
+			"cardinality",
+			"NrIntegrationError",
+			"api-key",
+			"rate limit",
+			"quota exceeded",
+			"unique time series",
+		},
 	}
 }

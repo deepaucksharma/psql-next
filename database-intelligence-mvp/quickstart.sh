@@ -12,8 +12,9 @@ source "${SCRIPT_DIR}/scripts/lib/common.sh"
 
 # Configuration
 INSTALL_DIR="${INSTALL_DIR:-/opt/db-intelligence}"
-CONFIG_FILE="${SCRIPT_DIR}/config/collector-improved.yaml"
+CONFIG_FILE="${SCRIPT_DIR}/config/collector.yaml"
 COMPOSE_FILE="${SCRIPT_DIR}/deploy/docker/docker-compose.yaml"
+EXPERIMENTAL_MODE="${EXPERIMENTAL_MODE:-false}"
 
 # Check prerequisites
 check_prerequisites() {
@@ -103,38 +104,71 @@ start_services() {
     # Copy environment file for docker-compose
     cp "$env_file" "${SCRIPT_DIR}/deploy/docker/.env"
     
-    # Start the collector
+    # Choose deployment based on mode
     cd "${SCRIPT_DIR}/deploy/docker"
-    docker-compose up -d db-intelligence-primary
+    
+    if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+        log "Starting in EXPERIMENTAL mode with custom components"
+        
+        # Check if custom collector is built
+        if [ ! -f "${SCRIPT_DIR}/dist/db-intelligence-custom" ]; then
+            error "Custom collector not built. Run: $0 --experimental build"
+            return 1
+        fi
+        
+        # Start experimental deployment
+        docker-compose -f docker-compose.experimental.yaml up -d db-intelligence-experimental
+        local container_name="db-intel-experimental"
+        local health_port="13134"
+        local metrics_port="8889"
+        local debug_port="55680"
+    else
+        # Start standard deployment
+        docker-compose up -d db-intelligence-primary
+        local container_name="db-intel-primary"
+        local health_port="13133"
+        local metrics_port="8888"
+        local debug_port="55679"
+    fi
     
     # Wait for startup
-    if wait_for_service "http://localhost:13133" 60; then
+    if wait_for_service "http://localhost:${health_port}" 60; then
         success "Collector is running"
     else
         error "Collector failed to start"
-        echo "Check logs with: docker logs db-intel-primary"
-        return 1
-    fi
-    
-    if [ $retries -eq 0 ]; then
-        error "Collector failed to start"
-        echo "Check logs with: docker logs db-intel-primary"
+        echo "Check logs with: docker logs ${container_name}"
         return 1
     fi
     
     echo ""
-    success "Database Intelligence MVP is running!"
+    if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+        success "Database Intelligence MVP is running in EXPERIMENTAL mode!"
+        echo ""
+        echo "⚠️  WARNING: Experimental components are active"
+        echo "   - Single instance deployment (stateful components)"
+        echo "   - Higher resource usage expected"
+        echo "   - Monitor closely for issues"
+    else
+        success "Database Intelligence MVP is running!"
+    fi
     echo ""
     echo "🔗 Useful endpoints:"
-    echo "   Health Check: http://localhost:13133"
-    echo "   Metrics:      http://localhost:8888/metrics"
-    echo "   Debug UI:     http://localhost:55679"
+    echo "   Health Check: http://localhost:${health_port}"
+    echo "   Metrics:      http://localhost:${metrics_port}/metrics"
+    if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+        echo "   Debug UI:     http://localhost:${debug_port}/debug/tracez"
+        echo "   pprof:        http://localhost:6061/debug/pprof"
+    fi
     echo ""
     echo "📊 To check if data is being collected:"
-    echo "   curl http://localhost:8888/metrics | grep otelcol_receiver_accepted"
+    echo "   curl http://localhost:${metrics_port}/metrics | grep otelcol_receiver_accepted"
     echo ""
     echo "🛑 To stop:"
-    echo "   docker-compose -f ${SCRIPT_DIR}/deploy/docker/docker-compose.yaml down"
+    if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+        echo "   docker-compose -f ${SCRIPT_DIR}/deploy/docker/docker-compose.experimental.yaml down"
+    else
+        echo "   docker-compose -f ${SCRIPT_DIR}/deploy/docker/docker-compose.yaml down"
+    fi
     echo ""
 }
 
@@ -142,8 +176,19 @@ start_services() {
 check_status() {
     log "Checking collector status..."
     
+    # Determine ports based on mode
+    if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+        local health_port="13134"
+        local metrics_port="8889"
+        local compose_file="docker-compose.experimental.yaml"
+    else
+        local health_port="13133"
+        local metrics_port="8888"
+        local compose_file="docker-compose.yaml"
+    fi
+    
     # Health check
-    if curl -f http://localhost:13133 &> /dev/null; then
+    if curl -f http://localhost:${health_port} &> /dev/null; then
         success "Collector is healthy"
     else
         error "Collector health check failed"
@@ -151,7 +196,7 @@ check_status() {
     fi
     
     # Metrics check
-    local metrics=$(curl -s http://localhost:8888/metrics 2>/dev/null || echo "")
+    local metrics=$(curl -s http://localhost:${metrics_port}/metrics 2>/dev/null || echo "")
     if [ -n "$metrics" ]; then
         success "Metrics endpoint responding"
         
@@ -161,6 +206,19 @@ check_status() {
         
         echo "   📈 Records received: $received"
         echo "   📤 Records exported: $exported"
+        
+        # Experimental-specific metrics
+        if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+            local ash_samples=$(echo "$metrics" | grep "db_intelligence_ash_samples_total" | tail -1 | awk '{print $2}' || echo "0")
+            local circuit_state=$(echo "$metrics" | grep "db_intelligence_circuitbreaker_open" | tail -1 | awk '{print $2}' || echo "0")
+            local sampling_rate=$(echo "$metrics" | grep "db_intelligence_adaptivesampler_current_rate" | tail -1 | awk '{print $2}' || echo "0")
+            
+            echo ""
+            echo "   🔬 Experimental Metrics:"
+            echo "   ASH Samples: $ash_samples"
+            echo "   Circuit Breaker: $([ "$circuit_state" = "0" ] && echo "closed" || echo "OPEN")"
+            echo "   Sampling Rate: ${sampling_rate}%"
+        fi
     else
         warning "Metrics endpoint not responding"
     fi
@@ -168,7 +226,7 @@ check_status() {
     # Container status
     echo ""
     echo "🐳 Container status:"
-    docker-compose -f "${SCRIPT_DIR}/deploy/docker/docker-compose.yaml" ps
+    docker-compose -f "${SCRIPT_DIR}/deploy/docker/${compose_file}" ps
 }
 
 # Stop services
@@ -176,15 +234,25 @@ stop_services() {
     log "Stopping Database Intelligence Collector..."
     
     cd "${SCRIPT_DIR}/deploy/docker"
-    docker-compose down
+    
+    if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+        docker-compose -f docker-compose.experimental.yaml down
+    else
+        docker-compose down
+    fi
     
     success "Services stopped"
 }
 
 # Show logs
 show_logs() {
-    local service="${1:-db-intelligence-primary}"
-    docker logs -f "db-intel-${service#db-intelligence-}"
+    if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+        local service="${1:-experimental}"
+    else
+        local service="${1:-primary}"
+    fi
+    
+    docker logs -f "db-intel-${service}"
 }
 
 # Run safety tests
@@ -202,28 +270,66 @@ run_tests() {
 usage() {
     echo "Database Intelligence MVP Quickstart"
     echo ""
-    echo "Usage: $0 <command>"
+    echo "Usage: $0 [--experimental] <command>"
+    echo ""
+    echo "Options:"
+    echo "  --experimental  Use experimental components (requires build)"
     echo ""
     echo "Commands:"
-    echo "  prereq     Check prerequisites"
-    echo "  configure  Interactive configuration setup"
-    echo "  validate   Validate database connections"
-    echo "  start      Start the collector"
-    echo "  status     Check collector status"
-    echo "  stop       Stop the collector"
-    echo "  logs       Show collector logs"
-    echo "  test       Run safety tests"
-    echo "  all        Run prereq, configure, validate, start"
+    echo "  prereq      Check prerequisites"
+    echo "  configure   Interactive configuration setup"
+    echo "  validate    Validate database connections"
+    echo "  start       Start the collector"
+    echo "  status      Check collector status"
+    echo "  stop        Stop the collector"
+    echo "  logs        Show collector logs"
+    echo "  test        Run safety tests"
+    echo "  build       Build experimental collector (experimental mode only)"
+    echo "  all         Run prereq, configure, validate, start"
     echo ""
     echo "Examples:"
-    echo "  $0 all          # Complete setup"
-    echo "  $0 start        # Start with existing config"
-    echo "  $0 logs         # Show logs"
+    echo "  $0 all                    # Complete setup (production)"
+    echo "  $0 --experimental all     # Complete setup (experimental)"
+    echo "  $0 --experimental build   # Build custom collector"
+    echo "  $0 start                  # Start with existing config"
+    echo "  $0 logs                   # Show logs"
     echo ""
+}
+
+# Build experimental collector
+build_experimental() {
+    log "Building experimental collector..."
+    
+    if [ ! -f "${SCRIPT_DIR}/scripts/build-custom-collector.sh" ]; then
+        error "Build script not found"
+        return 1
+    fi
+    
+    # Make script executable
+    chmod +x "${SCRIPT_DIR}/scripts/build-custom-collector.sh"
+    
+    # Run build
+    "${SCRIPT_DIR}/scripts/build-custom-collector.sh" --with-docker --with-tests
+    
+    if [ $? -eq 0 ]; then
+        success "Experimental collector built successfully"
+        echo ""
+        echo "You can now start the experimental collector with:"
+        echo "  $0 --experimental start"
+    else
+        error "Build failed"
+        return 1
+    fi
 }
 
 # Main script logic
 main() {
+    # Check for experimental flag
+    if [ "${1:-}" = "--experimental" ]; then
+        EXPERIMENTAL_MODE="true"
+        shift
+    fi
+    
     local command="${1:-}"
     
     if [ -z "$command" ]; then
@@ -256,8 +362,19 @@ main() {
         test)
             run_tests
             ;;
+        build)
+            if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+                build_experimental
+            else
+                error "Build command requires --experimental flag"
+                exit 1
+            fi
+            ;;
         all)
             check_prerequisites
+            if [ "$EXPERIMENTAL_MODE" = "true" ]; then
+                build_experimental
+            fi
             configure_environment
             validate_database_setup
             start_services

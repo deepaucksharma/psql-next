@@ -125,6 +125,11 @@ func (p *adaptiveSampler) Start(ctx context.Context, host component.Host) error 
 	go p.periodicStateSave()
 	go p.periodicCleanup()
 
+	// Sort rules by priority (highest first)
+	sort.Slice(p.config.SamplingRules, func(i, j int) bool {
+		return p.config.SamplingRules[i].Priority > p.config.SamplingRules[j].Priority
+	})
+
 	return nil
 }
 
@@ -261,14 +266,7 @@ func (p *adaptiveSampler) isDuplicate(record plog.LogRecord) bool {
 
 // findMatchingRule finds the highest priority rule that matches the record
 func (p *adaptiveSampler) findMatchingRule(record plog.LogRecord) *SamplingRule {
-	// Sort rules by priority (highest first)
-	rules := make([]SamplingRule, len(p.config.SamplingRules))
-	copy(rules, p.config.SamplingRules)
-	sort.Slice(rules, func(i, j int) bool {
-		return rules[i].Priority > rules[j].Priority
-	})
-
-	for _, rule := range rules {
+	for _, rule := range p.config.SamplingRules {
 		if p.ruleMatches(rule, record) {
 			return &rule
 		}

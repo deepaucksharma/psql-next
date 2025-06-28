@@ -1,15 +1,13 @@
-module github.com/newrelic/database-intelligence-mvp/processors/circuitbreaker
+module github.com/database-intelligence-mvp/processors/circuitbreaker
 
-go 1.23.0
-
-toolchain go1.24.3
+go 1.21
 
 require (
-	go.opentelemetry.io/collector/component v1.34.0
-	go.opentelemetry.io/collector/consumer v1.34.0
-	go.opentelemetry.io/collector/pdata v1.34.0
-	go.opentelemetry.io/collector/processor v1.34.0
-	go.uber.org/zap v1.27.0
+	go.opentelemetry.io/collector/component v0.96.0
+	go.opentelemetry.io/collector/consumer v0.96.0
+	go.opentelemetry.io/collector/pdata v1.3.0
+	go.opentelemetry.io/collector/processor v0.96.0
+	go.uber.org/zap v1.26.0
 )
 
 require (

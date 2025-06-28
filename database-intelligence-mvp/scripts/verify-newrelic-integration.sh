@@ -25,8 +25,8 @@ if ! load_env_file "${PROJECT_ROOT}/.env"; then
 fi
 
 # Validate required environment variables
-check_env_var "NEW_RELIC_LICENSE_KEY"
-check_env_var "NEW_RELIC_ACCOUNT_ID"
+validate_env_var "NEW_RELIC_LICENSE_KEY"
+validate_env_var "NEW_RELIC_ACCOUNT_ID"
 
 # Configuration
 NERDGRAPH_URL="https://api.newrelic.com/graphql"

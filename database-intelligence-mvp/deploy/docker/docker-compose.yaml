@@ -22,19 +22,23 @@ services:
     
     # Configuration
     volumes:
-      - ../../config/collector-newrelic-optimized.yaml:/etc/otel/config.yaml:ro
+      - ../../config/collector.yaml:/etc/otelcol-contrib/config.yaml:ro
       - collector-storage:/var/lib/otel/storage
       - /var/log:/var/log:ro  # For log file access
     
     # Environment variables
     environment:
-      - OTEL_CONFIG_FILE=/etc/otel/config.yaml
+      - OTEL_CONFIG_FILE=/etc/otelcol-contrib/config.yaml
       - PG_REPLICA_DSN=${PG_REPLICA_DSN}
       - MYSQL_READONLY_DSN=${MYSQL_READONLY_DSN}
       - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
       - OTLP_ENDPOINT=${OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
       - DEPLOYMENT_ENV=docker-compose
       - INSTANCE_ROLE=primary
+      - COLLECTION_INTERVAL_SECONDS=60
+      - QUERY_TIMEOUT_MS=3000
+      - SAMPLING_PERCENTAGE=25
+      - LOG_LEVEL=info
     
     # Health check
     healthcheck:

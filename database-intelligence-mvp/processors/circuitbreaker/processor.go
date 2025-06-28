@@ -670,18 +670,9 @@ func (p *circuitBreakerProcessor) isNewRelicError(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	errStr := err.Error()
-	nrErrorPatterns := []string{
-		"cardinality",
-		"NrIntegrationError",
-		"api-key",
-		"rate limit",
-		"quota exceeded",
-		"unique time series",
-	}
-	
-	for _, pattern := range nrErrorPatterns {
+	for _, pattern := range p.config.NewRelicErrorPatterns {
 		if contains(errStr, pattern) {
 			return true
 		}

@@ -11,7 +11,7 @@ import (
 )
 
 // ComponentType is the name of this processor
-const componentType = "adaptive_sampler"
+var componentType = component.MustNewType("adaptivesampler")
 
 // NewFactory creates a new factory for the adaptive sampler processor
 func NewFactory() processor.Factory {

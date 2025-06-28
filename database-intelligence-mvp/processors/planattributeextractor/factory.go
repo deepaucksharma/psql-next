@@ -11,7 +11,7 @@ import (
 )
 
 // ComponentType is the name of this processor
-const componentType = "plan_attribute_extractor"
+var componentType = component.MustNewType("planattributeextractor")
 
 // NewFactory creates a new factory for the plan attribute extractor processor
 func NewFactory() processor.Factory {

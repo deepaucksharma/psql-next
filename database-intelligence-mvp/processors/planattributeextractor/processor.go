@@ -19,10 +19,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// ComponentType defines the type of this processor
-	ComponentType = "plan_attribute_extractor"
-)
+
 
 // planAttributeExtractor is the processor implementation
 type planAttributeExtractor struct {
