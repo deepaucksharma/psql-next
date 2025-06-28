@@ -1,0 +1,222 @@
+# RBAC Configuration for Database Intelligence Collector
+# Follows principle of least privilege
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nr-db-intelligence
+  namespace: monitoring
+  labels:
+    app: nr-db-intelligence
+    component: rbac
+automountServiceAccountToken: true
+
+---
+# Cluster Role for reading cluster-wide resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nr-db-intelligence-reader
+  labels:
+    app: nr-db-intelligence
+    component: rbac
+rules:
+# Read access to nodes for node-level metrics
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "nodes/metrics"]
+  verbs: ["get", "list", "watch"]
+
+# Read access to pods and services for correlation
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+# Read access to deployments and replicasets
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch"]
+
+# Read access to config maps for configuration discovery
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+
+# Read access to namespaces
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list", "watch"]
+
+---
+# Namespace Role for managing own resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nr-db-intelligence-manager
+  namespace: monitoring
+  labels:
+    app: nr-db-intelligence
+    component: rbac
+rules:
+# Manage own pods
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Read secrets for configuration
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["newrelic-credentials", "database-credentials", "database-tls-certs"]
+  verbs: ["get"]
+
+# Manage config maps
+- apiGroups: [""]
+  resources: ["configmaps"]
+  resourceNames: ["nr-db-intelligence-config"]
+  verbs: ["get", "list", "watch"]
+
+# Read persistent volume claims
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+
+# Create events for monitoring
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+
+# Access to leases for leader election (future use)
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+# Bind cluster role to service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nr-db-intelligence-reader
+  labels:
+    app: nr-db-intelligence
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nr-db-intelligence-reader
+subjects:
+- kind: ServiceAccount
+  name: nr-db-intelligence
+  namespace: monitoring
+
+---
+# Bind namespace role to service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nr-db-intelligence-manager
+  namespace: monitoring
+  labels:
+    app: nr-db-intelligence
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nr-db-intelligence-manager
+subjects:
+- kind: ServiceAccount
+  name: nr-db-intelligence
+  namespace: monitoring
+
+---
+# Pod Security Policy (if cluster uses PSP)
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: nr-db-intelligence-psp
+  labels:
+    app: nr-db-intelligence
+    component: security
+spec:
+  # Security constraints
+  privileged: false
+  allowPrivilegeEscalation: false
+  
+  # User/Group restrictions
+  runAsUser:
+    rule: MustRunAsNonRoot
+  runAsGroup:
+    rule: MustRunAs
+    ranges:
+    - min: 10001
+      max: 10001
+  
+  # Filesystem restrictions
+  readOnlyRootFilesystem: true
+  
+  # Volume restrictions
+  volumes:
+  - configMap
+  - secret
+  - emptyDir
+  - persistentVolumeClaim
+  - hostPath  # Limited to log directories
+  
+  # Host restrictions
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  
+  # Allowed host paths (for log access)
+  allowedHostPaths:
+  - pathPrefix: /var/log/postgresql
+    readOnly: true
+  - pathPrefix: /var/log/mysql
+    readOnly: true
+  
+  # Security context constraints
+  seLinux:
+    rule: RunAsAny
+  fsGroup:
+    rule: MustRunAs
+    ranges:
+    - min: 10001
+      max: 10001
+  
+  # Capabilities
+  requiredDropCapabilities:
+  - ALL
+  allowedCapabilities: []
+
+---
+# Role for PSP usage
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nr-db-intelligence-psp-user
+  namespace: monitoring
+  labels:
+    app: nr-db-intelligence
+    component: security
+rules:
+- apiGroups: ["policy"]
+  resources: ["podsecuritypolicies"]
+  resourceNames: ["nr-db-intelligence-psp"]
+  verbs: ["use"]
+
+---
+# Bind PSP role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nr-db-intelligence-psp-user
+  namespace: monitoring
+  labels:
+    app: nr-db-intelligence
+    component: security
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nr-db-intelligence-psp-user
+subjects:
+- kind: ServiceAccount
+  name: nr-db-intelligence
+  namespace: monitoring
