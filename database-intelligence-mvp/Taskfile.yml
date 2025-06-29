@@ -1,0 +1,425 @@
+version: '3'
+
+silent: true
+
+includes:
+  build: ./tasks/build.yml
+  test: ./tasks/test.yml
+  deploy: ./tasks/deploy.yml
+  dev: ./tasks/dev.yml
+  validate: ./tasks/validate.yml
+
+vars:
+  PROJECT_NAME: database-intelligence-collector
+  BINARY_NAME: otelcol-db-intelligence
+  DIST_DIR: dist
+  CONFIG_DIR: config
+  DOCKER_REGISTRY: '{{.DOCKER_REGISTRY | default "docker.io"}}'
+  DOCKER_ORG: '{{.DOCKER_ORG | default "database-intelligence"}}'
+  VERSION: '{{.VERSION | default "latest"}}'
+
+env:
+  CGO_ENABLED: 0
+  GOOS: '{{OS}}'
+  GOARCH: '{{ARCH}}'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list-all
+
+  # Setup tasks
+  setup:
+    desc: Complete development environment setup
+    cmds:
+      - task: setup:validate
+      - task: setup:tools
+      - task: setup:deps
+      - task: setup:env
+      - echo "✅ Development environment ready!"
+
+  setup:validate:
+    desc: Validate system requirements
+    cmds:
+      - |
+        echo "🔍 Checking system requirements..."
+        if ! command -v go &> /dev/null; then
+          echo "❌ Go is not installed. Please install Go 1.21+"
+          exit 1
+        fi
+        if ! command -v docker &> /dev/null; then
+          echo "❌ Docker is not installed. Please install Docker"
+          exit 1
+        fi
+        echo "✅ System requirements met"
+
+  setup:tools:
+    desc: Install required development tools
+    cmds:
+      - echo "📦 Installing development tools..."
+      - go install go.opentelemetry.io/collector/cmd/ocb@latest
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - go install golang.org/x/tools/cmd/goimports@latest
+      - go install github.com/segmentio/golines@latest
+      - |
+        if ! command -v helm &> /dev/null; then
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          rm get_helm.sh
+        fi
+      - echo "✅ Tools installed"
+    status:
+      - command -v ocb
+      - command -v golangci-lint
+      - command -v goimports
+      - command -v helm
+
+  setup:deps:
+    desc: Download and verify dependencies
+    cmds:
+      - echo "📦 Managing Go dependencies..."
+      - go mod download
+      - go mod verify
+      - go mod tidy
+      - echo "✅ Dependencies ready"
+
+  setup:env:
+    desc: Create development environment file
+    cmds:
+      - |
+        if [ ! -f .env ]; then
+          echo "📝 Creating .env file..."
+          cat > .env << 'EOF'
+        # Database Configuration
+        POSTGRES_HOST=localhost
+        POSTGRES_PORT=5432
+        POSTGRES_USER=postgres
+        POSTGRES_PASSWORD=postgres
+        POSTGRES_DATABASE=testdb
+        
+        # New Relic Configuration
+        NEW_RELIC_LICENSE_KEY=your_license_key_here
+        OTLP_ENDPOINT=https://otlp.nr-data.net:4317
+        
+        # Environment
+        ENVIRONMENT=development
+        LOG_LEVEL=debug
+        EOF
+          echo "✅ Created .env file - please update with your values"
+        else
+          echo "ℹ️  .env file already exists"
+        fi
+
+  # Quick start
+  quickstart:
+    desc: Quick start for new developers
+    cmds:
+      - task: setup
+      - task: fix:all
+      - task: build
+      - task: dev:up
+      - |
+        echo "
+        🚀 Database Intelligence Collector is ready!
+        
+        📊 Access points:
+        - Health: http://localhost:13133/
+        - Metrics: http://localhost:8888/metrics
+        - Prometheus: http://localhost:8889/metrics
+        - Grafana: http://localhost:3000 (admin/admin)
+        
+        📝 Next steps:
+        1. Update .env with your New Relic license key
+        2. Run 'task dev:logs' to see collector logs
+        3. Run 'task test:integration' to verify setup
+        "
+
+  # Fix tasks
+  fix:all:
+    desc: Fix all known issues
+    cmds:
+      - task: fix:modules
+      - task: fix:imports
+      - echo "✅ All fixes applied"
+
+  fix:modules:
+    desc: Fix module path inconsistencies
+    vars:
+      OLD_PATH: github.com/newrelic/database-intelligence-mvp
+      NEW_PATH: github.com/database-intelligence-mvp
+    cmds:
+      - echo "🔧 Fixing module paths..."
+      - |
+        # Fix in YAML files
+        find . -name "*.yaml" -o -name "*.yml" | while read f; do
+          if grep -q "{{.OLD_PATH}}" "$f"; then
+            echo "  Fixing: $f"
+            sed -i.bak 's|{{.OLD_PATH}}|{{.NEW_PATH}}|g' "$f"
+          fi
+        done
+        
+        # Fix in Go files
+        find . -name "*.go" | while read f; do
+          if grep -q "{{.OLD_PATH}}" "$f"; then
+            echo "  Fixing: $f"
+            sed -i.bak 's|{{.OLD_PATH}}|{{.NEW_PATH}}|g' "$f"
+          fi
+        done
+        
+        # Clean up backup files
+        find . -name "*.bak" -delete
+      - echo "✅ Module paths fixed"
+    status:
+      - '! grep -r "{{.OLD_PATH}}" . --include="*.go" --include="*.yaml" --include="*.yml" 2>/dev/null'
+
+  fix:imports:
+    desc: Fix and organize Go imports
+    cmds:
+      - echo "🔧 Organizing imports..."
+      - goimports -w ./
+      - golines -w --max-len=120 ./
+      - echo "✅ Imports organized"
+
+  # Build tasks
+  build:
+    desc: Build the collector binary
+    deps: [fix:modules]
+    vars:
+      OUTPUT: '{{.OUTPUT | default (print .DIST_DIR "/" .BINARY_NAME)}}'
+    cmds:
+      - echo "🔨 Building collector..."
+      - mkdir -p {{.DIST_DIR}}
+      - |
+        if command -v ocb &> /dev/null; then
+          ocb --config=ocb-config.yaml --output-path={{.OUTPUT}}
+        else
+          echo "❌ OCB not found. Run 'task setup:tools' first"
+          exit 1
+        fi
+      - echo "✅ Built: {{.OUTPUT}}"
+    sources:
+      - ./**/*.go
+      - go.mod
+      - go.sum
+      - ocb-config.yaml
+    generates:
+      - '{{.OUTPUT}}'
+
+  build:docker:
+    desc: Build Docker image
+    vars:
+      IMAGE: '{{.DOCKER_REGISTRY}}/{{.DOCKER_ORG}}/{{.BINARY_NAME}}'
+      TAG: '{{.TAG | default .VERSION}}'
+    cmds:
+      - echo "🐳 Building Docker image: {{.IMAGE}}:{{.TAG}}"
+      - docker build -t {{.IMAGE}}:{{.TAG}} -t {{.IMAGE}}:latest .
+      - echo "✅ Docker image built"
+
+  build:all:
+    desc: Build everything (binary, docker, helm)
+    cmds:
+      - task: build
+      - task: build:docker
+      - task: helm:package
+
+  # Development tasks
+  dev:up:
+    desc: Start development environment
+    cmds:
+      - echo "🚀 Starting development environment..."
+      - docker compose --profile dev up -d
+      - |
+        echo "⏳ Waiting for services to be healthy..."
+        timeout 60 bash -c 'until docker compose ps | grep -E "(postgres|mysql).*healthy" &>/dev/null; do sleep 2; done'
+      - echo "✅ Development environment ready"
+
+  dev:down:
+    desc: Stop development environment
+    cmds:
+      - echo "🛑 Stopping development environment..."
+      - docker compose --profile dev down
+      - echo "✅ Development environment stopped"
+
+  dev:logs:
+    desc: Show development logs
+    vars:
+      SERVICE: '{{.SERVICE | default "collector"}}'
+    cmds:
+      - docker compose logs -f {{.SERVICE}}
+
+  dev:shell:
+    desc: Open shell in collector container
+    cmds:
+      - docker compose exec collector /bin/sh
+
+  dev:reset:
+    desc: Reset development environment
+    cmds:
+      - task: dev:down
+      - echo "🧹 Cleaning volumes..."
+      - docker compose down -v
+      - echo "✅ Development environment reset"
+
+  # Run tasks
+  run:
+    desc: Run collector locally
+    deps: [build]
+    vars:
+      CONFIG: '{{.CONFIG | default (print .CONFIG_DIR "/collector.yaml")}}'
+      LOG_LEVEL: '{{.LOG_LEVEL | default "info"}}'
+    cmds:
+      - echo "🚀 Running collector..."
+      - '{{.DIST_DIR}}/{{.BINARY_NAME}} --config={{.CONFIG}} --log-level={{.LOG_LEVEL}}'
+
+  run:debug:
+    desc: Run collector with debug logging
+    cmds:
+      - task: run
+        vars:
+          LOG_LEVEL: debug
+
+  # Validation tasks
+  validate:
+    desc: Run all validations
+    cmds:
+      - task: validate:config
+      - task: validate:code
+      - task: validate:deps
+      - echo "✅ All validations passed"
+
+  validate:config:
+    desc: Validate collector configuration
+    deps: [build]
+    vars:
+      CONFIG: '{{.CONFIG | default (print .CONFIG_DIR "/collector.yaml")}}'
+    cmds:
+      - echo "🔍 Validating configuration..."
+      - '{{.DIST_DIR}}/{{.BINARY_NAME}} validate --config={{.CONFIG}}'
+      - echo "✅ Configuration valid"
+
+  validate:code:
+    desc: Run linters and static analysis
+    cmds:
+      - echo "🔍 Running code analysis..."
+      - golangci-lint run --timeout=5m ./...
+      - go vet ./...
+      - echo "✅ Code analysis passed"
+
+  validate:deps:
+    desc: Check for dependency vulnerabilities
+    cmds:
+      - echo "🔍 Checking dependencies..."
+      - go list -json -deps ./... | nancy sleuth
+      - echo "✅ Dependencies checked"
+
+  # Test tasks
+  test:
+    desc: Run all tests
+    cmds:
+      - task: test:unit
+      - task: test:integration
+      - echo "✅ All tests passed"
+
+  test:unit:
+    desc: Run unit tests with coverage
+    cmds:
+      - echo "🧪 Running unit tests..."
+      - go test -v -race -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+      - echo "✅ Unit tests passed. Coverage report: coverage.html"
+
+  test:integration:
+    desc: Run integration tests
+    deps: [dev:up]
+    cmds:
+      - echo "🧪 Running integration tests..."
+      - go test -v -tags=integration ./tests/integration/...
+      - echo "✅ Integration tests passed"
+
+  test:e2e:
+    desc: Run end-to-end tests
+    deps: [dev:up, run]
+    cmds:
+      - echo "🧪 Running end-to-end tests..."
+      - cd tests/e2e && go test -v ./...
+      - echo "✅ E2E tests passed"
+
+  # Monitoring tasks
+  monitor:health:
+    desc: Check collector health
+    cmds:
+      - |
+        echo "🏥 Checking collector health..."
+        if curl -sf http://localhost:13133/ > /dev/null; then
+          echo "✅ Collector is healthy"
+          curl -s http://localhost:13133/ | jq '.'
+        else
+          echo "❌ Collector is not responding"
+          exit 1
+        fi
+
+  monitor:metrics:
+    desc: Show collector metrics
+    vars:
+      FILTER: '{{.FILTER | default ""}}'
+    cmds:
+      - |
+        echo "📊 Collector metrics:"
+        if [ -n "{{.FILTER}}" ]; then
+          curl -s http://localhost:8888/metrics | grep -E "{{.FILTER}}"
+        else
+          curl -s http://localhost:8888/metrics | grep -E "^(# HELP|# TYPE|otelcol_|db_|adaptive_|circuit_)"
+        fi
+
+  # Helm tasks
+  helm:lint:
+    desc: Lint Helm chart
+    dir: deployments/helm/db-intelligence
+    cmds:
+      - echo "🔍 Linting Helm chart..."
+      - helm lint .
+      - echo "✅ Helm chart valid"
+
+  helm:package:
+    desc: Package Helm chart
+    dir: deployments/helm/db-intelligence
+    cmds:
+      - echo "📦 Packaging Helm chart..."
+      - helm package . --destination ../../../dist/
+      - echo "✅ Helm chart packaged"
+
+  helm:install:
+    desc: Install Helm chart
+    vars:
+      RELEASE: '{{.RELEASE | default "db-intelligence"}}'
+      NAMESPACE: '{{.NAMESPACE | default "monitoring"}}'
+    cmds:
+      - echo "☸️  Installing Helm chart..."
+      - |
+        helm upgrade --install {{.RELEASE}} \
+          ./deployments/helm/db-intelligence \
+          --namespace {{.NAMESPACE}} \
+          --create-namespace \
+          --wait
+      - echo "✅ Helm chart installed"
+
+  # Clean tasks
+  clean:
+    desc: Clean all generated files
+    cmds:
+      - echo "🧹 Cleaning..."
+      - rm -rf {{.DIST_DIR}}
+      - rm -rf coverage.*
+      - rm -rf vendor/
+      - find . -name "*.bak" -delete
+      - echo "✅ Cleaned"
+
+  clean:all:
+    desc: Clean everything including Docker
+    cmds:
+      - task: clean
+      - task: dev:reset
+      - docker rmi {{.DOCKER_REGISTRY}}/{{.DOCKER_ORG}}/{{.BINARY_NAME}} || true
+      - echo "✅ Everything cleaned"

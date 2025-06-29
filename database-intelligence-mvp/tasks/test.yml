@@ -1,0 +1,157 @@
+version: '3'
+
+vars:
+  TEST_TIMEOUT: 10m
+  COVERAGE_THRESHOLD: 70
+
+tasks:
+  unit:
+    desc: Run unit tests with coverage
+    vars:
+      PACKAGE: '{{.PACKAGE | default "./..."}}'
+      VERBOSE: '{{.VERBOSE | default "true"}}'
+    cmds:
+      - echo "🧪 Running unit tests..."
+      - |
+        go test {{if eq .VERBOSE "true"}}-v{{end}} \
+          -race \
+          -timeout={{.TEST_TIMEOUT}} \
+          -coverprofile=coverage.out \
+          -covermode=atomic \
+          {{.PACKAGE}}
+      - echo "📊 Coverage report:"
+      - go tool cover -func=coverage.out | tail -n 1
+
+  unit:processor:
+    desc: Test specific processor
+    vars:
+      PROCESSOR: '{{.PROCESSOR}}'
+    cmds:
+      - |
+        if [ -z "{{.PROCESSOR}}" ]; then
+          echo "❌ PROCESSOR is required (adaptivesampler|circuitbreaker|planattributeextractor|verification)"
+          exit 1
+        fi
+      - task: test:unit
+        vars:
+          PACKAGE: './processors/{{.PROCESSOR}}/...'
+
+  integration:
+    desc: Run integration tests
+    deps: ['dev:up']
+    vars:
+      VERBOSE: '{{.VERBOSE | default "true"}}'
+    cmds:
+      - echo "🧪 Running integration tests..."
+      - |
+        POSTGRES_HOST=localhost \
+        POSTGRES_PORT=5432 \
+        POSTGRES_USER=postgres \
+        POSTGRES_PASSWORD=postgres \
+        MYSQL_HOST=localhost \
+        MYSQL_PORT=3306 \
+        MYSQL_USER=root \
+        MYSQL_PASSWORD=mysql \
+        go test {{if eq .VERBOSE "true"}}-v{{end}} \
+          -tags=integration \
+          -timeout={{.TEST_TIMEOUT}} \
+          ./tests/integration/...
+
+  e2e:
+    desc: Run end-to-end tests
+    deps: ['dev:up', 'run']
+    cmds:
+      - echo "🧪 Running E2E tests..."
+      - |
+        # Wait for collector to be ready
+        timeout 30 bash -c 'until curl -sf http://localhost:13133/ > /dev/null; do sleep 1; done'
+      - |
+        go test -v \
+          -tags=e2e \
+          -timeout={{.TEST_TIMEOUT}} \
+          ./tests/e2e/...
+
+  benchmark:
+    desc: Run performance benchmarks
+    vars:
+      PACKAGE: '{{.PACKAGE | default "./processors/..."}}'
+      TIME: '{{.TIME | default "10s"}}'
+    cmds:
+      - echo "⚡ Running benchmarks..."
+      - |
+        go test -bench=. \
+          -benchtime={{.TIME}} \
+          -benchmem \
+          -cpuprofile=cpu.prof \
+          -memprofile=mem.prof \
+          {{.PACKAGE}}
+      - echo "✅ Benchmark complete. Profiles: cpu.prof, mem.prof"
+
+  load:
+    desc: Run load tests
+    deps: ['dev:up', 'run']
+    vars:
+      DURATION: '{{.DURATION | default "5m"}}'
+      VUS: '{{.VUS | default "10"}}'
+    cmds:
+      - echo "🔥 Running load tests..."
+      - |
+        docker run --rm \
+          --network=host \
+          -v $(pwd)/tests/load:/scripts:ro \
+          grafana/k6:latest \
+          run /scripts/database-load.js \
+          --duration={{.DURATION}} \
+          --vus={{.VUS}}
+
+  coverage:
+    desc: Generate coverage report
+    deps: [unit]
+    cmds:
+      - echo "📊 Generating coverage report..."
+      - go tool cover -html=coverage.out -o coverage.html
+      - |
+        COVERAGE=$(go tool cover -func=coverage.out | tail -n 1 | awk '{print $3}' | sed 's/%//')
+        echo "📈 Total coverage: ${COVERAGE}%"
+        if (( $(echo "$COVERAGE < {{.COVERAGE_THRESHOLD}}" | bc -l) )); then
+          echo "❌ Coverage below threshold ({{.COVERAGE_THRESHOLD}}%)"
+          exit 1
+        fi
+      - echo "✅ Coverage report: coverage.html"
+
+  all:
+    desc: Run all tests
+    cmds:
+      - task: test:unit
+      - task: test:integration
+      - task: test:e2e
+      - task: test:coverage
+      - echo "✅ All tests passed!"
+
+  watch:
+    desc: Run tests in watch mode
+    vars:
+      PACKAGE: '{{.PACKAGE | default "./..."}}'
+    cmds:
+      - |
+        echo "👀 Watching for changes..."
+        while true; do
+          inotifywait -qre modify ./**/*.go 2>/dev/null || \
+          fswatch -o ./**/*.go 2>/dev/null | while read; do
+            clear
+            task test:unit PACKAGE={{.PACKAGE}} VERBOSE=false
+          done
+        done
+
+  specific:
+    desc: Run specific test by name
+    vars:
+      NAME: '{{.NAME}}'
+      PACKAGE: '{{.PACKAGE | default "./..."}}'
+    cmds:
+      - |
+        if [ -z "{{.NAME}}" ]; then
+          echo "❌ NAME is required"
+          exit 1
+        fi
+      - go test -v -run "{{.NAME}}" {{.PACKAGE}}
