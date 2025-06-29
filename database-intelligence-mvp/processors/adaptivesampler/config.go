@@ -9,8 +9,8 @@ import (
 
 // Config represents the configuration for the adaptive sampler processor
 type Config struct {
-	// StateStorage configures persistent state management
-	StateStorage StateStorageConfig `mapstructure:"state_storage"`
+	// InMemoryOnly forces in-memory-only operation (no persistence)
+	InMemoryOnly bool `mapstructure:"in_memory_only"`
 
 	// Deduplication settings
 	Deduplication DeduplicationConfig `mapstructure:"deduplication"`
@@ -28,31 +28,13 @@ type Config struct {
 	EnableDebugLogging bool `mapstructure:"enable_debug_logging"`
 }
 
-// StateStorageConfig configures how state is stored
-type StateStorageConfig struct {
-	// Type of storage: "file_storage" only for MVP
-	Type string `mapstructure:"type"`
+// StateConfig configures in-memory state management
+type StateConfig struct {
+	// CleanupInterval how often to clean expired entries
+	CleanupInterval time.Duration `mapstructure:"cleanup_interval"`
 
-	// FileStorage configuration for file-based storage
-	FileStorage FileStorageConfig `mapstructure:"file_storage"`
-}
-
-// FileStorageConfig configures file-based state storage
-type FileStorageConfig struct {
-	// Directory where state files are stored
-	Directory string `mapstructure:"directory"`
-
-	// SyncInterval how often to sync to disk
-	SyncInterval time.Duration `mapstructure:"sync_interval"`
-
-	// CompactionInterval how often to compact state files
-	CompactionInterval time.Duration `mapstructure:"compaction_interval"`
-
-	// MaxSizeMB maximum size of state files before compaction
-	MaxSizeMB int `mapstructure:"max_size_mb"`
-
-	// BackupRetention how many backup files to keep
-	BackupRetention int `mapstructure:"backup_retention"`
+	// MaxMemoryMB maximum memory usage for state (soft limit)
+	MaxMemoryMB int `mapstructure:"max_memory_mb"`
 }
 
 // DeduplicationConfig configures duplicate detection
@@ -105,17 +87,8 @@ type SamplingCondition struct {
 
 // Validate checks the processor configuration
 func (cfg *Config) Validate() error {
-	if cfg.StateStorage.Type != "file_storage" {
-		return fmt.Errorf("only file_storage is supported for state storage, got: %s", cfg.StateStorage.Type)
-	}
-
-	if cfg.StateStorage.FileStorage.Directory == "" {
-		return fmt.Errorf("file storage directory must be specified")
-	}
-
-	if cfg.StateStorage.FileStorage.MaxSizeMB <= 0 {
-		return fmt.Errorf("max_size_mb must be positive, got: %d", cfg.StateStorage.FileStorage.MaxSizeMB)
-	}
+	// Force in-memory mode (file storage is deprecated)
+	cfg.InMemoryOnly = true
 
 	if cfg.DefaultSampleRate < 0.0 || cfg.DefaultSampleRate > 1.0 {
 		return fmt.Errorf("default_sample_rate must be between 0.0 and 1.0, got: %f", cfg.DefaultSampleRate)
@@ -202,16 +175,7 @@ func (condition *SamplingCondition) Validate() error {
 // createDefaultConfig creates a default configuration
 func createDefaultConfig() component.Config {
 	return &Config{
-		StateStorage: StateStorageConfig{
-			Type: "file_storage",
-			FileStorage: FileStorageConfig{
-				Directory:          "/var/lib/otel/sampling_state",
-				SyncInterval:       10 * time.Second,
-				CompactionInterval: 300 * time.Second, // 5 minutes
-				MaxSizeMB:          100,
-				BackupRetention:    3,
-			},
-		},
+		InMemoryOnly: true, // Force in-memory operation
 		Deduplication: DeduplicationConfig{
 			Enabled:         true,
 			CacheSize:       10000,

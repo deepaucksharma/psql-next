@@ -9,10 +9,10 @@ tasks:
     desc: Deploy locally using Docker Compose
     deps: ['build:docker']
     cmds:
-      - echo "🚀 Deploying locally with Docker Compose..."
+      - echo "[START] Deploying locally with Docker Compose..."
       - docker compose --profile all up -d
       - |
-        echo "⏳ Waiting for services to be healthy..."
+        echo "[WAIT] Waiting for services to be healthy..."
         timeout 60 bash -c '
           until docker compose ps | grep -E "collector.*healthy" &>/dev/null; do 
             echo -n "."
@@ -27,15 +27,15 @@ tasks:
     vars:
       PROFILE: '{{.PROFILE | default "all"}}'
     cmds:
-      - echo "🚀 Deploying profile: {{.PROFILE}}"
+      - echo "[START] Deploying profile: {{.PROFILE}}"
       - docker compose --profile {{.PROFILE}} up -d
-      - echo "✅ Profile {{.PROFILE}} deployed"
+      - echo "[OK] Profile {{.PROFILE}} deployed"
 
   k8s:
     desc: Deploy to Kubernetes using Helm
     deps: ['helm:package']
     cmds:
-      - echo "☸️  Deploying to Kubernetes..."
+      - echo "[K8S] Deploying to Kubernetes..."
       - |
         kubectl create namespace {{.NAMESPACE}} --dry-run=client -o yaml | kubectl apply -f -
       - task: deploy:k8s:secrets
@@ -46,7 +46,7 @@ tasks:
           --values ./deployments/helm/db-intelligence/values.yaml \
           {{if .VALUES_FILE}}--values {{.VALUES_FILE}}{{end}} \
           --wait --timeout 10m
-      - echo "✅ Deployed to Kubernetes"
+      - echo "[OK] Deployed to Kubernetes"
       - task: deploy:k8s:status
 
   k8s:secrets:
@@ -56,10 +56,10 @@ tasks:
     cmds:
       - |
         if [ -z "{{.LICENSE_KEY}}" ]; then
-          echo "⚠️  NEW_RELIC_LICENSE_KEY not set, skipping secret creation"
+          echo "[WARNING]  NEW_RELIC_LICENSE_KEY not set, skipping secret creation"
           exit 0
         fi
-      - echo "🔐 Creating Kubernetes secrets..."
+      - echo "[SECRET] Creating Kubernetes secrets..."
       - |
         kubectl create secret generic newrelic-license \
           --from-literal=license-key={{.LICENSE_KEY}} \
@@ -75,13 +75,13 @@ tasks:
   k8s:status:
     desc: Check Kubernetes deployment status
     cmds:
-      - echo "📊 Kubernetes deployment status:"
+      - echo "[STATUS] Kubernetes deployment status:"
       - kubectl get all -n {{.NAMESPACE}}
       - echo ""
-      - echo "🔍 Pod status:"
+      - echo "[CHECK] Pod status:"
       - kubectl get pods -n {{.NAMESPACE}} -o wide
       - echo ""
-      - echo "🌐 Services:"
+      - echo "[SERVICES] Services:"
       - kubectl get svc -n {{.NAMESPACE}}
 
   k8s:logs:
@@ -92,13 +92,13 @@ tasks:
     cmds:
       - |
         POD=$(kubectl get pod -n {{.NAMESPACE}} -l {{.POD_LABEL}} -o jsonpath="{.items[0].metadata.name}")
-        echo "📜 Logs for pod: $POD"
+        echo "[LOGS] Logs for pod: $POD"
         kubectl logs -n {{.NAMESPACE}} $POD {{if eq .FOLLOW "true"}}-f{{end}}
 
   k8s:port-forward:
     desc: Port forward to Kubernetes services
     cmds:
-      - echo "🔌 Setting up port forwards..."
+      - echo "[FORWARD] Setting up port forwards..."
       - |
         # Collector health
         kubectl port-forward -n {{.NAMESPACE}} svc/{{.RELEASE_NAME}}-collector 13133:13133 &
@@ -106,7 +106,7 @@ tasks:
         kubectl port-forward -n {{.NAMESPACE}} svc/{{.RELEASE_NAME}}-collector 8888:8888 &
         # Prometheus metrics
         kubectl port-forward -n {{.NAMESPACE}} svc/{{.RELEASE_NAME}}-collector 8889:8889 &
-        echo "✅ Port forwards established:"
+        echo "[OK] Port forwards established:"
         echo "  - Health: http://localhost:13133/"
         echo "  - Metrics: http://localhost:8888/metrics"
         echo "  - Prometheus: http://localhost:8889/metrics"
@@ -117,44 +117,44 @@ tasks:
     vars:
       ENVIRONMENT: '{{.ENVIRONMENT | default "dev"}}'
     cmds:
-      - echo "🏗️  Deploying with Terraform..."
+      - echo "[TERRAFORM] Deploying with Terraform..."
       - terraform init
       - terraform workspace select {{.ENVIRONMENT}} || terraform workspace new {{.ENVIRONMENT}}
       - terraform plan -var-file=environments/{{.ENVIRONMENT}}.tfvars -out=tfplan
       - |
-        echo "📋 Review the plan above. Deploy? (y/N)"
+        echo "[REVIEW] Review the plan above. Deploy? (y/N)"
         read -r response
         if [[ "$response" =~ ^[Yy]$ ]]; then
           terraform apply tfplan
         else
-          echo "❌ Deployment cancelled"
+          echo "[ERROR] Deployment cancelled"
         fi
 
   status:
     desc: Check deployment status
     cmds:
-      - echo "🔍 Checking deployment status..."
+      - echo "[CHECK] Checking deployment status..."
       - |
         # Check Docker
         if docker compose ps 2>/dev/null | grep -q collector; then
-          echo "🐳 Docker deployment:"
+          echo "[DOCKER] Docker deployment:"
           docker compose ps | grep -E "(collector|postgres|mysql)"
         fi
       - |
         # Check Kubernetes
         if kubectl get ns {{.NAMESPACE}} &>/dev/null; then
           echo ""
-          echo "☸️  Kubernetes deployment:"
+          echo "[K8S] Kubernetes deployment:"
           kubectl get pods -n {{.NAMESPACE}} | grep -E "(collector|postgres|mysql)"
         fi
       - |
         # Check collector health
         if curl -sf http://localhost:13133/ > /dev/null; then
           echo ""
-          echo "✅ Collector is healthy"
+          echo "[OK] Collector is healthy"
         else
           echo ""
-          echo "⚠️  Collector health check failed"
+          echo "[WARNING]  Collector health check failed"
         fi
 
   rollback:
@@ -165,16 +165,16 @@ tasks:
       - |
         case {{.TYPE}} in
           docker)
-            echo "🔄 Rolling back Docker deployment..."
+            echo "[ROLLBACK] Rolling back Docker deployment..."
             docker compose down
             docker compose --profile all up -d --force-recreate
             ;;
           k8s)
-            echo "🔄 Rolling back Kubernetes deployment..."
+            echo "[ROLLBACK] Rolling back Kubernetes deployment..."
             helm rollback {{.RELEASE_NAME}} -n {{.NAMESPACE}}
             ;;
           *)
-            echo "❌ Unknown deployment type: {{.TYPE}}"
+            echo "[ERROR] Unknown deployment type: {{.TYPE}}"
             exit 1
             ;;
         esac
@@ -183,13 +183,13 @@ tasks:
     desc: Clean up deployments
     cmds:
       - |
-        echo "🧹 Cleaning up deployments..."
+        echo "[CLEAN] Cleaning up deployments..."
         # Docker
         docker compose down -v || true
         # Kubernetes
         helm uninstall {{.RELEASE_NAME}} -n {{.NAMESPACE}} || true
         kubectl delete namespace {{.NAMESPACE}} || true
-        echo "✅ Cleanup complete"
+        echo "[OK] Cleanup complete"
 
   backup:
     desc: Backup deployment configurations
@@ -197,7 +197,7 @@ tasks:
       BACKUP_DIR: '{{.BACKUP_DIR | default "./backups"}}'
       TIMESTAMP: '{{now | date "20060102-150405"}}'
     cmds:
-      - echo "💾 Backing up configurations..."
+      - echo "[BACKUP] Backing up configurations..."
       - mkdir -p {{.BACKUP_DIR}}/{{.TIMESTAMP}}
       - |
         # Backup Docker configs
@@ -207,4 +207,4 @@ tasks:
         # Backup Kubernetes configs
         kubectl get all -n {{.NAMESPACE}} -o yaml > {{.BACKUP_DIR}}/{{.TIMESTAMP}}/k8s-resources.yaml || true
         helm get values {{.RELEASE_NAME}} -n {{.NAMESPACE}} > {{.BACKUP_DIR}}/{{.TIMESTAMP}}/helm-values.yaml || true
-      - echo "✅ Backup saved to {{.BACKUP_DIR}}/{{.TIMESTAMP}}/"
+      - echo "[OK] Backup saved to {{.BACKUP_DIR}}/{{.TIMESTAMP}}/"

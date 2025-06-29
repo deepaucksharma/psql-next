@@ -1,47 +1,122 @@
 # Configuration Reference
 
-This document provides a comprehensive reference for configuring the Database Intelligence OTEL Collector.
+This document provides a comprehensive reference for configuring the Database Intelligence Collector with our modernized infrastructure.
 
 ## Table of Contents
+- [Configuration Overlay System](#configuration-overlay-system)
 - [Environment Variables](#environment-variables)
 - [Receivers Configuration](#receivers-configuration)
 - [Processors Configuration](#processors-configuration)
 - [Exporters Configuration](#exporters-configuration)
 - [Service Configuration](#service-configuration)
 - [Complete Examples](#complete-examples)
+- [Using Taskfile](#using-taskfile)
+
+## Configuration Overlay System
+
+We use a layered configuration approach for managing environment-specific settings:
+
+```
+configs/overlays/
+├── base/           # Shared base configuration
+│   └── collector.yaml
+├── dev/            # Development overrides
+│   └── collector.yaml
+├── staging/        # Staging overrides
+│   └── collector.yaml
+└── production/     # Production overrides
+    └── collector.yaml
+```
+
+### Using Overlays with Taskfile
+
+```bash
+# Run with development configuration
+task run CONFIG_ENV=dev
+
+# Run with staging configuration
+task run CONFIG_ENV=staging
+
+# Run with production configuration
+task run CONFIG_ENV=production
+```
+
+### Overlay Inheritance
+
+Each environment configuration includes the base and adds overrides:
+
+```yaml
+# dev/collector.yaml
+__includes:
+  - ../base/collector.yaml
+
+# Override specific values
+service:
+  telemetry:
+    logs:
+      level: debug  # Override from base 'info'
+```
 
 ## Environment Variables
 
-The collector uses environment variables for sensitive data and deployment-specific settings:
+### Using Environment Files
+
+```bash
+# Copy appropriate template
+cp .env.development .env  # For development
+cp .env.staging .env      # For staging
+cp .env.production .env   # For production
+
+# Edit with your values
+vim .env
+
+# Run with environment file
+task run ENV_FILE=.env
+```
+
+### Core Environment Variables
 
 ```bash
 # Database Credentials
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
-POSTGRES_USER=monitor_user
+POSTGRES_USER=monitoring_user
 POSTGRES_PASSWORD=secure_password
-POSTGRES_DATABASE=production
+POSTGRES_DB=postgres
 
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
-MYSQL_USER=monitor_user
+MYSQL_USER=monitoring_user
 MYSQL_PASSWORD=secure_password
-MYSQL_DATABASE=production
+MYSQL_DB=mysql
 
 # New Relic Configuration
 NEW_RELIC_LICENSE_KEY=your_license_key_here
-OTLP_ENDPOINT=https://otlp.nr-data.net:4317
+NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net:4317
+NEW_RELIC_ACCOUNT_ID=your_account_id
 
-# Feature Flags
-ENABLE_ADAPTIVE_SAMPLING=true
-ENABLE_CIRCUIT_BREAKER=true
-ENABLE_VERIFICATION=true
+# Environment Settings
+ENVIRONMENT=development  # development, staging, production
+LOG_LEVEL=info          # debug, info, warn, error
+
+# Resource Management
+GOGC=80
+GOMEMLIMIT=512MiB
+MEMORY_LIMIT_PERCENTAGE=75
+MEMORY_SPIKE_LIMIT_PERCENTAGE=25
+
+# Feature Flags (Experimental Mode)
+ENABLE_ADAPTIVE_SAMPLER=false
+ENABLE_CIRCUIT_BREAKER=false
+ENABLE_PLAN_EXTRACTOR=false
+ENABLE_VERIFICATION=false
 ENABLE_PII_SANITIZATION=true
 
-# Resource Settings
-MEMORY_LIMIT_PERCENTAGE=80
-BATCH_SIZE=10000
-COLLECTION_INTERVAL=60s
+# Collection Settings
+COLLECTION_INTERVAL_SECONDS=60
+QUERY_TIMEOUT_MS=10000
+MIN_QUERY_TIME_MS=100
+MAX_QUERIES_PER_COLLECTION=500
 ```
 
 ## Receivers Configuration
@@ -55,17 +130,18 @@ receivers:
     username: ${env:POSTGRES_USER}
     password: ${env:POSTGRES_PASSWORD}
     databases:
-      - ${env:POSTGRES_DATABASE}
-    collection_interval: 60s
+      - ${env:POSTGRES_DB}
+    collection_interval: ${env:COLLECTION_INTERVAL_SECONDS}s
+    initial_delay: 30s
+    timeout: 30s
     tls:
-      insecure: true
-      insecure_skip_verify: false
-      ca_file: /path/to/ca.crt
-      cert_file: /path/to/client.crt
-      key_file: /path/to/client.key
-    initial_delay: 10s
+      insecure: ${env:TLS_INSECURE_SKIP_VERIFY}
+      ca_file: /etc/ssl/certs/postgres-ca.crt
+      cert_file: /etc/ssl/certs/postgres-client.crt
+      key_file: /etc/ssl/private/postgres-client.key
     resource_attributes:
       db.system: postgresql
+      environment: ${env:ENVIRONMENT}
 ```
 
 ### MySQL Receiver (Standard OTEL)
@@ -76,85 +152,45 @@ receivers:
     endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
     username: ${env:MYSQL_USER}
     password: ${env:MYSQL_PASSWORD}
-    database: ${env:MYSQL_DATABASE}
-    collection_interval: 60s
-    transport: tcp
+    database: ${env:MYSQL_DB}
+    collection_interval: ${env:COLLECTION_INTERVAL_SECONDS}s
     allow_native_passwords: true
     tls:
-      insecure: false
+      mode: ${env:MYSQL_TLS_MODE}  # required, preferred, disabled
     resource_attributes:
       db.system: mysql
+      environment: ${env:ENVIRONMENT}
 ```
 
-### SQLQuery Receiver (Standard OTEL)
+### SQLQuery Receiver (Custom Queries)
 
 ```yaml
 receivers:
-  sqlquery/postgresql:
+  sqlquery:
     driver: postgres
-    datasource: "host=${env:POSTGRES_HOST} port=${env:POSTGRES_PORT} user=${env:POSTGRES_USER} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DATABASE} sslmode=disable"
-    collection_interval: 60s
+    datasource: "host=${env:POSTGRES_HOST} port=${env:POSTGRES_PORT} user=${env:POSTGRES_USER} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DB} sslmode=${env:POSTGRES_SSL_MODE}"
+    collection_interval: ${env:COLLECTION_INTERVAL_SECONDS}s
+    timeout: ${env:QUERY_TIMEOUT_MS}ms
     queries:
       # Query Performance from pg_stat_statements
-      - sql: |
+      - query: |
           SELECT 
             queryid,
             LEFT(query, 100) as query_text,
             calls,
             total_exec_time,
             mean_exec_time,
-            stddev_exec_time,
-            rows,
-            shared_blks_hit,
-            shared_blks_read,
-            blk_read_time,
-            blk_write_time
+            rows
           FROM pg_stat_statements
-          WHERE query NOT LIKE '%pg_stat_statements%'
-          ORDER BY total_exec_time DESC
-          LIMIT 100
+          WHERE mean_exec_time > ${env:MIN_QUERY_TIME_MS}
+          ORDER BY mean_exec_time DESC
+          LIMIT ${env:MAX_QUERIES_PER_COLLECTION}
         metrics:
-          - metric_name: db.query.exec_time.total
-            value_column: total_exec_time
-            value_type: double
-            unit: ms
-            monotonic: true
-            attributes:
-              - column_name: queryid
-                attribute_name: query.id
-              - column_name: query_text
-                attribute_name: query.text
-          - metric_name: db.query.exec_time.mean
+          - metric_name: db.query.stats
             value_column: mean_exec_time
             value_type: double
             unit: ms
-          - metric_name: db.query.calls
-            value_column: calls
-            value_type: int
-            monotonic: true
-            
-      # Active Sessions (ASH-like)
-      - sql: |
-          SELECT 
-            state,
-            wait_event_type,
-            wait_event,
-            query,
-            COUNT(*) as session_count
-          FROM pg_stat_activity
-          WHERE state != 'idle'
-          GROUP BY state, wait_event_type, wait_event, query
-        metrics:
-          - metric_name: db.sessions.active
-            value_column: session_count
-            value_type: int
-            attributes:
-              - column_name: state
-                attribute_name: session.state
-              - column_name: wait_event_type
-                attribute_name: wait.type
-              - column_name: wait_event
-                attribute_name: wait.event
+            attribute_columns: [queryid, query_text, calls, rows]
 ```
 
 ## Processors Configuration
@@ -166,17 +202,17 @@ receivers:
 processors:
   memory_limiter:
     check_interval: 1s
-    limit_percentage: 80
-    spike_limit_percentage: 30
+    limit_percentage: ${env:MEMORY_LIMIT_PERCENTAGE}
+    spike_limit_percentage: ${env:MEMORY_SPIKE_LIMIT_PERCENTAGE}
 ```
 
 #### Batch Processor
 ```yaml
 processors:
   batch:
-    timeout: 10s
-    send_batch_size: 10000
-    send_batch_max_size: 11000
+    timeout: ${env:BATCH_TIMEOUT}
+    send_batch_size: ${env:BATCH_SEND_SIZE}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE}
 ```
 
 #### Resource Processor
@@ -186,16 +222,16 @@ processors:
     attributes:
       - key: service.name
         value: database-intelligence
-        action: insert
+        action: upsert
       - key: deployment.environment
-        value: ${env:DEPLOYMENT_ENV}
-        action: insert
+        value: ${env:ENVIRONMENT}
+        action: upsert
       - key: service.version
         value: ${env:SERVICE_VERSION}
-        action: insert
-      - key: host.name
-        from_attribute: host.name
-        action: insert
+        action: upsert
+      - key: cloud.region
+        value: ${env:AWS_REGION}
+        action: upsert
 ```
 
 #### Transform Processor (PII Sanitization)
@@ -206,151 +242,66 @@ processors:
     metric_statements:
       - context: datapoint
         statements:
-          # Email sanitization
+          # Sanitize sensitive data in query text
           - replace_pattern(attributes["query.text"], "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "[EMAIL]")
-          # SSN sanitization
           - replace_pattern(attributes["query.text"], "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[SSN]")
-          # Credit card sanitization
           - replace_pattern(attributes["query.text"], "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b", "[CARD]")
-          # Phone number sanitization
-          - replace_pattern(attributes["query.text"], "\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b", "[PHONE]")
-          # UUID sanitization
-          - replace_pattern(attributes["query.text"], "\\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\b", "[UUID]")
 ```
 
-### Custom Processors (Gap Fillers)
+### Custom Processors (Experimental Mode)
+
+Enable experimental processors through environment variables or Helm values:
+
+```yaml
+# values-experimental.yaml
+config:
+  mode: experimental
+  processors:
+    experimental:
+      adaptiveSampler:
+        enabled: true
+      circuitBreaker:
+        enabled: true
+      planExtractor:
+        enabled: true
+      verification:
+        enabled: true
+```
 
 #### Adaptive Sampler
 ```yaml
 processors:
-  database_intelligence/adaptivesampler:
-    # Sampling rates
-    min_sampling_rate: 0.1      # 10% minimum
-    max_sampling_rate: 1.0      # 100% for slow queries
-    
-    # Performance thresholds
-    high_cost_threshold_ms: 1000   # Queries > 1s are high cost
-    error_sampling_rate: 1.0       # Always sample errors
-    
-    # Deduplication
-    deduplication_window: 300s     # 5 minutes
-    max_dedup_entries: 10000       # Limit memory usage
-    
-    # State persistence
-    state_file: /var/lib/otelcol/adaptive_sampler_state.json
-    save_interval: 60s
-    
-    # Sampling rules (optional)
+  adaptive_sampler:
+    enabled: ${env:ENABLE_ADAPTIVE_SAMPLER}
+    default_sampling_rate: ${env:BASE_SAMPLING_RATE}
     rules:
-      - name: "slow_queries"
-        condition: "attributes[\"db.query.exec_time.mean\"] > 1000"
+      - name: slow_queries
+        condition: 'attributes["db_query_duration"] > 5000'
         sampling_rate: 1.0
-      - name: "frequent_queries"
-        condition: "attributes[\"db.query.calls\"] > 10000"
-        sampling_rate: 0.5
+      - name: errors
+        condition: 'attributes["error"] != nil'
+        sampling_rate: 1.0
+      - name: high_frequency
+        condition: 'attributes["query_count"] > 1000'
+        sampling_rate: 0.1
 ```
 
 #### Circuit Breaker
 ```yaml
 processors:
-  database_intelligence/circuitbreaker:
-    # Circuit breaker thresholds
-    failure_threshold: 5           # Failures to open circuit
-    success_threshold: 2           # Successes to close circuit
-    timeout: 30s                   # Timeout for operations
-    cooldown_period: 60s           # Time in open state
-    half_open_max_requests: 3      # Requests in half-open
-    
-    # Monitoring configuration
-    monitor_databases:
-      - postgresql
-      - mysql
-    
-    # Resource protection
-    resource_limits:
-      max_cpu_percent: 80
-      max_memory_mb: 1024
-      max_goroutines: 1000
-    
-    # Database-specific settings
-    database_configs:
+  circuit_breaker:
+    enabled: ${env:ENABLE_CIRCUIT_BREAKER}
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 30s
+    half_open_requests: 3
+    databases:
       postgresql:
-        query_timeout: 5s
-        connection_timeout: 10s
         max_connections: 10
+        query_timeout: 5s
       mysql:
-        query_timeout: 5s
-        connection_timeout: 10s
         max_connections: 10
-```
-
-#### Verification Processor
-```yaml
-processors:
-  database_intelligence/verification:
-    # Health monitoring
-    health_checks:
-      enabled: true
-      interval: 60s
-      thresholds:
-        memory_percent: 80
-        cpu_percent: 90
-        disk_percent: 95
-        error_rate: 0.05
-      database_connectivity:
-        timeout: 5s
-        retry_count: 3
-    
-    # Metric quality validation
-    metric_quality:
-      enabled: true
-      required_fields: 
-        - "db.system"
-        - "db.name"
-        - "service.name"
-      schema_validation:
-        strict: false
-        max_cardinality: 10000
-        check_types: true
-      duplicate_detection:
-        enabled: true
-        window: 60s
-    
-    # PII detection
-    pii_detection:
-      enabled: true
-      sensitivity: medium  # low, medium, high
-      scan_fields:
-        - "query.text"
-        - "error.message"
-        - "db.statement"
-      patterns:
-        email: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
-        ssn: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
-        credit_card: "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b"
-      action: "alert"  # alert, redact, drop
-    
-    # Auto-tuning
-    auto_tuning:
-      enabled: true
-      analysis_window: 5m
-      confidence_threshold: 0.8
-      max_change_percent: 20
-      parameters:
-        - sampling_rate
-        - batch_size
-        - collection_interval
-    
-    # Self-healing
-    self_healing:
-      enabled: true
-      max_retry_attempts: 3
-      backoff_multiplier: 2.0
-      memory_pressure_threshold: 0.8
-      actions:
-        - garbage_collection
-        - cache_clear
-        - connection_reset
+        query_timeout: 5s
 ```
 
 ## Exporters Configuration
@@ -359,12 +310,11 @@ processors:
 ```yaml
 exporters:
   otlp/newrelic:
-    endpoint: ${env:OTLP_ENDPOINT}
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
     headers:
       api-key: ${env:NEW_RELIC_LICENSE_KEY}
     compression: gzip
-    tls:
-      insecure: false
+    timeout: 30s
     retry_on_failure:
       enabled: true
       initial_interval: 5s
@@ -372,30 +322,21 @@ exporters:
       max_elapsed_time: 300s
     sending_queue:
       enabled: true
-      num_consumers: 10
-      queue_size: 5000
-    timeout: 30s
+      num_consumers: ${env:OTLP_NUM_CONSUMERS}
+      queue_size: ${env:OTLP_QUEUE_SIZE}
 ```
 
-### Prometheus Exporter
+### Prometheus Exporter (Local Metrics)
 ```yaml
 exporters:
   prometheus:
     endpoint: 0.0.0.0:8888
-    namespace: db_intelligence
+    namespace: dbintel
     const_labels:
-      environment: ${env:DEPLOYMENT_ENV}
-    metric_expiration: 5m
-    enable_open_metrics: true
-```
-
-### Debug Exporter
-```yaml
-exporters:
-  debug:
-    verbosity: detailed
-    sampling_initial: 5
-    sampling_thereafter: 200
+      environment: ${env:ENVIRONMENT}
+      region: ${env:AWS_REGION}
+    resource_to_telemetry_conversion:
+      enabled: true
 ```
 
 ## Service Configuration
@@ -405,16 +346,14 @@ exporters:
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
-    path: "/"
+    path: /
     check_collector_pipeline:
       enabled: true
-      interval: 5s
+      interval: 15s
       exporter_failure_threshold: 5
-    
+
   pprof:
     endpoint: 0.0.0.0:1777
-    block_profile_fraction: 0
-    mutex_profile_fraction: 0
     
   zpages:
     endpoint: 0.0.0.0:55679
@@ -425,117 +364,142 @@ extensions:
 service:
   extensions: [health_check, pprof, zpages]
   
-  pipelines:
-    # Infrastructure metrics pipeline
-    metrics/infrastructure:
-      receivers: [postgresql, mysql]
-      processors: 
-        - memory_limiter
-        - resource
-        - batch
-      exporters: [otlp/newrelic, prometheus]
-    
-    # Query performance pipeline
-    metrics/queries:
-      receivers: [sqlquery/postgresql, sqlquery/mysql]
-      processors:
-        - memory_limiter
-        - transform  # PII sanitization
-        - database_intelligence/adaptivesampler
-        - database_intelligence/circuitbreaker
-        - database_intelligence/verification
-        - batch
-        - resource
-      exporters: [otlp/newrelic, prometheus]
-    
-    # Internal telemetry pipeline
-    metrics/internal:
-      receivers: [prometheus]
-      processors: [memory_limiter, batch]
-      exporters: [prometheus]
-      
   telemetry:
     logs:
-      level: ${env:LOG_LEVEL:-info}
-      development: false
+      level: ${env:LOG_LEVEL}
       encoding: json
-      output_paths: ["stdout", "/var/log/otelcol/collector.log"]
+      output_paths: ["stdout"]
       error_output_paths: ["stderr"]
-      initial_fields:
-        service: "database-intelligence"
     metrics:
       level: detailed
-      address: 0.0.0.0:8889
-    traces:
-      processors:
-        - batch
+      address: 0.0.0.0:8888
+  
+  pipelines:
+    metrics/infrastructure:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/newrelic, prometheus]
+      
+    metrics/queries:
+      receivers: [sqlquery]
+      processors: [memory_limiter, resource, transform, batch]
+      exporters: [otlp/newrelic]
 ```
 
 ## Complete Examples
 
-### Minimal Development Configuration
-```yaml
-receivers:
-  postgresql:
-    endpoint: localhost:5432
-    username: postgres
-    password: postgres
-    databases: [postgres]
+### Development Configuration
+```bash
+# Use development overlay
+task run CONFIG_ENV=dev
 
-processors:
-  memory_limiter:
-  batch:
-
-exporters:
-  debug:
-    verbosity: detailed
-
-service:
-  pipelines:
-    metrics:
-      receivers: [postgresql]
-      processors: [memory_limiter, batch]
-      exporters: [debug]
+# Or run with specific settings
+task run LOG_LEVEL=debug COLLECTION_INTERVAL_SECONDS=10
 ```
 
-### Production Configuration
-See `config/collector.yaml` for a complete production-ready configuration.
+### Production Configuration with Helm
+```bash
+# Deploy with production values
+helm install db-intelligence ./deployments/helm/db-intelligence \
+  -f deployments/helm/db-intelligence/values-production.yaml \
+  --set config.mode=standard \
+  --set image.tag=v2.0.0
+```
 
 ### High-Security Configuration
 ```yaml
-# Additional security measures
+# Enable all security features
 processors:
   transform:
-    error_mode: ignore
     metric_statements:
-      # Aggressive PII removal
       - context: datapoint
         statements:
-          - delete_key(attributes, "query.text") where attributes["contains_pii"] == "true"
+          # Remove all query text in production
+          - delete_key(attributes, "query.text") where deployment.environment == "production"
           
-  database_intelligence/verification:
+  verification:
     pii_detection:
+      enabled: true
       sensitivity: high
-      action: drop  # Drop metrics with PII
-      
-receivers:
-  postgresql:
-    tls:
-      insecure: false
-      ca_file: /secrets/ca.crt
-      cert_file: /secrets/client.crt
-      key_file: /secrets/client.key
+      action: drop
+```
+
+## Using Taskfile
+
+### Configuration Validation
+```bash
+# Validate configuration before deployment
+task validate:config CONFIG_ENV=production
+
+# Test configuration merge
+task config:test ENV=staging
+```
+
+### Running with Different Configurations
+```bash
+# Development with hot reload
+task dev:watch
+
+# Production mode
+task run:prod
+
+# Debug mode with verbose logging
+task run:debug
+```
+
+### Environment Management
+```bash
+# Show current configuration
+task config:show
+
+# Validate environment variables
+task validate:env
+
+# Generate config from template
+task config:generate ENV=production
 ```
 
 ## Configuration Best Practices
 
-1. **Use Environment Variables**: Never hardcode credentials
-2. **Enable Health Checks**: Essential for production monitoring
-3. **Set Resource Limits**: Prevent collector from consuming too many resources
-4. **Configure Batching**: Reduces API calls and improves efficiency
-5. **Enable Circuit Breakers**: Protect databases from monitoring overhead
-6. **Implement PII Sanitization**: Comply with privacy regulations
-7. **Use Verification**: Ensure data quality and system health
-8. **Monitor Internal Metrics**: Track collector performance
-9. **Configure Retries**: Handle transient failures gracefully
-10. **Set Appropriate Timeouts**: Prevent hanging operations
+1. **Use Environment Files**: Keep sensitive data out of configs
+   ```bash
+   task run ENV_FILE=.env.production
+   ```
+
+2. **Layer Configurations**: Use overlays for environment-specific settings
+   ```bash
+   configs/overlays/production/collector.yaml
+   ```
+
+3. **Validate Before Deploy**: Always validate configurations
+   ```bash
+   task validate:all
+   ```
+
+4. **Use Appropriate Modes**:
+   - Standard: Production stability
+   - Experimental: Advanced features
+
+5. **Monitor Resource Usage**: Set appropriate limits
+   ```yaml
+   GOMEMLIMIT=1900MiB  # Leave headroom
+   MEMORY_LIMIT_PERCENTAGE=75
+   ```
+
+6. **Enable Security Features**:
+   - PII sanitization
+   - TLS for connections
+   - Network policies
+
+7. **Configure for Scale**:
+   - Appropriate batch sizes
+   - Queue configurations
+   - Sampling rates
+
+8. **Use Version Control**: Track configuration changes
+   ```bash
+   git add configs/overlays/
+   git commit -m "Update production config"
+   ```
+
+For more examples and templates, see the `configs/overlays/` directory.

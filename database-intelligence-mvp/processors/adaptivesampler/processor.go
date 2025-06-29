@@ -3,12 +3,9 @@ package adaptivesampler
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,10 +30,9 @@ type adaptiveSampler struct {
 	logger   *zap.Logger
 	consumer consumer.Logs
 
-	// State management
+	// State management (in-memory only)
 	deduplicationCache *lru.Cache[string, time.Time]
 	ruleLimiters       map[string]*rateLimiter
-	stateFile          string
 	stateMutex         sync.RWMutex
 
 	// Metrics
@@ -57,17 +53,6 @@ type rateLimiter struct {
 	mutex        sync.Mutex
 }
 
-// persistentState represents the state saved to disk
-type persistentState struct {
-	DeduplicationHashes map[string]time.Time `json:"deduplication_hashes"`
-	RuleLimiters        map[string]rateLimiterState `json:"rule_limiters"`
-	SavedAt             time.Time `json:"saved_at"`
-}
-
-type rateLimiterState struct {
-	Count       int       `json:"count"`
-	WindowStart time.Time `json:"window_start"`
-}
 
 // newAdaptiveSampler creates a new adaptive sampler processor
 func newAdaptiveSampler(cfg *Config, logger *zap.Logger, consumer consumer.Logs) (*adaptiveSampler, error) {
@@ -94,7 +79,6 @@ func newAdaptiveSampler(cfg *Config, logger *zap.Logger, consumer consumer.Logs)
 		consumer:           consumer,
 		deduplicationCache: cache,
 		ruleLimiters:       limiters,
-		stateFile:          filepath.Join(cfg.StateStorage.FileStorage.Directory, "sampler_state.json"),
 		shutdownChan:       make(chan struct{}),
 	}
 
@@ -110,19 +94,8 @@ func (p *adaptiveSampler) Capabilities() consumer.Capabilities {
 func (p *adaptiveSampler) Start(ctx context.Context, host component.Host) error {
 	p.logger.Info("Starting adaptive sampler processor")
 
-	// Create state directory if it doesn't exist
-	if err := os.MkdirAll(p.config.StateStorage.FileStorage.Directory, 0755); err != nil {
-		return fmt.Errorf("failed to create state directory: %w", err)
-	}
-
-	// Load persistent state
-	if err := p.loadState(); err != nil {
-		p.logger.Warn("Failed to load persistent state, starting fresh", zap.Error(err))
-	}
-
-	// Start background tasks
-	p.wg.Add(2)
-	go p.periodicStateSave()
+	// Start background cleanup only (no state persistence)
+	p.wg.Add(1)
 	go p.periodicCleanup()
 
 	// Sort rules by priority (highest first)
@@ -140,10 +113,11 @@ func (p *adaptiveSampler) Shutdown(ctx context.Context) error {
 	close(p.shutdownChan)
 	p.wg.Wait()
 
-	// Save final state
-	if err := p.saveState(); err != nil {
-		p.logger.Error("Failed to save final state", zap.Error(err))
-	}
+	// No state persistence needed for in-memory mode
+	p.logger.Info("Adaptive sampler shutdown complete", 
+		zap.Int64("total_sampled", p.sampledCount),
+		zap.Int64("total_dropped", p.droppedCount),
+		zap.Int64("total_duplicates", p.duplicateCount))
 
 	return nil
 }
@@ -418,24 +392,6 @@ func (p *adaptiveSampler) randomSample(rate float64) bool {
 	return random < rate
 }
 
-// periodicStateSave saves state to disk periodically
-func (p *adaptiveSampler) periodicStateSave() {
-	defer p.wg.Done()
-
-	ticker := time.NewTicker(p.config.StateStorage.FileStorage.SyncInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := p.saveState(); err != nil {
-				p.logger.Error("Failed to save state", zap.Error(err))
-			}
-		case <-p.shutdownChan:
-			return
-		}
-	}
-}
 
 // periodicCleanup cleans up expired cache entries
 func (p *adaptiveSampler) periodicCleanup() {
@@ -477,100 +433,3 @@ func (p *adaptiveSampler) cleanupExpiredHashes() {
 	}
 }
 
-// saveState saves the current state to disk
-func (p *adaptiveSampler) saveState() error {
-	p.stateMutex.RLock()
-	defer p.stateMutex.RUnlock()
-
-	state := persistentState{
-		DeduplicationHashes: make(map[string]time.Time),
-		RuleLimiters:        make(map[string]rateLimiterState),
-		SavedAt:             time.Now(),
-	}
-
-	// Save deduplication hashes
-	if p.config.Deduplication.Enabled {
-		keys := p.deduplicationCache.Keys()
-		for _, key := range keys {
-			if timestamp, exists := p.deduplicationCache.Peek(key); exists {
-				state.DeduplicationHashes[key] = timestamp
-			}
-		}
-	}
-
-	// Save rule limiter states
-	for name, limiter := range p.ruleLimiters {
-		limiter.mutex.Lock()
-		state.RuleLimiters[name] = rateLimiterState{
-			Count:       limiter.count,
-			WindowStart: limiter.windowStart,
-		}
-		limiter.mutex.Unlock()
-	}
-
-	// Write to temporary file first
-	tempFile := p.stateFile + ".tmp"
-	data, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal state: %w", err)
-	}
-
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
-		return fmt.Errorf("failed to write state file: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tempFile, p.stateFile); err != nil {
-		return fmt.Errorf("failed to rename state file: %w", err)
-	}
-
-	return nil
-}
-
-// loadState loads the state from disk
-func (p *adaptiveSampler) loadState() error {
-	data, err := os.ReadFile(p.stateFile)
-	if err != nil {
-		return fmt.Errorf("failed to read state file: %w", err)
-	}
-
-	var state persistentState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("failed to unmarshal state: %w", err)
-	}
-
-	p.stateMutex.Lock()
-	defer p.stateMutex.Unlock()
-
-	// Restore deduplication hashes
-	if p.config.Deduplication.Enabled {
-		windowDuration := time.Duration(p.config.Deduplication.WindowSeconds) * time.Second
-		cutoff := time.Now().Add(-windowDuration)
-
-		for hash, timestamp := range state.DeduplicationHashes {
-			if timestamp.After(cutoff) {
-				p.deduplicationCache.Add(hash, timestamp)
-			}
-		}
-	}
-
-	// Restore rule limiter states
-	for name, limiterState := range state.RuleLimiters {
-		if limiter, exists := p.ruleLimiters[name]; exists {
-			limiter.mutex.Lock()
-			// Only restore if window is still valid
-			if time.Since(limiterState.WindowStart) < time.Minute {
-				limiter.count = limiterState.Count
-				limiter.windowStart = limiterState.WindowStart
-			}
-			limiter.mutex.Unlock()
-		}
-	}
-
-	p.logger.Info("Loaded persistent state",
-		zap.Int("deduplication_hashes", len(state.DeduplicationHashes)),
-		zap.Int("rule_limiters", len(state.RuleLimiters)),
-		zap.Time("saved_at", state.SavedAt))
-
-	return nil
-}

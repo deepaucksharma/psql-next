@@ -1,0 +1,67 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13134
+
+receivers:
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - testdb
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: mysql
+    database: testdb
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+  
+  batch:
+    send_batch_size: 1000
+    timeout: 10s
+  
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence
+        action: insert
+      - key: deployment.environment  
+        value: development
+        action: insert
+
+exporters:
+  logging:
+    verbosity: normal
+  
+  # Test OTLP exporter with fixed endpoint
+  otlp:
+    endpoint: otlp.nr-data.net:4317
+    headers:
+      api-key: YOUR_NEW_RELIC_LICENSE_KEY
+    compression: gzip
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [logging, otlp]
+  
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888

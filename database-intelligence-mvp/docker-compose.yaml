@@ -57,6 +57,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        required: false
       mysql:
         condition: service_healthy
         required: false
@@ -82,7 +83,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: testdb
-      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=pg_stat_statements"
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
     volumes:
       - ./scripts/sql/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - postgres-data:/var/lib/postgresql/data

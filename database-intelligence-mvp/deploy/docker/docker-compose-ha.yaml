@@ -1,34 +1,19 @@
-# High Availability Database Intelligence Setup with Redis
+# Single Instance Database Intelligence Setup
+# Simplified deployment without Redis dependency
 
 services:
-  # Redis for distributed state
-  redis:
-    image: redis:7-alpine
-    container_name: db-intel-redis
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redis123}
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    networks:
-      - db-intelligence
-    healthcheck:
-      test: ["CMD", "redis-cli", "--pass", "${REDIS_PASSWORD:-redis123}", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Primary collector instance
-  collector-1:
+  # Single collector instance
+  collector:
     image: database-intelligence/collector:latest
-    container_name: db-intel-collector-1
-    hostname: collector-1
+    container_name: db-intel-collector
+    hostname: db-intel-collector
     depends_on:
-      redis:
+      postgres-primary:
         condition: service_healthy
     volumes:
-      - ../../config/collector-ha.yaml:/etc/otel-collector-config.yaml
+      - ../../config/collector-simplified.yaml:/etc/otel-collector-config.yaml
       - /var/log/collector:/var/log
+      - collector-state:/var/lib/otel  # Local state storage
     environment:
       - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
       - NEW_RELIC_ACCOUNT_ID=${NEW_RELIC_ACCOUNT_ID}
@@ -38,13 +23,13 @@ services:
       - PG_PASSWORD=monitor123
       - PG_DATABASE=testdb
       - PG_REPLICA_DSN=postgres://newrelic_monitor:monitor123@postgres-primary:5432/testdb?sslmode=disable
-      - REDIS_ENDPOINT=redis:6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis123}
       - DEPLOYMENT_ENV=production
       - LOG_LEVEL=info
     ports:
       - "8888:8888"   # Metrics
       - "13133:13133" # Health check
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
     networks:
       - db-intelligence
     restart: unless-stopped
@@ -53,63 +38,6 @@ services:
         limits:
           memory: 1G
           cpus: '1.0'
-
-  # Secondary collector instance
-  collector-2:
-    image: database-intelligence/collector:latest
-    container_name: db-intel-collector-2
-    hostname: collector-2
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ../../config/collector-ha.yaml:/etc/otel-collector-config.yaml
-      - /var/log/collector:/var/log
-    environment:
-      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
-      - NEW_RELIC_ACCOUNT_ID=${NEW_RELIC_ACCOUNT_ID}
-      - PG_HOST=postgres-primary
-      - PG_PORT=5432
-      - PG_USER=newrelic_monitor
-      - PG_PASSWORD=monitor123
-      - PG_DATABASE=testdb
-      - PG_REPLICA_DSN=postgres://newrelic_monitor:monitor123@postgres-primary:5432/testdb?sslmode=disable
-      - REDIS_ENDPOINT=redis:6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis123}
-      - DEPLOYMENT_ENV=production
-      - LOG_LEVEL=info
-    ports:
-      - "8889:8888"   # Metrics
-      - "13134:13133" # Health check
-    networks:
-      - db-intelligence
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '1.0'
-
-  # Load balancer for collectors
-  nginx:
-    image: nginx:alpine
-    container_name: db-intel-lb
-    depends_on:
-      - collector-1
-      - collector-2
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    ports:
-      - "4317:4317"  # OTLP gRPC
-      - "4318:4318"  # OTLP HTTP
-      - "80:80"      # Health check endpoint
-    networks:
-      - db-intelligence
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   # PostgreSQL for testing
   postgres-primary:
@@ -133,7 +61,7 @@ services:
       retries: 5
 
 volumes:
-  redis-data:
+  collector-state:  # Local storage for processor state
   postgres-data:
 
 networks:

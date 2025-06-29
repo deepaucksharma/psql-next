@@ -1,0 +1,261 @@
+{
+  "name": "Database Intelligence Alerts",
+  "incident_preference": "PER_CONDITION_AND_TARGET",
+  "conditions": [
+    {
+      "name": "Collector Down",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "BELOW",
+          "threshold": "1",
+          "threshold_duration": 120,
+          "threshold_occurrences": "ALL"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT count(*) FROM Metric WHERE otel.library.name LIKE 'otelcol%'"
+      },
+      "signal": {
+        "aggregation_window": 60,
+        "fill_option": "STATIC",
+        "fill_value": 0
+      },
+      "description": "Alert when the Database Intelligence Collector stops reporting metrics"
+    },
+    {
+      "name": "Database Connection Failed",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "BELOW",
+          "threshold": "1",
+          "threshold_duration": 180,
+          "threshold_occurrences": "ALL"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT latest(db_up) FROM Metric WHERE db_system IN ('postgresql', 'mysql') FACET db_name"
+      },
+      "signal": {
+        "aggregation_window": 60,
+        "fill_option": "STATIC",
+        "fill_value": 0
+      },
+      "description": "Alert when database connection is lost"
+    },
+    {
+      "name": "High Database Connection Usage",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": "80",
+          "threshold_duration": 300,
+          "threshold_occurrences": "ALL"
+        },
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": "90",
+          "threshold_duration": 180,
+          "threshold_occurrences": "ALL"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT percentage(average(db_connections_active), average(db_connections_max)) FROM Metric WHERE db_system IN ('postgresql', 'mysql') FACET db_name"
+      },
+      "signal": {
+        "aggregation_window": 60
+      },
+      "description": "Alert when database connection pool usage is high"
+    },
+    {
+      "name": "Slow Query Performance",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": "5000",
+          "threshold_duration": 600,
+          "threshold_occurrences": "AT_LEAST_ONCE"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT average(db_query_mean_duration) FROM Metric WHERE db_system IN ('postgresql', 'mysql') AND db_query_mean_duration > 1000 FACET db_name"
+      },
+      "signal": {
+        "aggregation_window": 300
+      },
+      "description": "Alert when average query duration exceeds 5 seconds"
+    },
+    {
+      "name": "Collector Memory High",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": "1500",
+          "threshold_duration": 300,
+          "threshold_occurrences": "ALL"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT average(otelcol_process_runtime_heap_alloc_bytes)/1024/1024 FROM Metric WHERE otel.library.name LIKE 'otelcol%'"
+      },
+      "signal": {
+        "aggregation_window": 60
+      },
+      "description": "Alert when collector memory usage exceeds 1.5GB"
+    },
+    {
+      "name": "Export Failures",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": "10",
+          "threshold_duration": 300,
+          "threshold_occurrences": "AT_LEAST_ONCE"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT rate(sum(otelcol_exporter_send_failed_metric_points), 1 minute) FROM Metric WHERE otel.library.name LIKE 'otelcol%' FACET exporter"
+      },
+      "signal": {
+        "aggregation_window": 60
+      },
+      "description": "Alert when metrics fail to export to New Relic"
+    },
+    {
+      "name": "PostgreSQL Cache Hit Ratio Low",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "WARNING",
+          "operator": "BELOW",
+          "threshold": "90",
+          "threshold_duration": 900,
+          "threshold_occurrences": "ALL"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT (sum(postgresql_blocks_hit) / (sum(postgresql_blocks_hit) + sum(postgresql_blocks_read))) * 100 FROM Metric WHERE db_system = 'postgresql' AND postgresql_blocks_read > 0 FACET db_name"
+      },
+      "signal": {
+        "aggregation_window": 300
+      },
+      "description": "Alert when PostgreSQL cache hit ratio drops below 90%"
+    },
+    {
+      "name": "PostgreSQL Replication Lag",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": "10",
+          "threshold_duration": 300,
+          "threshold_occurrences": "ALL"
+        },
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": "30",
+          "threshold_duration": 180,
+          "threshold_occurrences": "ALL"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT max(postgresql_replication_lag_seconds) FROM Metric WHERE db_system = 'postgresql' FACET application_name"
+      },
+      "signal": {
+        "aggregation_window": 60
+      },
+      "description": "Alert when PostgreSQL replication lag is high"
+    },
+    {
+      "name": "Circuit Breaker Opened",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "WARNING",
+          "operator": "EQUALS",
+          "threshold": "2",
+          "threshold_duration": 60,
+          "threshold_occurrences": "AT_LEAST_ONCE"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT latest(otelcol_circuitbreaker_state) FROM Metric WHERE otel.library.name = 'otelcol/circuitbreaker' FACET database"
+      },
+      "signal": {
+        "aggregation_window": 60
+      },
+      "description": "Alert when circuit breaker opens for a database (experimental mode)"
+    },
+    {
+      "name": "No Metrics Received",
+      "type": "NRQL",
+      "enabled": true,
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "EQUALS",
+          "threshold": "0",
+          "threshold_duration": 600,
+          "threshold_occurrences": "ALL"
+        }
+      ],
+      "nrql": {
+        "query": "SELECT rate(sum(otelcol_receiver_accepted_metric_points), 1 minute) FROM Metric WHERE otel.library.name LIKE 'otelcol%'"
+      },
+      "signal": {
+        "aggregation_window": 60,
+        "fill_option": "STATIC",
+        "fill_value": 0
+      },
+      "description": "Alert when collector stops receiving metrics from databases"
+    }
+  ],
+  "channels": [
+    {
+      "name": "Database Team Email",
+      "type": "EMAIL",
+      "configuration": {
+        "recipients": "database-team@company.com,oncall@company.com",
+        "include_json_attachment": true
+      }
+    },
+    {
+      "name": "Database Team Slack",
+      "type": "SLACK",
+      "configuration": {
+        "url": "${SLACK_WEBHOOK_URL}",
+        "channel": "#database-alerts"
+      }
+    },
+    {
+      "name": "PagerDuty Integration",
+      "type": "PAGERDUTY",
+      "configuration": {
+        "service_key": "${PAGERDUTY_SERVICE_KEY}"
+      }
+    }
+  ]
+}

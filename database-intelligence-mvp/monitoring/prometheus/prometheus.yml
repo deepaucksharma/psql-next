@@ -1,0 +1,99 @@
+# Prometheus Configuration for Database Intelligence Collector
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'database-intelligence'
+    environment: '${ENVIRONMENT}'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Load rules
+rule_files:
+  - "rules/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # OpenTelemetry Collector metrics
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['collector:8888']
+        labels:
+          component: 'collector'
+    metric_relabel_configs:
+      # Keep only important metrics
+      - source_labels: [__name__]
+        regex: 'otelcol_(receiver|processor|exporter)_.*'
+        action: keep
+      - source_labels: [__name__]
+        regex: 'up|scrape_.*'
+        action: keep
+
+  # Database metrics via collector
+  - job_name: 'databases'
+    static_configs:
+      - targets: ['collector:8888']
+        labels:
+          component: 'database'
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'db_.*|database_.*|postgres_.*|mysql_.*'
+        action: keep
+
+  # PostgreSQL direct scrape (optional)
+  - job_name: 'postgresql'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          db_type: 'postgresql'
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'pg_.*'
+        action: keep
+
+  # MySQL direct scrape (optional)
+  - job_name: 'mysql'
+    static_configs:
+      - targets: ['mysql-exporter:9104']
+        labels:
+          db_type: 'mysql'
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'mysql_.*'
+        action: keep
+
+  # Node exporter for system metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          component: 'system'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+# Remote write to long-term storage (optional)
+remote_write:
+  - url: "${REMOTE_WRITE_URL}"
+    bearer_token: "${REMOTE_WRITE_TOKEN}"
+    queue_config:
+      capacity: 10000
+      max_shards: 5
+      min_shards: 1
+      max_samples_per_send: 5000
+      batch_send_deadline: 5s
+      min_backoff: 30ms
+      max_backoff: 100ms
+    write_relabel_configs:
+      # Only send database and collector metrics to remote storage
+      - source_labels: [__name__]
+        regex: '(db_|database_|otelcol_).*'
+        action: keep

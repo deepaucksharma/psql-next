@@ -1,0 +1,99 @@
+receivers:
+  sqlquery/postgres:
+    driver: postgres
+    datasource: "host=localhost port=5432 user=postgres password=postgres dbname=testdb sslmode=disable"
+    queries:
+      - sql: "SELECT version() as version"
+        interval: 30s
+        metrics:
+          - metric_name: postgres.version
+            value_column: version
+            value_type: string
+            data_type: gauge
+            static_attributes:
+              db.system: postgresql
+
+      - sql: |
+          SELECT 
+            count(*) as connection_count,
+            state
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+          GROUP BY state
+        interval: 10s
+        metrics:
+          - metric_name: postgres.connections
+            value_column: connection_count
+            value_type: int
+            data_type: gauge
+            attribute_columns:
+              - state
+
+  sqlquery/mysql:
+    driver: mysql
+    datasource: "root:mysql@tcp(localhost:3306)/testdb"
+    queries:
+      - sql: "SELECT version() as version"
+        interval: 30s
+        metrics:
+          - metric_name: mysql.version
+            value_column: version
+            value_type: string
+            data_type: gauge
+            static_attributes:
+              db.system: mysql
+
+      - sql: "SHOW STATUS LIKE 'Threads_connected'"
+        interval: 10s
+        metrics:
+          - metric_name: mysql.connections
+            value_column: Value
+            value_type: int
+            data_type: gauge
+            static_attributes:
+              status: connected
+
+processors:
+  batch:
+    timeout: 10s
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+  transform:
+    metric_statements:
+      - context: metric
+        statements:
+          - set(attributes["environment"], "test")
+          - set(attributes["collector.version"], "1.0.0")
+
+exporters:
+  logging:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: db_intelligence
+    resource_to_telemetry_conversion:
+      enabled: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13134
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [sqlquery/postgres, sqlquery/mysql]
+      processors: [memory_limiter, transform, batch]
+      exporters: [logging, prometheus]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888

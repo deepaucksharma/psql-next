@@ -4,7 +4,12 @@
 FROM golang:1.21-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git make
+RUN apk add --no-cache \
+    git \
+    make \
+    curl \
+    ca-certificates \
+    && update-ca-certificates
 
 # Set working directory
 WORKDIR /build
@@ -13,51 +18,83 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
-COPY . .
+# Copy only necessary source files
+COPY Makefile ./
+COPY main.go ./
+COPY processors/ ./processors/
+COPY receivers/ ./receivers/
+COPY exporters/ ./exporters/
+COPY extensions/ ./extensions/
+COPY internal/ ./internal/
 
-# Install OCB (OpenTelemetry Collector Builder)
-RUN go install go.opentelemetry.io/collector/cmd/ocb@latest
+# Copy build configuration
+COPY ocb-config.yaml ./
+COPY otelcol-builder.yaml ./
 
-# Build the collector
-RUN ocb --config=ocb-config.yaml
+# Build the collector using make
+RUN make build-binary || \
+    (echo "Build failed, trying direct OCB install" && \
+     go install go.opentelemetry.io/collector/cmd/builder@v0.88.0 && \
+     builder --config=ocb-config.yaml)
 
 # Stage 2: Runtime
 FROM alpine:3.19
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata
+# Install runtime dependencies and security updates
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    curl \
+    && update-ca-certificates \
+    && apk upgrade --no-cache
 
-# Create non-root user
-RUN addgroup -g 1000 otel && \
-    adduser -u 1000 -G otel -D otel
+# Create non-root user and directories
+RUN addgroup -g 1000 -S otel && \
+    adduser -u 1000 -S otel -G otel && \
+    mkdir -p /etc/otel /var/lib/otel /var/log/otel && \
+    chown -R otel:otel /etc/otel /var/lib/otel /var/log/otel
 
 # Copy binary from builder
-COPY --from=builder /build/dist/otelcol-db-intelligence /otelcol-db-intelligence
+COPY --from=builder /build/dist/otelcol* /usr/local/bin/otelcol
+
+# Make binary executable
+RUN chmod +x /usr/local/bin/otelcol
 
 # Copy configuration files
-COPY --from=builder /build/config /etc/otelcol/config
+COPY --chown=otel:otel configs/ /etc/otel/configs/
 
-# Set ownership
-RUN chown -R otel:otel /etc/otelcol
+# Set environment variables for performance tuning
+ENV GOGC=80 \
+    GOMEMLIMIT=512MiB \
+    OTEL_RESOURCE_ATTRIBUTES="service.name=database-intelligence,service.version=1.0.0" \
+    OTEL_LOG_LEVEL=info
 
 # Switch to non-root user
 USER otel
 
 # Expose ports
-# 13133 - health check extension
-# 8888  - Prometheus metrics
 # 4317  - OTLP gRPC receiver
-# 4318  - OTLP HTTP receiver
-EXPOSE 13133 8888 4317 4318
+# 4318  - OTLP HTTP receiver  
+# 8888  - Prometheus metrics
+# 13133 - Health check extension
+# 55679 - ZPages (debug)
+EXPOSE 4317 4318 8888 13133 55679
 
-# Health check
+# Volume for persistent state
+VOLUME ["/var/lib/otel"]
+
+# Health check with timeout
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:13133/ || exit 1
+    CMD curl -f http://localhost:13133/ || exit 1
 
-# Default configuration file
-ENV OTEL_CONFIG=/etc/otelcol/config/collector.yaml
+# Entry point with signal handling
+ENTRYPOINT ["/usr/local/bin/otelcol"]
+CMD ["--config", "/etc/otel/configs/collector.yaml"]
 
-# Entry point
-ENTRYPOINT ["/otelcol-db-intelligence"]
-CMD ["--config", "${OTEL_CONFIG}"]
+# Metadata labels
+LABEL org.opencontainers.image.title="Database Intelligence Collector" \
+      org.opencontainers.image.description="OpenTelemetry-based database monitoring solution" \
+      org.opencontainers.image.vendor="Database Intelligence MVP" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="https://github.com/database-intelligence-mvp/database-intelligence-mvp" \
+      maintainer="Database Intelligence Team"

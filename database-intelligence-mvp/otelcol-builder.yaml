@@ -32,19 +32,19 @@ processors:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/probabilisticsamplerprocessor v0.96.0
   
   # Experimental processors (require local modules)
-  - gomod: github.com/newrelic/database-intelligence-mvp/processors/adaptivesampler v0.0.0
+  - gomod: github.com/database-intelligence-mvp/processors/adaptivesampler v0.0.0
     path: ./processors/adaptivesampler
     # Note: Stateful processor - requires single instance or state coordination
     
-  - gomod: github.com/newrelic/database-intelligence-mvp/processors/circuitbreaker v0.0.0
+  - gomod: github.com/database-intelligence-mvp/processors/circuitbreaker v0.0.0
     path: ./processors/circuitbreaker
     # Note: Provides database protection and isolation
     
-  - gomod: github.com/newrelic/database-intelligence-mvp/processors/planattributeextractor v0.0.0
+  - gomod: github.com/database-intelligence-mvp/processors/planattributeextractor v0.0.0
     path: ./processors/planattributeextractor
     # Note: Requires pg_querylens extension for safe EXPLAIN
     
-  - gomod: github.com/newrelic/database-intelligence-mvp/processors/verification v0.0.0
+  - gomod: github.com/database-intelligence-mvp/processors/verification v0.0.0
     path: ./processors/verification
     # Note: Validates data quality and correctness
 
@@ -56,22 +56,16 @@ exporters:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter v0.96.0
   
   # Experimental exporters (if custom OTLP enhancements needed)
-  - gomod: github.com/newrelic/database-intelligence-mvp/exporters/otlpexporter v0.0.0
-    path: ./exporters/otlpexporter
-    # Note: Enhanced with PostgreSQL-specific entity synthesis
+  # DISABLED: Custom OTLP exporter has incomplete implementation
+  # - gomod: github.com/database-intelligence-mvp/exporters/otlpexporter v0.0.0
+  #   path: ./exporters/otlpexporter
+  #   # Note: Enhanced with PostgreSQL-specific entity synthesis
 
 # Connectors (for pipeline interconnection)
 connectors:
   - gomod: go.opentelemetry.io/collector/connector/forwardconnector v0.96.0
 
 # Build configuration
-replaces:
-  # Replace with local modules during development
-  - github.com/newrelic/database-intelligence-mvp/processors/adaptivesampler: ./processors/adaptivesampler
-  - github.com/newrelic/database-intelligence-mvp/processors/circuitbreaker: ./processors/circuitbreaker
-  - github.com/newrelic/database-intelligence-mvp/processors/planattributeextractor: ./processors/planattributeextractor
-  - github.com/newrelic/database-intelligence-mvp/processors/verification: ./processors/verification
-  - github.com/newrelic/database-intelligence-mvp/exporters/otlpexporter: ./exporters/otlpexporter
 
 # Exclude default modules to reduce binary size
 excludes:

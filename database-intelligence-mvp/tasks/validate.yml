@@ -9,19 +9,19 @@ tasks:
       - task: validate:code
       - task: validate:security
       - task: validate:deps
-      - echo "✅ All validations passed!"
+      - echo "[OK] All validations passed!"
 
   modules:
     desc: Validate module paths are consistent
     vars:
       EXPECTED: github.com/database-intelligence-mvp
     cmds:
-      - echo "🔍 Checking module path consistency..."
+      - echo "[CHECK] Checking module path consistency..."
       - |
         # Check go.mod
         MODULE=$(grep "^module" go.mod | awk '{print $2}')
         if [ "$MODULE" != "{{.EXPECTED}}" ]; then
-          echo "❌ go.mod has incorrect module: $MODULE"
+          echo "[ERROR] go.mod has incorrect module: $MODULE"
           echo "   Expected: {{.EXPECTED}}"
           exit 1
         fi
@@ -29,32 +29,32 @@ tasks:
         # Check for old module references
         if grep -r "github.com/newrelic/database-intelligence-mvp" . \
            --include="*.go" --include="*.yaml" --include="*.yml" 2>/dev/null; then
-          echo "❌ Found old module references"
+          echo "[ERROR] Found old module references"
           exit 1
         fi
       - |
         # Check OCB config
         if grep -v "{{.EXPECTED}}" ocb-config.yaml | grep "github.com" | grep -v "opentelemetry"; then
-          echo "⚠️  OCB config may have incorrect module paths"
+          echo "[WARNING]  OCB config may have incorrect module paths"
         fi
-      - echo "✅ Module paths are consistent"
+      - echo "[OK] Module paths are consistent"
 
   config:
     desc: Validate all configuration files
     deps: ['build:binary']
     cmds:
-      - echo "🔍 Validating configurations..."
+      - echo "[CHECK] Validating configurations..."
       - |
         for config in config/*.yaml; do
           echo "  Checking: $config"
           {{.DIST_DIR}}/{{.BINARY_NAME}} validate --config=$config || exit 1
         done
-      - echo "✅ All configurations valid"
+      - echo "[OK] All configurations valid"
 
   code:
     desc: Run static code analysis
     cmds:
-      - echo "🔍 Running code analysis..."
+      - echo "[CHECK] Running code analysis..."
       - |
         # Run go vet
         echo "  Running go vet..."
@@ -65,23 +65,23 @@ tasks:
           echo "  Running golangci-lint..."
           golangci-lint run --timeout=5m ./...
         else
-          echo "⚠️  golangci-lint not installed, skipping"
+          echo "[WARNING]  golangci-lint not installed, skipping"
         fi
       - |
         # Check formatting
         echo "  Checking formatting..."
         UNFORMATTED=$(gofmt -l .)
         if [ -n "$UNFORMATTED" ]; then
-          echo "❌ Unformatted files:"
+          echo "[ERROR] Unformatted files:"
           echo "$UNFORMATTED"
           exit 1
         fi
-      - echo "✅ Code analysis passed"
+      - echo "[OK] Code analysis passed"
 
   security:
     desc: Run security checks
     cmds:
-      - echo "🔍 Running security checks..."
+      - echo "[CHECK] Running security checks..."
       - |
         # Check for hardcoded credentials
         echo "  Checking for hardcoded credentials..."
@@ -89,14 +89,14 @@ tasks:
            --include="*.go" --include="*.yaml" \
            --exclude-dir=scripts \
            --exclude-dir=tests 2>/dev/null; then
-          echo "⚠️  Possible hardcoded credentials found"
+          echo "[WARNING]  Possible hardcoded credentials found"
         fi
       - |
         # Check for sensitive data in logs
         echo "  Checking for sensitive data logging..."
         if grep -r "(?i)(password|secret|key|token)" . \
            --include="*.go" | grep -i "log\|print" | grep -v "REDACTED"; then
-          echo "⚠️  Possible sensitive data in logs"
+          echo "[WARNING]  Possible sensitive data in logs"
         fi
       - |
         # Run gosec if available
@@ -104,20 +104,20 @@ tasks:
           echo "  Running gosec..."
           gosec -quiet ./...
         else
-          echo "⚠️  gosec not installed, skipping security scan"
+          echo "[WARNING]  gosec not installed, skipping security scan"
         fi
-      - echo "✅ Security checks completed"
+      - echo "[OK] Security checks completed"
 
   deps:
     desc: Validate dependencies
     cmds:
-      - echo "🔍 Checking dependencies..."
+      - echo "[CHECK] Checking dependencies..."
       - |
         # Check go.mod is tidy
         echo "  Checking go.mod..."
         go mod tidy
         if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
-          echo "❌ go.mod is not tidy"
+          echo "[ERROR] go.mod is not tidy"
           exit 1
         fi
       - |
@@ -128,22 +128,22 @@ tasks:
         else
           go list -m all | while read -r module version; do
             if go list -m -json "$module@$version" | grep -q "Deprecated"; then
-              echo "⚠️  Deprecated: $module"
+              echo "[WARNING]  Deprecated: $module"
             fi
           done
         fi
-      - echo "✅ Dependencies validated"
+      - echo "[OK] Dependencies validated"
 
   env:
     desc: Validate environment setup
     cmds:
-      - echo "🔍 Checking environment..."
+      - echo "[CHECK] Checking environment..."
       - |
         # Check required tools
         REQUIRED_TOOLS="go docker"
         for tool in $REQUIRED_TOOLS; do
           if ! command -v $tool &> /dev/null; then
-            echo "❌ Required tool not found: $tool"
+            echo "[ERROR] Required tool not found: $tool"
             exit 1
           fi
         done
@@ -152,36 +152,36 @@ tasks:
         GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
         MIN_VERSION="1.21"
         if [ "$(printf '%s\n' "$MIN_VERSION" "$GO_VERSION" | sort -V | head -n1)" != "$MIN_VERSION" ]; then
-          echo "❌ Go version $GO_VERSION is below minimum $MIN_VERSION"
+          echo "[ERROR] Go version $GO_VERSION is below minimum $MIN_VERSION"
           exit 1
         fi
       - |
         # Check environment variables
         if [ ! -f .env ]; then
-          echo "⚠️  No .env file found"
+          echo "[WARNING]  No .env file found"
         else
           source .env
           if [ -z "$NEW_RELIC_LICENSE_KEY" ] || [ "$NEW_RELIC_LICENSE_KEY" = "your_license_key_here" ]; then
-            echo "⚠️  NEW_RELIC_LICENSE_KEY not configured"
+            echo "[WARNING]  NEW_RELIC_LICENSE_KEY not configured"
           fi
         fi
-      - echo "✅ Environment validated"
+      - echo "[OK] Environment validated"
 
   processors:
     desc: Validate custom processors
     cmds:
-      - echo "🔍 Validating custom processors..."
+      - echo "[CHECK] Validating custom processors..."
       - |
         # Check processor registration
         PROCESSORS="adaptivesampler circuitbreaker planattributeextractor verification"
         for proc in $PROCESSORS; do
           echo "  Checking $proc..."
           if [ ! -d "processors/$proc" ]; then
-            echo "❌ Processor directory not found: processors/$proc"
+            echo "[ERROR] Processor directory not found: processors/$proc"
             exit 1
           fi
           if ! grep -q "func New.*Factory" processors/$proc/*.go; then
-            echo "❌ Factory function not found for $proc"
+            echo "[ERROR] Factory function not found for $proc"
             exit 1
           fi
         done
@@ -189,25 +189,25 @@ tasks:
         # Check processor tests
         for proc in $PROCESSORS; do
           if [ ! -f "processors/$proc/*_test.go" ]; then
-            echo "⚠️  No tests found for processor: $proc"
+            echo "[WARNING]  No tests found for processor: $proc"
           fi
         done
-      - echo "✅ Processors validated"
+      - echo "[OK] Processors validated"
 
   docker:
     desc: Validate Docker setup
     cmds:
-      - echo "🔍 Validating Docker setup..."
+      - echo "[CHECK] Validating Docker setup..."
       - |
         # Check Docker daemon
         if ! docker info &> /dev/null; then
-          echo "❌ Docker daemon not running"
+          echo "[ERROR] Docker daemon not running"
           exit 1
         fi
       - |
         # Check docker-compose
         if ! docker compose version &> /dev/null; then
-          echo "❌ Docker Compose not available"
+          echo "[ERROR] Docker Compose not available"
           exit 1
         fi
       - |
@@ -218,15 +218,15 @@ tasks:
         if [ -f Dockerfile ]; then
           docker build --no-cache --check . || exit 1
         else
-          echo "⚠️  No Dockerfile found"
+          echo "[WARNING]  No Dockerfile found"
         fi
-      - echo "✅ Docker setup validated"
+      - echo "[OK] Docker setup validated"
 
   integration:
     desc: Validate integration test setup
     deps: ['dev:up']
     cmds:
-      - echo "🔍 Validating integration test setup..."
+      - echo "[CHECK] Validating integration test setup..."
       - |
         # Check database connections
         echo "  Testing PostgreSQL connection..."
@@ -239,4 +239,4 @@ tasks:
         echo "  Testing monitoring user access..."
         docker compose exec -T postgres psql -U monitoring_user -d testdb -c "SELECT 1" || exit 1
         docker compose exec -T mysql mysql -u monitoring_user -pmonitoring testdb -e "SELECT 1" || exit 1
-      - echo "✅ Integration test setup validated"
+      - echo "[OK] Integration test setup validated"

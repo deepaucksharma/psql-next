@@ -1,0 +1,121 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13134
+
+receivers:
+  # PostgreSQL metrics receiver
+  postgresql:
+    endpoint: ${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+    databases:
+      - ${POSTGRES_DATABASE:testdb}
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+  # MySQL metrics receiver  
+  mysql:
+    endpoint: ${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:mysql}
+    database: ${MYSQL_DATABASE:testdb}
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+  # Custom SQL queries for additional insights
+  sqlquery/postgres_insights:
+    driver: postgres
+    datasource: "host=${POSTGRES_HOST:localhost} port=${POSTGRES_PORT:5432} user=${POSTGRES_USER:postgres} password=${POSTGRES_PASSWORD:postgres} dbname=${POSTGRES_DATABASE:testdb} sslmode=disable"
+    queries:
+      - sql: |
+          SELECT 
+            current_database() as database_name,
+            pg_database_size(current_database()) as size_bytes,
+            pg_size_pretty(pg_database_size(current_database())) as size_pretty,
+            (SELECT count(*) FROM pg_stat_user_tables) as table_count
+        metrics:
+          - metric_name: postgres.database.size_bytes
+            value_column: size_bytes
+            value_type: int
+            data_type: gauge
+            attribute_columns: [database_name]
+          - metric_name: postgres.database.table_count
+            value_column: table_count
+            value_type: int
+            data_type: gauge
+            attribute_columns: [database_name]
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+  
+  batch:
+    send_batch_size: 1000
+    timeout: 10s
+  
+  # Add essential resource attributes for New Relic
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence
+        action: insert
+      - key: deployment.environment  
+        value: ${ENVIRONMENT:development}
+        action: insert
+      - key: service.version
+        value: "1.0.0"
+        action: insert
+      - key: telemetry.sdk.name
+        value: opentelemetry
+        action: insert
+      - key: telemetry.sdk.language
+        value: go
+        action: insert
+      - key: telemetry.sdk.version
+        value: "0.96.0"
+        action: insert
+
+exporters:
+  # Logging for debugging
+  logging:
+    verbosity: normal
+    sampling_initial: 2
+    sampling_thereafter: 500
+  
+  # New Relic OTLP exporter
+  otlp/newrelic:
+    endpoint: ${OTLP_ENDPOINT:otlp.nr-data.net:4317}
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql, sqlquery/postgres_insights]
+      processors: [memory_limiter, resource, batch]
+      exporters: [logging, otlp/newrelic]
+  
+  telemetry:
+    logs:
+      level: info
+      encoding: console
+      output_paths: ["stdout"]
+      error_output_paths: ["stderr"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

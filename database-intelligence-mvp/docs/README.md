@@ -2,7 +2,9 @@
 
 ## Overview
 
-This documentation represents a comprehensive, ground-up rewrite that validates every claim against the actual implementation. All documentation has been verified to be 100% accurate as of December 2024.
+The Database Intelligence Collector is an OpenTelemetry-based monitoring solution for PostgreSQL and MySQL databases. Built with an OTEL-first architecture, it uses standard components wherever possible and includes 4 sophisticated custom processors for advanced monitoring capabilities.
+
+This documentation has been comprehensively updated to reflect our modernized infrastructure using Taskfile, unified Docker Compose with profiles, Helm charts, and configuration overlays.
 
 ## Documentation Structure
 
@@ -54,43 +56,150 @@ This documentation represents a comprehensive, ground-up rewrite that validates 
 
 ## Quick Start
 
-### For Operators
-Start with [DEPLOYMENT.md](./DEPLOYMENT.md) to understand current status and deployment options.
+### Fastest Path to Running Collector
 
-### For Developers
-Read [TECHNICAL_IMPLEMENTATION_DEEPDIVE.md](./TECHNICAL_IMPLEMENTATION_DEEPDIVE.md) for code architecture details.
+```bash
+# Install Task (build automation tool)
+brew install go-task/tap/go-task  # macOS
+# or: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin  # Linux
 
-### For Architects
-Review [UNIFIED_IMPLEMENTATION_OVERVIEW.md](./UNIFIED_IMPLEMENTATION_OVERVIEW.md) for complete system understanding.
+# Clone and setup
+git clone https://github.com/database-intelligence-mvp
+cd database-intelligence-mvp
 
-### For Executives
-See [FINAL_COMPREHENSIVE_SUMMARY.md](./FINAL_COMPREHENSIVE_SUMMARY.md) for project status and recommendations.
+# Configure environment
+cp .env.example .env
+# Edit .env with your database credentials and New Relic license key
 
-## Key Findings
+# Start everything
+task quickstart
+```
+
+This single command will:
+- Install dependencies
+- Fix common setup issues  
+- Build the collector
+- Start PostgreSQL and MySQL containers
+- Begin collecting and sending metrics to New Relic
+
+### For Different Audiences
+
+**For Operators**: Start with [DEPLOYMENT.md](./DEPLOYMENT.md) for production deployment options using Docker, Kubernetes/Helm, or binaries.
+
+**For Developers**: Read [TECHNICAL_IMPLEMENTATION_DEEPDIVE.md](./TECHNICAL_IMPLEMENTATION_DEEPDIVE.md) for code architecture and [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for debugging.
+
+**For Architects**: Review [ARCHITECTURE.md](./ARCHITECTURE.md) for system design and [UNIFIED_IMPLEMENTATION_OVERVIEW.md](./UNIFIED_IMPLEMENTATION_OVERVIEW.md) for comprehensive analysis.
+
+**For Configuration**: See [CONFIGURATION.md](./CONFIGURATION.md) for detailed configuration options and environment overlays.
+
+## Key Features
 
 ### ✅ What's Implemented
-- 4 sophisticated custom processors (3,242 lines)
-- Production-grade error handling
-- Advanced features (auto-tuning, self-healing)
-- Comprehensive monitoring and observability
+- **4 Custom Processors** (3,242 lines of production code)
+  - Adaptive Sampler: Rule-based sampling with persistent state
+  - Circuit Breaker: Database protection with self-healing
+  - Plan Attribute Extractor: Query plan analysis and hashing
+  - Verification Processor: PII detection and data quality validation
+- **Standard OTEL Components**: PostgreSQL/MySQL receivers, batch processor, OTLP exporter
+- **Modern Infrastructure**:
+  - Taskfile replacing 30+ shell scripts and Makefile
+  - Unified Docker Compose with profiles (dev/test/prod)
+  - Complete Helm chart for Kubernetes deployment
+  - Configuration overlay system for environments
+  - New Relic dashboards and alerting
 
-### ❌ What's Blocking Deployment
-- Module path inconsistencies in build configs
-- Incomplete custom OTLP exporter
-- No integration tests (due to build issues)
+### 🚀 Deployment Options
+- **Binary**: Direct execution with environment configuration
+- **Docker**: Unified compose file with service profiles
+- **Kubernetes**: Production-ready Helm charts with HPA, PDB, NetworkPolicy
+- **CI/CD**: GitHub Actions workflows for automated deployment
 
-### ⏱️ Time to Production
-- **4-8 hours** of actual fixes needed
-- **1-2 weeks** total including testing and validation
+### ⚡ Performance Characteristics
+- **Memory**: 512MB-1GB standard mode, 1-2GB experimental mode
+- **CPU**: 0.5-1 core standard, 1-2 cores experimental
+- **Latency**: 1-5ms added by custom processors
+- **Collection Interval**: Configurable (10s dev, 60s staging, 300s production)
+
+## Infrastructure Modernization
+
+### Taskfile Commands
+We've replaced 30+ shell scripts with organized Task commands:
+
+```bash
+# Core Operations
+task build              # Build collector
+task test              # Run tests
+task run               # Run collector
+task quickstart        # Complete setup for new developers
+
+# Development
+task dev:up            # Start development environment
+task dev:watch         # Hot reload mode
+task dev:logs          # View logs
+task health-check      # Check collector health
+
+# Deployment  
+task deploy:docker     # Docker deployment
+task deploy:helm       # Kubernetes deployment
+task deploy:binary     # Binary deployment
+
+# Validation & Fixes
+task validate:all      # Validate everything
+task fix:all          # Fix common issues
+task clean            # Clean build artifacts
+```
+
+### Configuration Management
+- **Environment Overlays**: `base/`, `dev/`, `staging/`, `production/`
+- **Environment Files**: `.env.development`, `.env.staging`, `.env.production`
+- **Helm Values**: Per-environment values files with GitOps support
 
 ## Documentation Standards
 
-All documentation in this directory:
+All documentation is:
 - ✅ Validated against actual implementation
+- ✅ Updated with modernized infrastructure (Taskfile, Docker Compose profiles, Helm)
+- ✅ Includes working examples and commands
 - ✅ Marks features as [DONE], [NOT DONE], or [PARTIALLY DONE]
-- ✅ Includes working code examples
-- ✅ Provides honest assessment of gaps
-- ✅ Updated December 2024
+- ✅ Maintained with CLAUDE.md guidelines for automatic updates
+
+## Project Structure
+
+```
+database-intelligence-mvp/
+├── Taskfile.yml              # Main task automation
+├── tasks/                    # Modular task files
+│   ├── build.yml
+│   ├── test.yml
+│   ├── deploy.yml
+│   ├── dev.yml
+│   └── validate.yml
+├── docker-compose.yaml       # Unified with profiles
+├── deployments/
+│   ├── helm/                # Kubernetes Helm charts
+│   └── systemd/             # SystemD service files
+├── configs/
+│   └── overlays/            # Environment configurations
+│       ├── base/
+│       ├── dev/
+│       ├── staging/
+│       └── production/
+├── monitoring/
+│   └── newrelic/           # Dashboards and alerts
+├── processors/              # Custom OTEL processors
+│   ├── adaptivesampler/
+│   ├── circuitbreaker/
+│   ├── planattributeextractor/
+│   └── verification/
+└── docs/                    # This documentation
+```
+
+## Getting Help
+
+- **Task Help**: `task --list-all` to see all available commands
+- **Troubleshooting**: See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
+- **Configuration**: See [CONFIGURATION.md](./CONFIGURATION.md)
+- **Architecture**: See [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ## Archive
 

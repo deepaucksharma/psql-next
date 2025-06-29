@@ -1,5 +1,5 @@
-# Production-Grade Kubernetes Deployment for Database Intelligence MVP
-# Incorporates New Relic best practices for OpenTelemetry integration
+# Single-Instance Kubernetes Deployment for Database Intelligence MVP
+# Simplified deployment without Redis dependency for reliable operation
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -71,7 +71,7 @@ metadata:
   name: otel-collector-pdb
   namespace: db-intelligence
 spec:
-  minAvailable: 2
+  minAvailable: 1
   selector:
     matchLabels:
       app: otel-collector
@@ -85,7 +85,7 @@ metadata:
     app: otel-collector
 spec:
   serviceName: otel-collector-headless
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: otel-collector
@@ -103,17 +103,7 @@ spec:
     spec:
       serviceAccountName: otel-collector
       
-      # Anti-affinity for high availability
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - otel-collector
-            topologyKey: kubernetes.io/hostname
+      # No anti-affinity needed for single instance
             
       # Security context
       securityContext:
@@ -327,8 +317,8 @@ spec:
     apiVersion: apps/v1
     kind: StatefulSet
     name: otel-collector
-  minReplicas: 3
-  maxReplicas: 10
+  minReplicas: 1
+  maxReplicas: 3
   metrics:
   - type: Resource
     resource:

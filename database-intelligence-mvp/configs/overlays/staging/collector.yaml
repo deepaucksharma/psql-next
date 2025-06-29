@@ -1,0 +1,103 @@
+# Staging Environment Overlay
+# Includes base configuration with staging-specific optimizations
+
+# Include base configuration
+__includes:
+  - ../base/collector.yaml
+
+# Staging-specific overrides
+service:
+  telemetry:
+    logs:
+      level: info
+      sampling:
+        initial: 10
+        thereafter: 100
+
+receivers:
+  postgresql:
+    collection_interval: 30s
+    databases:
+      - ${env:POSTGRES_DB}
+      - staging_analytics
+    
+  mysql:
+    collection_interval: 30s
+    
+  sqlquery:
+    collection_interval: 120s
+    queries:
+      # Performance monitoring query for staging
+      - query: |
+          SELECT 
+            schemaname,
+            tablename,
+            n_live_tup,
+            n_dead_tup,
+            last_autovacuum
+          FROM pg_stat_user_tables
+          WHERE n_dead_tup > 1000
+        metrics:
+          - metric_name: db.table.dead_tuples
+            value_column: n_dead_tup
+            attribute_columns: [schemaname, tablename]
+
+processors:
+  # More aggressive batching for staging
+  batch:
+    timeout: 15s
+    send_batch_size: 2048
+    send_batch_max_size: 4096
+    
+  # Sampling for high-volume metrics
+  probabilistic_sampler:
+    hash_seed: 22
+    sampling_percentage: 50
+    
+  # Resource detection for cloud metadata
+  resourcedetection:
+    detectors: [env, system, aws]
+    timeout: 5s
+    
+  # Metrics transform for staging
+  metricstransform:
+    transforms:
+      - include: db.query.stats
+        match_type: strict
+        action: update
+        operations:
+          - action: add_label
+            new_label: stage
+            new_value: staging
+
+exporters:
+  # Staging OTLP configuration
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_STAGING_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_STAGING_KEY}
+      X-Environment: staging
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 100
+      
+  # Additional staging exporter for testing
+  otlphttp/backup:
+    endpoint: ${env:BACKUP_ENDPOINT}
+    compression: gzip
+    headers:
+      Authorization: Bearer ${env:BACKUP_TOKEN}
+
+# Staging pipelines with sampling
+service:
+  pipelines:
+    metrics/infrastructure:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resourcedetection, resource, batch]
+      exporters: [otlp/newrelic, prometheus]
+      
+    metrics/queries:
+      receivers: [sqlquery]
+      processors: [memory_limiter, resource, probabilistic_sampler, metricstransform, batch]
+      exporters: [otlp/newrelic, otlphttp/backup]

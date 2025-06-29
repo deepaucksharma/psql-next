@@ -1,55 +1,55 @@
-{{- if and .Values.metrics.serviceMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+{{- if and .Values.monitoring.serviceMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: {{ include "database-intelligence.fullname" . }}
   labels:
     {{- include "database-intelligence.labels" . | nindent 4 }}
-    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-  {{- with .Values.metrics.serviceMonitor.annotations }}
+  {{- with .Values.monitoring.serviceMonitor.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  jobLabel: {{ .Values.metrics.serviceMonitor.jobLabel | default "app.kubernetes.io/name" }}
+  jobLabel: {{ .Values.monitoring.serviceMonitor.jobLabel | default "app.kubernetes.io/name" }}
   selector:
     matchLabels:
       {{- include "database-intelligence.selectorLabels" . | nindent 6 }}
-      {{- with .Values.metrics.serviceMonitor.selector }}
+      {{- with .Values.monitoring.serviceMonitor.selector }}
       {{- toYaml . | nindent 6 }}
       {{- end }}
   endpoints:
     - port: metrics
-      {{- with .Values.metrics.serviceMonitor.interval }}
+      {{- with .Values.monitoring.serviceMonitor.interval }}
       interval: {{ . }}
       {{- end }}
-      {{- with .Values.metrics.serviceMonitor.scrapeTimeout }}
+      {{- with .Values.monitoring.serviceMonitor.scrapeTimeout }}
       scrapeTimeout: {{ . }}
       {{- end }}
-      {{- with .Values.metrics.serviceMonitor.relabelings }}
+      {{- with .Values.monitoring.serviceMonitor.relabelings }}
       relabelings:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.metrics.serviceMonitor.metricRelabelings }}
+      {{- with .Values.monitoring.serviceMonitor.metricRelabelings }}
       metricRelabelings:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.metrics.serviceMonitor.honorLabels }}
+      {{- with .Values.monitoring.serviceMonitor.honorLabels }}
       honorLabels: {{ . }}
       {{- end }}
-      path: {{ .Values.metrics.serviceMonitor.path | default "/metrics" }}
-      scheme: {{ .Values.metrics.serviceMonitor.scheme | default "http" }}
-      {{- if .Values.metrics.serviceMonitor.tlsConfig }}
+      path: {{ .Values.monitoring.serviceMonitor.path | default "/metrics" }}
+      scheme: {{ .Values.monitoring.serviceMonitor.scheme | default "http" }}
+      {{- if .Values.monitoring.serviceMonitor.tlsConfig }}
       tlsConfig:
-        {{- toYaml .Values.metrics.serviceMonitor.tlsConfig | nindent 8 }}
+        {{- toYaml .Values.monitoring.serviceMonitor.tlsConfig | nindent 8 }}
       {{- end }}
-  {{- with .Values.metrics.serviceMonitor.namespaceSelector }}
+  {{- with .Values.monitoring.serviceMonitor.namespaceSelector }}
   namespaceSelector:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  {{- with .Values.metrics.serviceMonitor.targetLabels }}
+  {{- with .Values.monitoring.serviceMonitor.targetLabels }}
   targetLabels:
     {{- toYaml . | nindent 4 }}
   {{- end }}

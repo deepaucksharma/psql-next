@@ -11,7 +11,7 @@ tasks:
       PACKAGE: '{{.PACKAGE | default "./..."}}'
       VERBOSE: '{{.VERBOSE | default "true"}}'
     cmds:
-      - echo "🧪 Running unit tests..."
+      - echo "[TEST] Running unit tests..."
       - |
         go test {{if eq .VERBOSE "true"}}-v{{end}} \
           -race \
@@ -19,7 +19,7 @@ tasks:
           -coverprofile=coverage.out \
           -covermode=atomic \
           {{.PACKAGE}}
-      - echo "📊 Coverage report:"
+      - echo "[COVERAGE] Coverage report:"
       - go tool cover -func=coverage.out | tail -n 1
 
   unit:processor:
@@ -29,7 +29,7 @@ tasks:
     cmds:
       - |
         if [ -z "{{.PROCESSOR}}" ]; then
-          echo "❌ PROCESSOR is required (adaptivesampler|circuitbreaker|planattributeextractor|verification)"
+          echo "[ERROR] PROCESSOR is required (adaptivesampler|circuitbreaker|planattributeextractor|verification)"
           exit 1
         fi
       - task: test:unit
@@ -42,7 +42,7 @@ tasks:
     vars:
       VERBOSE: '{{.VERBOSE | default "true"}}'
     cmds:
-      - echo "🧪 Running integration tests..."
+      - echo "[TEST] Running integration tests..."
       - |
         POSTGRES_HOST=localhost \
         POSTGRES_PORT=5432 \
@@ -61,7 +61,7 @@ tasks:
     desc: Run end-to-end tests
     deps: ['dev:up', 'run']
     cmds:
-      - echo "🧪 Running E2E tests..."
+      - echo "[TEST] Running E2E tests..."
       - |
         # Wait for collector to be ready
         timeout 30 bash -c 'until curl -sf http://localhost:13133/ > /dev/null; do sleep 1; done'
@@ -77,7 +77,7 @@ tasks:
       PACKAGE: '{{.PACKAGE | default "./processors/..."}}'
       TIME: '{{.TIME | default "10s"}}'
     cmds:
-      - echo "⚡ Running benchmarks..."
+      - echo "[BENCH] Running benchmarks..."
       - |
         go test -bench=. \
           -benchtime={{.TIME}} \
@@ -85,7 +85,7 @@ tasks:
           -cpuprofile=cpu.prof \
           -memprofile=mem.prof \
           {{.PACKAGE}}
-      - echo "✅ Benchmark complete. Profiles: cpu.prof, mem.prof"
+      - echo "[OK] Benchmark complete. Profiles: cpu.prof, mem.prof"
 
   load:
     desc: Run load tests
@@ -94,7 +94,7 @@ tasks:
       DURATION: '{{.DURATION | default "5m"}}'
       VUS: '{{.VUS | default "10"}}'
     cmds:
-      - echo "🔥 Running load tests..."
+      - echo "[LOAD] Running load tests..."
       - |
         docker run --rm \
           --network=host \
@@ -108,16 +108,16 @@ tasks:
     desc: Generate coverage report
     deps: [unit]
     cmds:
-      - echo "📊 Generating coverage report..."
+      - echo "[REPORT] Generating coverage report..."
       - go tool cover -html=coverage.out -o coverage.html
       - |
         COVERAGE=$(go tool cover -func=coverage.out | tail -n 1 | awk '{print $3}' | sed 's/%//')
-        echo "📈 Total coverage: ${COVERAGE}%"
+        echo "[TOTAL] Total coverage: ${COVERAGE}%"
         if (( $(echo "$COVERAGE < {{.COVERAGE_THRESHOLD}}" | bc -l) )); then
-          echo "❌ Coverage below threshold ({{.COVERAGE_THRESHOLD}}%)"
+          echo "[ERROR] Coverage below threshold ({{.COVERAGE_THRESHOLD}}%)"
           exit 1
         fi
-      - echo "✅ Coverage report: coverage.html"
+      - echo "[OK] Coverage report: coverage.html"
 
   all:
     desc: Run all tests
@@ -126,7 +126,7 @@ tasks:
       - task: test:integration
       - task: test:e2e
       - task: test:coverage
-      - echo "✅ All tests passed!"
+      - echo "[OK] All tests passed!"
 
   watch:
     desc: Run tests in watch mode
@@ -134,7 +134,7 @@ tasks:
       PACKAGE: '{{.PACKAGE | default "./..."}}'
     cmds:
       - |
-        echo "👀 Watching for changes..."
+        echo "[WATCH] Watching for changes..."
         while true; do
           inotifywait -qre modify ./**/*.go 2>/dev/null || \
           fswatch -o ./**/*.go 2>/dev/null | while read; do
@@ -151,7 +151,7 @@ tasks:
     cmds:
       - |
         if [ -z "{{.NAME}}" ]; then
-          echo "❌ NAME is required"
+          echo "[ERROR] NAME is required"
           exit 1
         fi
       - go test -v -run "{{.NAME}}" {{.PACKAGE}}

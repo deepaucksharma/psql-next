@@ -1,0 +1,301 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.21'
+  DOCKER_REGISTRY: ghcr.io
+  HELM_VERSION: '3.13.0'
+  OCB_VERSION: '0.88.0'
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+jobs:
+  validate:
+    name: Validate Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          go mod download
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run validation
+        run: |
+          make validate-modules
+          make lint
+          make vet
+          make fmt-check
+
+      - name: Security scan
+        run: |
+          gosec -fmt sarif -out gosec-results.sarif ./...
+          
+      - name: Upload security results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: gosec-results.sarif
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: validate
+    strategy:
+      matrix:
+        test-suite: [unit, integration]
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: mysql
+          MYSQL_DATABASE: testdb
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        ports:
+          - 3306:3306
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run ${{ matrix.test-suite }} tests
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          MYSQL_HOST: localhost
+          MYSQL_USER: root
+          MYSQL_PASSWORD: mysql
+        run: |
+          if [ "${{ matrix.test-suite }}" = "unit" ]; then
+            make test
+          else
+            make test-integration
+          fi
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        if: matrix.test-suite == 'unit'
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+
+  build:
+    name: Build Collector
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install OCB
+        run: |
+          curl -L -o ocb https://github.com/open-telemetry/opentelemetry-collector/releases/download/cmd%2Fbuilder%2Fv${OCB_VERSION}/ocb_${OCB_VERSION}_linux_amd64
+          chmod +x ocb
+          sudo mv ocb /usr/local/bin/
+
+      - name: Build collector
+        run: make build
+
+      - name: Test binary
+        run: |
+          ./dist/otelcol --version
+          ./dist/otelcol validate --config=configs/collector.yaml
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: collector-binary
+          path: dist/otelcol
+          retention-days: 7
+
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v3
+        with:
+          name: collector-binary
+          path: dist/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  helm:
+    name: Package Helm Chart
+    runs-on: ubuntu-latest
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Package Helm chart
+        run: |
+          cd deployments/helm
+          helm package db-intelligence
+          helm repo index . --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+
+      - name: Upload Helm package
+        uses: actions/upload-artifact@v3
+        with:
+          name: helm-chart
+          path: deployments/helm/*.tgz
+          retention-days: 30
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [docker, helm]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+          files: |
+            collector-binary/otelcol
+            helm-chart/*.tgz
+          generate_release_notes: true
+          body: |
+            ## What's Changed
+            
+            ### Docker Image
+            ```bash
+            docker pull ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}:${{ github.ref_name }}
+            ```
+            
+            ### Helm Chart
+            ```bash
+            helm repo add db-intelligence https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+            helm repo update
+            helm install db-intelligence db-intelligence/db-intelligence --version ${{ github.ref_name }}
+            ```
+            
+            ### Binary
+            Download the `otelcol` binary from the release assets.
+
+  deploy-docs:
+    name: Deploy Documentation
+    runs-on: ubuntu-latest
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Build documentation
+        run: |
+          # If using a documentation generator like mkdocs or docusaurus
+          # npm install
+          # npm run build-docs
+          echo "Documentation deployment placeholder"
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs

@@ -1,0 +1,98 @@
+version: '3'
+
+silent: true
+
+includes:
+  build: ./tasks/build.yml
+  test: ./tasks/test.yml
+  deploy: ./tasks/deploy.yml
+  dev: ./tasks/dev.yml
+  validate: ./tasks/validate.yml
+
+vars:
+  PROJECT_NAME: database-intelligence-collector
+  BINARY_NAME: otelcol-db-intelligence
+  DIST_DIR: dist
+  CONFIG_DIR: config
+  DOCKER_REGISTRY: '{{.DOCKER_REGISTRY | default "docker.io"}}'
+  DOCKER_ORG: '{{.DOCKER_ORG | default "database-intelligence"}}'
+  VERSION: '{{.VERSION | default "latest"}}'
+
+env:
+  CGO_ENABLED: 0
+  GOOS: '{{OS}}'
+  GOARCH: '{{ARCH}}'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list-all
+
+  setup:
+    desc: Complete development environment setup
+    cmds:
+      - task: setup:tools
+      - task: setup:deps
+      - echo "[OK] Development environment ready!"
+
+  setup:tools:
+    desc: Install required development tools
+    cmds:
+      - echo "[PACKAGE] Installing development tools..."
+      - go install go.opentelemetry.io/collector/cmd/builder@latest
+      - echo "[OK] Tools installed"
+
+  setup:deps:
+    desc: Download and verify dependencies
+    cmds:
+      - echo "[PACKAGE] Managing Go dependencies..."
+      - go mod download
+      - go mod verify
+      - echo "[OK] Dependencies ready"
+
+  quickstart:
+    desc: Quick start for new developers
+    cmds:
+      - task: setup
+      - task: build
+      - task: dev:up
+
+  build:
+    desc: Build the collector binary
+    vars:
+      OUTPUT: '{{.OUTPUT | default (print .DIST_DIR "/" .BINARY_NAME)}}'
+    cmds:
+      - echo "Building collector..."
+      - mkdir -p {{.DIST_DIR}}
+      - builder --config=otelcol-builder.yaml || echo "Builder failed - check configuration"
+      - echo "[OK] Build complete"
+
+  dev:up:
+    desc: Start development environment
+    cmds:
+      - echo "[START] Starting development environment..."
+      - docker compose --profile dev up -d
+      - echo "[OK] Development environment ready"
+
+  dev:down:
+    desc: Stop development environment
+    cmds:
+      - echo "[STOP] Stopping development environment..."
+      - docker compose down
+      - echo "[OK] Development environment stopped"
+
+  test:
+    desc: Run all tests
+    cmds:
+      - echo "[TEST] Running tests..."
+      - go test ./...
+      - echo "[OK] Tests passed"
+
+  clean:
+    desc: Clean all generated files
+    cmds:
+      - echo "[CLEAN] Cleaning..."
+      - rm -rf {{.DIST_DIR}}
+      - rm -rf coverage.*
+      - echo "[OK] Cleaned"

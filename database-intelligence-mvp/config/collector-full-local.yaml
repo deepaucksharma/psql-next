@@ -1,0 +1,152 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13134
+
+receivers:
+  # PostgreSQL metrics receiver
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - testdb
+    collection_interval: 30s
+    tls:
+      insecure: true
+    metrics:
+      postgresql.database.count:
+        enabled: true
+      postgresql.backends:
+        enabled: true
+      postgresql.connection.max:
+        enabled: true
+      postgresql.blocks_read:
+        enabled: true
+      postgresql.commits:
+        enabled: true
+      postgresql.rollbacks:
+        enabled: true
+      postgresql.database.locks:
+        enabled: true
+
+  # MySQL metrics receiver  
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: mysql
+    database: testdb
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+  # Custom SQL queries receiver
+  sqlquery/postgres_custom:
+    driver: postgres
+    datasource: "host=localhost port=5432 user=postgres password=postgres dbname=testdb sslmode=disable"
+    queries:
+      - sql: |
+          SELECT 
+            schemaname,
+            tablename,
+            n_live_tup as row_count,
+            n_dead_tup as dead_rows,
+            last_vacuum,
+            last_autovacuum
+          FROM pg_stat_user_tables
+        metrics:
+          - metric_name: postgres.table.row_count
+            value_column: row_count
+            value_type: int
+            data_type: gauge
+            attribute_columns: [schemaname, tablename]
+          - metric_name: postgres.table.dead_rows
+            value_column: dead_rows  
+            value_type: int
+            data_type: gauge
+            attribute_columns: [schemaname, tablename]
+
+  sqlquery/mysql_custom:
+    driver: mysql
+    datasource: "root:mysql@tcp(localhost:3306)/testdb"
+    queries:
+      - sql: |
+          SELECT 
+            table_schema,
+            table_name,
+            table_rows,
+            data_length,
+            index_length
+          FROM information_schema.tables
+          WHERE table_schema = 'testdb'
+        metrics:
+          - metric_name: mysql.table.row_count
+            value_column: table_rows
+            value_type: int
+            data_type: gauge
+            attribute_columns: [table_schema, table_name]
+          - metric_name: mysql.table.data_size
+            value_column: data_length
+            value_type: int
+            data_type: gauge
+            attribute_columns: [table_schema, table_name]
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+  
+  batch:
+    send_batch_size: 1000
+    timeout: 10s
+  
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence
+        action: insert
+      - key: deployment.environment  
+        value: development
+        action: insert
+      - key: collector.version
+        value: "1.0.0"
+        action: insert
+  
+  # Transform processor removed due to syntax issues - using resource processor for attributes
+
+exporters:
+  logging:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 20
+  
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: db_intelligence
+    const_labels:
+      environment: development
+      collector: otel
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics/postgresql:
+      receivers: [postgresql, sqlquery/postgres_custom]
+      processors: [memory_limiter, resource, batch]
+      exporters: [logging, prometheus]
+    
+    metrics/mysql:
+      receivers: [mysql, sqlquery/mysql_custom]
+      processors: [memory_limiter, resource, batch]
+      exporters: [logging, prometheus]
+  
+  telemetry:
+    logs:
+      level: info
+      encoding: console
+      output_paths: ["stdout", "logs/collector.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

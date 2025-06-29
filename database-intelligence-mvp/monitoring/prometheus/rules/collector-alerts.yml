@@ -1,0 +1,119 @@
+groups:
+  - name: collector_alerts
+    interval: 30s
+    rules:
+      # Collector health
+      - alert: CollectorDown
+        expr: up{job="otel-collector"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "OpenTelemetry Collector is down"
+          description: "OpenTelemetry Collector {{ $labels.instance }} has been down for more than 2 minutes."
+          runbook_url: "https://wiki.internal/runbooks/collector-down"
+
+      - alert: CollectorHighMemoryUsage
+        expr: |
+          (otelcol_process_runtime_total_sys_memory_bytes / otelcol_process_runtime_total_alloc_bytes) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Collector memory usage is high"
+          description: "Collector {{ $labels.instance }} memory usage is above 80% (current: {{ $value }}%)"
+
+      # Receiver issues
+      - alert: ReceiverErrors
+        expr: |
+          rate(otelcol_receiver_refused_metric_points[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Receiver refusing metrics"
+          description: "Receiver {{ $labels.receiver }} is refusing metrics at {{ $value }} points/sec"
+
+      - alert: NoDataReceived
+        expr: |
+          rate(otelcol_receiver_accepted_metric_points[5m]) == 0
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "No data being received"
+          description: "Receiver {{ $labels.receiver }} has not received any data for 10 minutes"
+
+      # Processor issues
+      - alert: ProcessorQueueFull
+        expr: |
+          otelcol_processor_queued_retry_queue_length / otelcol_processor_queued_retry_queue_capacity > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Processor queue almost full"
+          description: "Processor {{ $labels.processor }} queue is {{ $value }}% full"
+
+      - alert: BatchProcessorTimeout
+        expr: |
+          rate(otelcol_processor_batch_batch_send_size_sum[5m]) / rate(otelcol_processor_batch_batch_send_size_count[5m]) < 100
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Batch processor sending small batches"
+          description: "Batch processor is sending batches with average size {{ $value }}, which is below threshold"
+
+      # Exporter issues
+      - alert: ExporterFailures
+        expr: |
+          rate(otelcol_exporter_send_failed_metric_points[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Exporter failing to send data"
+          description: "Exporter {{ $labels.exporter }} is failing to send {{ $value }} points/sec"
+
+      - alert: ExporterQueueFull
+        expr: |
+          otelcol_exporter_queue_size / otelcol_exporter_queue_capacity > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Exporter queue almost full"
+          description: "Exporter {{ $labels.exporter }} queue is {{ $value }}% full"
+
+      # Circuit breaker alerts (if experimental mode enabled)
+      - alert: CircuitBreakerOpen
+        expr: |
+          otelcol_circuitbreaker_state == 2
+        for: 1m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Circuit breaker is open"
+          description: "Circuit breaker for database {{ $labels.database }} is open"
+
+      # Adaptive sampling alerts (if experimental mode enabled)
+      - alert: AdaptiveSamplingHighRate
+        expr: |
+          otelcol_adaptivesampler_sampling_rate < 0.1
+        for: 10m
+        labels:
+          severity: info
+          team: platform
+        annotations:
+          summary: "Adaptive sampling rate is very low"
+          description: "Sampling rate for rule {{ $labels.rule }} is {{ $value }}, indicating high load"

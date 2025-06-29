@@ -1,86 +1,210 @@
-# Environment files
-.env
-.env.local
-.env.*.local
-.env.backup*
+# Build artifacts
+dist/
+build/
+*.exe
+*.dll
+*.so
+*.dylib
+otelcol
+otelcol-*
+/bin/
+target/
 
-# Secrets
-*.key
-*.pem
-*.crt
-secrets/
-credentials/
-
-# State and data
-/var/lib/otel/storage/
-/var/log/
-*.log
-*.db
-*.sqlite
-
-# Test outputs
-test-results/
-coverage/
+# Go specific
+vendor/
 *.test
 *.out
-test-config.yaml
+coverage.txt
+coverage.html
+*.prof
+*.pprof
+go.work
+go.work.sum
 
-# Build artifacts
-bin/
-build/
-dist/
+# OCB (OpenTelemetry Collector Builder)
+.ocb-cache/
+ocb
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-*
+.atom/
+.history/
+*.iml
+.project
+.settings/
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.template
+*.env.local
+*.env.*.local
+
+# Secrets and credentials
+**/secrets/
+**/credentials/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*_rsa
+*_dsa
+*_ecdsa
+*_ed25519
+kubeconfig
+.kube/
+
+# Logs
+*.log
+logs/
+/var/log/
+*.log.*
+
+# Test artifacts
+test-results/
+test-reports/
+*.test.json
+.coverage/
+htmlcov/
+.pytest_cache/
+__pycache__/
+
+# Docker
+.docker/
+docker-compose.override.yml
+docker-compose.*.override.yml
+!docker-compose.override.example.yml
+
+# Kubernetes
+*.kubeconfig
+charts/*.tgz
+charts/*/charts/
+charts/*/Chart.lock
+
+# Helm
+deployments/helm/*/charts/
+deployments/helm/*/Chart.lock
+*.tgz
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars
+!terraform.tfvars.example
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+.cache/
+
+# OS specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+
+# State files
+*.state
+state/
+/var/lib/otel/
+collector-storage/
+sampling_state/
+zpages.debug
+
+# Generated files
+generated/
+gen/
+*.generated.*
+
+# Documentation build
+docs/_build/
+docs/.doctrees/
+site/
+
+# CI/CD
+.gitlab-ci-local/
+.github/actions/*/dist/
+
+# Node.js (if any frontend tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Python (for any scripts)
+*.py[cod]
+*$py.class
+.Python
+pip-log.txt
+.venv/
+venv/
+ENV/
+
+# Archives
+*.tar
 *.tar.gz
 *.zip
+*.gz
+*.tgz
+*.rar
+*.7z
+
+# Database dumps
+*.sql
+*.dump
+*.db
+*.sqlite
+*.sqlite3
+
+# Monitoring data
+prometheus-data/
+grafana-data/
+metrics-data/
+
+# Custom
+.notes/
+.scratch/
+playground/
+experiments/
 
 # Processor binaries
 processors/adaptivesampler/adaptivesampler
 processors/circuitbreaker/circuitbreaker
 processors/planattributeextractor/planattributeextractor
+processors/verification/verification
 
-# OS files
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-*~
-
-# IDE files
-.vscode/
-.idea/
-*.iml
-.project
-.settings/
-
-# Docker
-.docker/
-docker-compose.override.yml
-
-# Kubernetes
-kubeconfig
-*.kubeconfig
-
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*.cache
-tmp/
-temp/
-
-# Collector specific
-collector-storage/
-sampling_state/
-zpages.debug
-
-# Documentation build
-docs/_build/
-site/
-
-# Monitoring data
-prometheus-data/
-grafana-data/
-
-# But keep these
+# Allow specific files
+!scripts/sql/*.sql
+!monitoring/newrelic/dashboards/*.json
+!deployments/helm/*/templates/*.yaml
 !.gitignore
-!.env.example
 !.gitkeep

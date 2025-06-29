@@ -8,7 +8,7 @@ tasks:
       GOOS: '{{.GOOS | default OS}}'
       GOARCH: '{{.GOARCH | default ARCH}}'
     cmds:
-      - echo "🔨 Building for {{.GOOS}}/{{.GOARCH}}..."
+      - echo "[BUILD] Building for {{.GOOS}}/{{.GOARCH}}..."
       - mkdir -p {{.DIST_DIR}}
       - |
         GOOS={{.GOOS}} GOARCH={{.GOARCH}} \
@@ -18,7 +18,7 @@ tasks:
         if [ "{{.GOOS}}/{{.GOARCH}}" = "{{OS}}/{{ARCH}}" ]; then
           cp {{.OUTPUT}}-{{.GOOS}}-{{.GOARCH}} {{.OUTPUT}}
         fi
-      - echo "✅ Built: {{.OUTPUT}}-{{.GOOS}}-{{.GOARCH}}"
+      - echo "[OK] Built: {{.OUTPUT}}-{{.GOOS}}-{{.GOARCH}}"
 
   multi:
     desc: Build for multiple platforms
@@ -39,7 +39,7 @@ tasks:
         vars:
           GOOS: darwin
           GOARCH: arm64
-      - echo "✅ Multi-platform build complete"
+      - echo "[OK] Multi-platform build complete"
 
   docker:
     desc: Build Docker image
@@ -49,7 +49,7 @@ tasks:
       PLATFORM: '{{.PLATFORM | default "linux/amd64,linux/arm64"}}'
     deps: [binary]
     cmds:
-      - echo "🐳 Building Docker image: {{.IMAGE}}:{{.TAG}}"
+      - echo "[DOCKER] Building Docker image: {{.IMAGE}}:{{.TAG}}"
       - |
         docker buildx build \
           --platform {{.PLATFORM}} \
@@ -67,19 +67,19 @@ tasks:
   processors:
     desc: Build only custom processors
     cmds:
-      - echo "🔨 Building custom processors..."
+      - echo "[BUILD] Building custom processors..."
       - go build -v ./processors/adaptivesampler/...
       - go build -v ./processors/circuitbreaker/...
       - go build -v ./processors/planattributeextractor/...
       - go build -v ./processors/verification/...
-      - echo "✅ Processors built"
+      - echo "[OK] Processors built"
 
   quick:
     desc: Quick build without OCB (for development)
     cmds:
-      - echo "🚀 Quick build..."
+      - echo "[START] Quick build..."
       - go build -o {{.DIST_DIR}}/{{.BINARY_NAME}}-dev ./main.go
-      - echo "✅ Development build ready"
+      - echo "[OK] Development build ready"
 
   release:
     desc: Build release artifacts
@@ -88,7 +88,7 @@ tasks:
     cmds:
       - |
         if [ -z "{{.VERSION}}" ]; then
-          echo "❌ VERSION is required"
+          echo "[ERROR] VERSION is required"
           exit 1
         fi
       - task: build:multi
@@ -97,9 +97,9 @@ tasks:
           TAG: '{{.VERSION}}'
       - task: helm:package
       - |
-        echo "📦 Creating release archive..."
+        echo "[PACKAGE] Creating release archive..."
         cd {{.DIST_DIR}} && \
         tar czf {{.BINARY_NAME}}-{{.VERSION}}.tar.gz \
           {{.BINARY_NAME}}-* \
           *.tgz
-      - echo "✅ Release {{.VERSION}} ready in {{.DIST_DIR}}/"
+      - echo "[OK] Release {{.VERSION}} ready in {{.DIST_DIR}}/"

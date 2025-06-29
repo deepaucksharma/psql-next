@@ -1,0 +1,114 @@
+# Development Environment Overlay
+# Includes base configuration and adds dev-specific settings
+
+# Include base configuration
+__includes:
+  - ../base/collector.yaml
+
+# Override service telemetry for development
+service:
+  telemetry:
+    logs:
+      level: debug
+      development: true
+      disable_caller: false
+      disable_stacktrace: false
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+# Override receivers for faster collection in dev
+receivers:
+  postgresql:
+    collection_interval: 10s
+    initial_delay: 5s
+    
+  mysql:
+    collection_interval: 10s
+    initial_delay: 5s
+    
+  sqlquery:
+    collection_interval: 30s
+    queries:
+      # Additional dev-only query for active sessions
+      - query: |
+          SELECT 
+            pid,
+            usename,
+            application_name,
+            client_addr,
+            state,
+            query,
+            backend_start,
+            state_change
+          FROM pg_stat_activity
+          WHERE state != 'idle'
+        metrics:
+          - metric_name: db.active_sessions
+            value_column: pid
+            value_type: int
+            attribute_columns: [usename, state, application_name]
+
+# Add experimental processors for development
+processors:
+  # Debug batch settings
+  batch:
+    timeout: 5s
+    send_batch_size: 100
+    
+  # Add attributes processor for debugging
+  attributes:
+    actions:
+      - key: debug.enabled
+        value: true
+        action: insert
+      - key: debug.timestamp
+        value: ${env:TIMESTAMP}
+        action: insert
+        
+  # Transform processor for dev metrics
+  transform:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - set(description, "DEV: " + description)
+
+# Enable debug exporter in dev
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 1
+    sampling_thereafter: 1
+    
+  # File exporter for local debugging
+  file:
+    path: /var/log/otel/metrics.json
+    format: json
+    
+  # Reduce OTLP retry for faster failures in dev
+  otlp/newrelic:
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 5s
+      max_elapsed_time: 30s
+
+# Development pipelines
+service:
+  pipelines:
+    metrics/infrastructure:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, attributes, transform, batch]
+      exporters: [debug, file, prometheus]
+      
+    metrics/queries:
+      receivers: [sqlquery]
+      processors: [memory_limiter, resource, attributes, batch]
+      exporters: [debug, file]
+      
+    # Dev-only pipeline for testing
+    metrics/debug:
+      receivers: [postgresql]
+      processors: [memory_limiter]
+      exporters: [debug]

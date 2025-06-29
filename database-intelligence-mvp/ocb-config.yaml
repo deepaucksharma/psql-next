@@ -38,13 +38,13 @@ processors:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/groupbyattrsprocessor v0.128.0
   
   # Custom processors
-  - gomod: github.com/database-intelligence/database-intelligence-mvp/processors/adaptivesampler v0.1.0
+  - gomod: github.com/database-intelligence-mvp/processors/adaptivesampler v0.1.0
     path: ./processors/adaptivesampler
-  - gomod: github.com/database-intelligence/database-intelligence-mvp/processors/circuitbreaker v0.1.0
+  - gomod: github.com/database-intelligence-mvp/processors/circuitbreaker v0.1.0
     path: ./processors/circuitbreaker
-  - gomod: github.com/database-intelligence/database-intelligence-mvp/processors/planattributeextractor v0.1.0
+  - gomod: github.com/database-intelligence-mvp/processors/planattributeextractor v0.1.0
     path: ./processors/planattributeextractor
-  - gomod: github.com/database-intelligence/database-intelligence-mvp/processors/verification v0.1.0
+  - gomod: github.com/database-intelligence-mvp/processors/verification v0.1.0
     path: ./processors/verification
 
 exporters:

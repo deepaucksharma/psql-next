@@ -1,0 +1,149 @@
+groups:
+  - name: database_alerts
+    interval: 30s
+    rules:
+      # PostgreSQL alerts
+      - alert: PostgreSQLDown
+        expr: |
+          db_up{db_system="postgresql"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: database
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL database {{ $labels.db_name }} on {{ $labels.instance }} is down"
+
+      - alert: PostgreSQLHighConnections
+        expr: |
+          db_connections_active / db_connections_max > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "PostgreSQL connection pool almost exhausted"
+          description: "PostgreSQL {{ $labels.db_name }} has {{ $value }}% of max connections in use"
+
+      - alert: PostgreSQLSlowQueries
+        expr: |
+          rate(db_query_mean_duration{db_system="postgresql"}[5m]) > 5000
+        for: 10m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "PostgreSQL queries are slow"
+          description: "Average query duration for {{ $labels.db_name }} is {{ $value }}ms"
+
+      - alert: PostgreSQLHighDeadTuples
+        expr: |
+          db_table_dead_tuples > 100000
+        for: 30m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "PostgreSQL table needs vacuum"
+          description: "Table {{ $labels.tablename }} in {{ $labels.schemaname }} has {{ $value }} dead tuples"
+
+      - alert: PostgreSQLReplicationLag
+        expr: |
+          postgresql_replication_lag_seconds > 10
+        for: 5m
+        labels:
+          severity: critical
+          team: database
+        annotations:
+          summary: "PostgreSQL replication lag is high"
+          description: "Replication lag for {{ $labels.application_name }} is {{ $value }} seconds"
+
+      # MySQL alerts
+      - alert: MySQLDown
+        expr: |
+          db_up{db_system="mysql"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: database
+        annotations:
+          summary: "MySQL database is down"
+          description: "MySQL database {{ $labels.db_name }} on {{ $labels.instance }} is down"
+
+      - alert: MySQLHighConnections
+        expr: |
+          mysql_global_status_threads_connected / mysql_global_variables_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "MySQL connection pool almost exhausted"
+          description: "MySQL has {{ $value }}% of max connections in use"
+
+      - alert: MySQLSlowQueries
+        expr: |
+          rate(mysql_global_status_slow_queries[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "MySQL slow query rate is high"
+          description: "MySQL is executing {{ $value }} slow queries per second"
+
+      - alert: MySQLInnoDBLogWaits
+        expr: |
+          rate(mysql_global_status_innodb_log_waits[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "MySQL InnoDB log writes are waiting"
+          description: "InnoDB log waits rate is {{ $value }} per second"
+
+      # Generic database alerts
+      - alert: DatabaseConnectionFailure
+        expr: |
+          increase(db_connection_errors_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: critical
+          team: database
+        annotations:
+          summary: "Database connection errors"
+          description: "Database {{ $labels.db_name }} has {{ $value }} connection errors in the last 5 minutes"
+
+      - alert: DatabaseHighCPU
+        expr: |
+          db_cpu_usage_percent > 80
+        for: 10m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "Database CPU usage is high"
+          description: "Database {{ $labels.db_name }} CPU usage is {{ $value }}%"
+
+      - alert: DatabaseHighMemory
+        expr: |
+          db_memory_usage_percent > 90
+        for: 10m
+        labels:
+          severity: warning
+          team: database
+        annotations:
+          summary: "Database memory usage is high"
+          description: "Database {{ $labels.db_name }} memory usage is {{ $value }}%"
+
+      - alert: DatabaseDiskSpaceLow
+        expr: |
+          db_disk_usage_percent > 85
+        for: 30m
+        labels:
+          severity: critical
+          team: database
+        annotations:
+          summary: "Database disk space is low"
+          description: "Database {{ $labels.db_name }} disk usage is {{ $value }}%"

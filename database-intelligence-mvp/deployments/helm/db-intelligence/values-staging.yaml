@@ -1,0 +1,128 @@
+# Staging Environment Values
+# This file overrides the default values.yaml for staging environments
+
+# Use standard mode with some experimental features
+config:
+  mode: standard
+  service:
+    telemetry:
+      logs:
+        level: info
+  
+  # Enable main receivers
+  receivers:
+    postgresql:
+      enabled: true
+      collection_interval: 60s
+    mysql:
+      enabled: true
+      collection_interval: 60s
+    sqlquery:
+      enabled: true
+      collection_interval: 300s
+
+  # Conservative processor configuration
+  processors:
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 75
+      spike_limit_percentage: 25
+    batch:
+      timeout: 10s
+      send_batch_size: 1024
+      send_batch_max_size: 2048
+    
+    # Enable some experimental features
+    experimental:
+      adaptiveSampler:
+        enabled: true
+        default_sampling_rate: 0.5
+      circuitBreaker:
+        enabled: true
+        failure_threshold: 5
+
+# Medium replica count
+replicaCount: 2
+
+# Moderate resources
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+# Enable autoscaling with conservative settings
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 75
+
+# Enable persistence
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClass: fast-ssd
+
+# LoadBalancer for external access
+service:
+  type: LoadBalancer
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+
+# Enable basic network policies
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: staging
+    - from:
+        - podSelector:
+            matchLabels:
+              app: prometheus
+
+# Enable monitoring
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 60s
+
+# Staging-specific environment variables
+env:
+  - name: ENVIRONMENT
+    value: staging
+  - name: LOG_LEVEL
+    value: info
+
+# Pod disruption budget for stability
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Affinity rules for spreading
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - database-intelligence
+          topologyKey: kubernetes.io/hostname

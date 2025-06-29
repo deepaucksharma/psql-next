@@ -11,6 +11,8 @@ import (
 	// Import custom processors
 	"github.com/database-intelligence-mvp/processors/adaptivesampler"
 	"github.com/database-intelligence-mvp/processors/circuitbreaker"
+	"github.com/database-intelligence-mvp/processors/planattributeextractor"
+	"github.com/database-intelligence-mvp/processors/verification"
 )
 
 func main() {
@@ -69,6 +71,8 @@ func components() (otelcol.Factories, error) {
 	// Add our custom processors for gaps
 	factories.Processors[adaptivesampler.TypeStr] = adaptivesampler.NewFactory()
 	factories.Processors[circuitbreaker.TypeStr] = circuitbreaker.NewFactory()
+	factories.Processors[planattributeextractor.TypeStr] = planattributeextractor.NewFactory()
+	factories.Processors[verification.TypeStr] = verification.NewFactory()
 
 	return factories, nil
 }

@@ -1,0 +1,555 @@
+{
+  "name": "Database Intelligence - Overview",
+  "description": "Overview dashboard for Database Intelligence Collector monitoring PostgreSQL and MySQL databases",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Collector Health",
+      "description": "OpenTelemetry Collector health and performance metrics",
+      "widgets": [
+        {
+          "title": "Collector Status",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT latest(otelcol_process_uptime) as 'Uptime (seconds)' FROM Metric WHERE otel.library.name LIKE 'otelcol%' SINCE 5 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 0
+              },
+              {
+                "alertSeverity": "WARNING",
+                "value": 300
+              }
+            ]
+          }
+        },
+        {
+          "title": "Data Flow Rate",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT rate(sum(otelcol_receiver_accepted_metric_points), 1 minute) as 'Received', rate(sum(otelcol_processor_accepted_metric_points), 1 minute) as 'Processed', rate(sum(otelcol_exporter_sent_metric_points), 1 minute) as 'Exported' FROM Metric WHERE otel.library.name LIKE 'otelcol%' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Collector Memory Usage",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(otelcol_process_runtime_heap_alloc_bytes)/1024/1024 as 'Heap Allocated (MB)', average(otelcol_process_runtime_total_sys_memory_bytes)/1024/1024 as 'System Memory (MB)' FROM Metric WHERE otel.library.name LIKE 'otelcol%' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Collector CPU Usage",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT rate(sum(otelcol_process_cpu_seconds), 1 minute) * 100 as 'CPU Usage %' FROM Metric WHERE otel.library.name LIKE 'otelcol%' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "units": {
+              "unit": "PERCENTAGE"
+            },
+            "yAxisLeft": {
+              "zero": true,
+              "max": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Database Overview",
+      "description": "Combined PostgreSQL and MySQL metrics",
+      "widgets": [
+        {
+          "title": "Active Databases",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT latest(db_up) as 'Status', latest(db_connections_active) as 'Active Connections', latest(db_connections_max) as 'Max Connections' FROM Metric WHERE db_system IN ('postgresql', 'mysql') FACET db_system, db_name SINCE 5 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Query Performance by Database",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(db_query_mean_duration) FROM Metric WHERE db_system IN ('postgresql', 'mysql') FACET db_system, db_name TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "units": {
+              "unit": "MS"
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Database Connections",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.stacked-bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(db_connections_active) as 'Active', average(db_connections_idle) as 'Idle', average(db_connections_blocked) as 'Blocked' FROM Metric WHERE db_system IN ('postgresql', 'mysql') FACET db_name TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Query Throughput",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT rate(sum(db_query_count), 1 minute) as 'Queries/min' FROM Metric WHERE db_system IN ('postgresql', 'mysql') FACET db_system TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "PostgreSQL Details",
+      "description": "PostgreSQL-specific metrics and performance indicators",
+      "widgets": [
+        {
+          "title": "Top Slow Queries",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(db_query_mean_duration) as 'Avg Duration (ms)', sum(db_query_calls) as 'Total Calls', average(db_query_rows) as 'Avg Rows' FROM Metric WHERE db_system = 'postgresql' AND db_query_mean_duration > 100 FACET db_statement_type, db_query_hash SINCE 1 hour ago LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Cache Hit Ratio",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(postgresql_blocks_hit) / (average(postgresql_blocks_hit) + average(postgresql_blocks_read)) * 100 as 'Cache Hit Ratio %' FROM Metric WHERE db_system = 'postgresql' AND postgresql_blocks_read > 0 SINCE 30 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 90
+              },
+              {
+                "alertSeverity": "WARNING",
+                "value": 95
+              }
+            ],
+            "units": {
+              "unit": "PERCENTAGE"
+            }
+          }
+        },
+        {
+          "title": "Table Bloat",
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 8,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT latest(db_table_dead_tuples) as 'Dead Tuples' FROM Metric WHERE db_system = 'postgresql' AND db_table_dead_tuples > 1000 FACET tablename SINCE 1 hour ago LIMIT 10"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Replication Lag",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(postgresql_replication_lag_seconds) FROM Metric WHERE db_system = 'postgresql' FACET application_name TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "units": {
+              "unit": "SECONDS"
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Transaction Rate",
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT rate(sum(postgresql_commits), 1 minute) as 'Commits/min', rate(sum(postgresql_rollbacks), 1 minute) as 'Rollbacks/min' FROM Metric WHERE db_system = 'postgresql' TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alerts & Issues",
+      "description": "Active alerts and potential issues",
+      "widgets": [
+        {
+          "title": "Circuit Breaker Status",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT latest(otelcol_circuitbreaker_state) as 'State', latest(otelcol_circuitbreaker_consecutive_failures) as 'Failures' FROM Metric WHERE otel.library.name = 'otelcol/circuitbreaker' FACET database SINCE 5 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Failed Exports",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT rate(sum(otelcol_exporter_send_failed_metric_points), 1 minute) as 'Failed Points/min' FROM Metric WHERE otel.library.name LIKE 'otelcol%' FACET exporter TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Adaptive Sampling Rates",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [],
+                "query": "SELECT average(otelcol_adaptivesampler_sampling_rate) * 100 as 'Sampling Rate %' FROM Metric WHERE otel.library.name = 'otelcol/adaptivesampler' FACET rule TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "units": {
+              "unit": "PERCENTAGE"
+            },
+            "yAxisLeft": {
+              "zero": true,
+              "max": 100
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variables": []
+}

@@ -432,3 +432,189 @@ curl http://localhost:8888/metrics > metrics-snapshot.txt
 3. **Community resources:**
 - OpenTelemetry Slack: #otel-collector
 - New Relic Community: https://discuss.newrelic.com/
+
+## Known Issues and Workarounds
+
+### Build Issues
+
+#### Module Path Inconsistencies
+
+**Issue:** Build fails with module not found errors
+```
+Error: failed to resolve go module github.com/newrelic/database-intelligence-mvp
+```
+
+**Root Cause:** Different module paths in various configuration files
+- `go.mod`: `github.com/database-intelligence-mvp`
+- `otelcol-builder.yaml`: `github.com/newrelic/database-intelligence-mvp`
+
+**Workaround:**
+```bash
+# Fix all module references
+sed -i 's|github.com/newrelic/database-intelligence-mvp|github.com/database-intelligence-mvp|g' otelcol-builder.yaml
+sed -i 's|github.com/database-intelligence/|github.com/database-intelligence-mvp/|g' ocb-config.yaml
+
+# Then rebuild
+make clean
+make build
+```
+
+#### Custom OTLP Exporter TODOs
+
+**Issue:** Custom OTLP exporter has unimplemented functions
+```go
+// TODO: implement conversion logic
+panic("not implemented")
+```
+
+**Root Cause:** Incomplete implementation in `exporters/otlpexporter/`
+
+**Workaround:** Use standard OTLP exporter instead
+```yaml
+exporters:
+  otlp:  # Use standard OTLP, not otlp/custom
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+```
+
+### Runtime Issues
+
+#### Circuit Breaker Triggering Too Often
+
+**Issue:** Circuit breaker opens frequently, stopping metric collection
+
+**Root Cause:** Database queries timing out or high error rate
+
+**Workaround:**
+```yaml
+processors:
+  database_intelligence/circuitbreaker:
+    failure_threshold: 10  # Increase from 5
+    timeout: 60s  # Increase from 30s
+    cooldown_period: 300s  # Increase from 60s
+```
+
+#### Verification Processor Overhead
+
+**Issue:** Verification processor adds significant latency
+
+**Root Cause:** Too frequent health checks and validations
+
+**Workaround:**
+```yaml
+processors:
+  database_intelligence/verification:
+    health_checks:
+      interval: 300s  # Increase from 60s
+    metric_quality:
+      enabled: false  # Disable if not critical
+    auto_tuning:
+      enabled: false  # Disable to reduce overhead
+```
+
+### Deployment Issues
+
+#### Container Image Size
+
+**Issue:** Docker image is very large (>1GB)
+
+**Root Cause:** Including all OTEL components even if unused
+
+**Workaround:** Use multi-stage build
+```dockerfile
+FROM golang:1.21-alpine AS builder
+# Build only needed components
+
+FROM alpine:3.19
+# Copy only binary
+```
+
+#### State File Permissions
+
+**Issue:** Adaptive sampler can't write state file
+
+**Root Cause:** Incorrect file permissions in container
+
+**Workaround:**
+```yaml
+# In Kubernetes
+securityContext:
+  fsGroup: 2000
+  runAsUser: 1000
+  
+# In Docker
+user: "1000:1000"
+volumes:
+  - ./state:/var/lib/otel:rw
+```
+
+### Scaling Issues
+
+#### Horizontal Scaling Limitations
+
+**Issue:** Can't run multiple collector instances
+
+**Root Cause:** File-based state in adaptive sampler
+
+**Workaround:** Shard by database
+```yaml
+# Instance 1
+receivers:
+  postgresql:
+    databases: [db1, db2]
+    
+# Instance 2  
+receivers:
+  postgresql:
+    databases: [db3, db4]
+```
+
+#### Memory Leak in Long-Running Instances
+
+**Issue:** Memory usage grows over time
+
+**Root Cause:** State accumulation in processors
+
+**Solution with Taskfile and Helm:**
+```bash
+# Enable memory-based restart in Helm
+helm upgrade db-intelligence ./deployments/helm/db-intelligence \
+  --set healthCheck.memoryRestart.enabled=true \
+  --set healthCheck.memoryRestart.threshold=1Gi
+
+# Or use values file
+task deploy:helm ENV=production \
+  VALUES_FILE=values-memory-management.yaml
+```
+
+### Quick Reference: Common Taskfile Commands
+
+```bash
+# Validation
+task validate:all        # Validate everything
+task validate:config     # Check configuration
+task validate:env        # Check environment variables
+
+# Running
+task quickstart         # First time setup
+task run               # Run with defaults
+task run:debug         # Debug mode
+task dev:watch         # Hot reload mode
+
+# Debugging
+task health-check      # Check health
+task metrics          # View metrics
+task test:connections # Test DB connections
+task dev:logs         # View logs
+
+# Fixes
+task fix:all          # Fix common issues
+task fix:module-paths # Fix import paths
+task clean           # Clean build artifacts
+
+# Deployment
+task deploy:docker    # Docker deployment
+task deploy:helm      # Kubernetes deployment
+task deploy:binary    # Binary deployment
+```

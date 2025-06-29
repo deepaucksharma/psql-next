@@ -1,0 +1,118 @@
+version: '3'
+
+silent: true
+
+includes:
+  build: ./tasks/build.yml
+  test: ./tasks/test.yml
+  deploy: ./tasks/deploy.yml
+  dev: ./tasks/dev.yml
+  validate: ./tasks/validate.yml
+
+vars:
+  PROJECT_NAME: database-intelligence-collector
+  BINARY_NAME: otelcol-db-intelligence
+  DIST_DIR: dist
+  CONFIG_DIR: config
+  DOCKER_REGISTRY: '{{.DOCKER_REGISTRY | default "docker.io"}}'
+  DOCKER_ORG: '{{.DOCKER_ORG | default "database-intelligence"}}'
+  VERSION: '{{.VERSION | default "latest"}}'
+
+env:
+  CGO_ENABLED: 0
+  GOOS: '{{OS}}'
+  GOARCH: '{{ARCH}}'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list-all
+
+  setup:
+    desc: Complete development environment setup
+    cmds:
+      - task: setup:validate
+      - task: setup:tools
+      - task: setup:deps
+      - task: setup:env
+      - echo "Development environment ready!"
+
+  setup:validate:
+    desc: Validate system requirements
+    cmds:
+      - |
+        echo "Checking system requirements..."
+        if ! command -v go &> /dev/null; then
+          echo "ERROR: Go is not installed. Please install Go 1.21+"
+          exit 1
+        fi
+        if ! command -v docker &> /dev/null; then
+          echo "ERROR: Docker is not installed. Please install Docker"
+          exit 1
+        fi
+        echo "System requirements met"
+
+  quickstart:
+    desc: Quick start for new developers
+    cmds:
+      - task: setup
+      - task: fix:all
+      - task: build
+      - task: dev:up
+
+  fix:all:
+    desc: Fix all common issues
+    cmds:
+      - task: fix:module-paths
+      - task: fix:imports
+      - echo "All fixes applied"
+
+  fix:module-paths:
+    desc: Fix inconsistent module paths
+    cmds:
+      - echo "Fixing module paths..."
+      - |
+        find . -name "*.yaml" -type f -exec sed -i '' \
+          's|github.com/newrelic/database-intelligence-mvp|github.com/database-intelligence-mvp|g' {} \;
+        find . -name "*.go" -type f -exec sed -i '' \
+          's|github.com/newrelic/database-intelligence-mvp|github.com/database-intelligence-mvp|g' {} \;
+      - echo "Module paths fixed"
+
+  build:
+    desc: Build collector binary
+    cmds:
+      - echo "Building collector..."
+      - |
+        if ! command -v ocb &> /dev/null; then
+          echo "ERROR: OCB not found. Run 'task setup:tools' first"
+          exit 1
+        fi
+      - ocb --config ocb-config.yaml --output-path {{.DIST_DIR}}/{{.BINARY_NAME}}
+      - echo "Built: {{.DIST_DIR}}/{{.BINARY_NAME}}"
+
+  dev:up:
+    desc: Start development environment
+    cmds:
+      - echo "Starting development environment..."
+      - docker compose --profile dev up -d
+      - echo "Development environment ready"
+
+  dev:down:
+    desc: Stop development environment
+    cmds:
+      - docker compose down
+      - echo "Development environment stopped"
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.DIST_DIR}}
+      - echo "Cleaned"
+
+  test:
+    desc: Run all tests
+    cmds:
+      - echo "Running tests..."
+      - go test ./...
+      - echo "Tests passed"

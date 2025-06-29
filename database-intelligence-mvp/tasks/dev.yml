@@ -4,7 +4,7 @@ tasks:
   up:
     desc: Start development environment
     cmds:
-      - echo "🚀 Starting development environment..."
+      - echo "[START] Starting development environment..."
       - docker compose --profile dev up -d
       - task: dev:wait
       - task: dev:info
@@ -12,9 +12,9 @@ tasks:
   down:
     desc: Stop development environment
     cmds:
-      - echo "🛑 Stopping development environment..."
+      - echo "[STOP] Stopping development environment..."
       - docker compose --profile dev down
-      - echo "✅ Development environment stopped"
+      - echo "[OK] Development environment stopped"
 
   restart:
     desc: Restart development environment
@@ -25,23 +25,23 @@ tasks:
   reset:
     desc: Reset development environment (including data)
     cmds:
-      - echo "🔄 Resetting development environment..."
+      - echo "[RESET] Resetting development environment..."
       - docker compose --profile dev down -v
       - docker compose --profile all down -v
-      - echo "✅ All data volumes removed"
+      - echo "[OK] All data volumes removed"
       - task: dev:up
 
   wait:
     desc: Wait for services to be healthy
     cmds:
       - |
-        echo "⏳ Waiting for services to be healthy..."
+        echo "[WAIT] Waiting for services to be healthy..."
         TIMEOUT=60
         ELAPSED=0
         while [ $ELAPSED -lt $TIMEOUT ]; do
           if docker compose ps | grep -E "(postgres|mysql).*healthy" &>/dev/null; then
             echo ""
-            echo "✅ Services are healthy"
+            echo "[OK] Services are healthy"
             exit 0
           fi
           echo -n "."
@@ -49,7 +49,7 @@ tasks:
           ELAPSED=$((ELAPSED + 2))
         done
         echo ""
-        echo "⚠️  Timeout waiting for services"
+        echo "[WARNING]  Timeout waiting for services"
         docker compose ps
         exit 1
 
@@ -57,17 +57,17 @@ tasks:
     desc: Show development environment information
     cmds:
       - |
-        echo "📊 Development Environment Status:"
+        echo "[STATUS] Development Environment Status:"
         echo "================================="
         docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
         echo ""
-        echo "🔗 Access URLs:"
+        echo "[URLS] Access URLs:"
         echo "  PostgreSQL:    localhost:5432"
         echo "  MySQL:         localhost:3306"
         echo "  PgAdmin:       http://localhost:5050"
         echo "  Adminer:       http://localhost:8080"
         echo ""
-        echo "📝 Database Credentials:"
+        echo "[CREDS] Database Credentials:"
         echo "  PostgreSQL:    postgres/postgres"
         echo "  MySQL:         root/mysql"
         echo "  Monitoring:    monitoring_user/monitoring"
@@ -93,19 +93,19 @@ tasks:
       - |
         case {{.SERVICE}} in
           postgres)
-            echo "🐘 Connecting to PostgreSQL..."
+            echo "[POSTGRES] Connecting to PostgreSQL..."
             docker compose exec postgres psql -U postgres testdb
             ;;
           mysql)
-            echo "🐬 Connecting to MySQL..."
+            echo "[MYSQL] Connecting to MySQL..."
             docker compose exec mysql mysql -u root -pmysql testdb
             ;;
           collector)
-            echo "📦 Opening shell in collector..."
+            echo "[PACKAGE] Opening shell in collector..."
             docker compose exec collector /bin/sh
             ;;
           *)
-            echo "🐚 Opening shell in {{.SERVICE}}..."
+            echo "[SHELL] Opening shell in {{.SERVICE}}..."
             docker compose exec {{.SERVICE}} /bin/sh
             ;;
         esac
@@ -118,7 +118,7 @@ tasks:
     cmds:
       - |
         if [ -z "{{.QUERY}}" ]; then
-          echo "❌ QUERY is required"
+          echo "[ERROR] QUERY is required"
           exit 1
         fi
       - |
@@ -130,7 +130,7 @@ tasks:
             docker compose exec -T mysql mysql -u root -pmysql testdb -e "{{.QUERY}}"
             ;;
           *)
-            echo "❌ Unknown database: {{.DB}}"
+            echo "[ERROR] Unknown database: {{.DB}}"
             exit 1
             ;;
         esac
@@ -138,7 +138,7 @@ tasks:
   db:stats:
     desc: Show database statistics
     cmds:
-      - echo "📊 Database Statistics:"
+      - echo "[STATS] Database Statistics:"
       - echo ""
       - echo "PostgreSQL:"
       - |
@@ -171,7 +171,7 @@ tasks:
       PRODUCTS: '{{.PRODUCTS | default "50"}}'
       ORDERS: '{{.ORDERS | default "500"}}'
     cmds:
-      - echo "🔄 Generating test data..."
+      - echo "[GENERATE] Generating test data..."
       - |
         # PostgreSQL
         docker compose exec -T postgres psql -U postgres testdb -c "
@@ -182,13 +182,13 @@ tasks:
         docker compose exec -T mysql mysql -u root -pmysql testdb -e "
           CALL generate_test_data({{.USERS}}, {{.PRODUCTS}}, {{.ORDERS}});
         "
-      - echo "✅ Test data generated"
+      - echo "[OK] Test data generated"
 
   collector:run:
     desc: Run collector with development config
     deps: ['build:binary']
     cmds:
-      - echo "🚀 Running collector..."
+      - echo "[START] Running collector..."
       - |
         POSTGRES_HOST=localhost \
         POSTGRES_PORT=5432 \
@@ -207,7 +207,7 @@ tasks:
     desc: Validate collector can connect to databases
     deps: ['build:binary', 'dev:wait']
     cmds:
-      - echo "🔍 Validating collector connections..."
+      - echo "[CHECK] Validating collector connections..."
       - |
         POSTGRES_HOST=localhost \
         POSTGRES_PORT=5432 \
@@ -220,23 +220,23 @@ tasks:
   monitoring:up:
     desc: Start monitoring stack
     cmds:
-      - echo "📊 Starting monitoring stack..."
+      - echo "[MONITOR] Starting monitoring stack..."
       - docker compose --profile monitoring up -d
       - |
-        echo "⏳ Waiting for monitoring services..."
+        echo "[WAIT] Waiting for monitoring services..."
         sleep 10
       - |
-        echo "✅ Monitoring stack ready:"
+        echo "[OK] Monitoring stack ready:"
         echo "  Prometheus: http://localhost:9090"
         echo "  Grafana:    http://localhost:3000 (admin/admin)"
 
   tools:up:
     desc: Start development tools
     cmds:
-      - echo "🛠️  Starting development tools..."
+      - echo "[BUILD]️  Starting development tools..."
       - docker compose --profile tools up -d
       - |
-        echo "✅ Development tools ready:"
+        echo "[OK] Development tools ready:"
         echo "  PgAdmin: http://localhost:5050 (admin@example.com/admin)"
         echo "  Adminer: http://localhost:8080"
 
@@ -244,7 +244,7 @@ tasks:
     desc: Watch for code changes and rebuild
     cmds:
       - |
-        echo "👀 Watching for changes..."
+        echo "[WATCH] Watching for changes..."
         while true; do
           inotifywait -qre modify \
             --exclude '(\.git|dist|vendor|coverage)' \
@@ -255,7 +255,7 @@ tasks:
             --exclude 'vendor' \
             ./**/*.go ./**/*.yaml 2>/dev/null | while read; do
             clear
-            echo "🔄 Changes detected, rebuilding..."
+            echo "[REBUILD] Changes detected, rebuilding..."
             task build:quick
           done
         done
@@ -263,9 +263,9 @@ tasks:
   clean:
     desc: Clean development artifacts
     cmds:
-      - echo "🧹 Cleaning development artifacts..."
+      - echo "[CLEAN] Cleaning development artifacts..."
       - rm -rf dist/
       - rm -rf coverage.*
       - rm -rf *.prof
       - docker compose down -v
-      - echo "✅ Clean complete"
+      - echo "[OK] Clean complete"
