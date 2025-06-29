@@ -119,10 +119,11 @@ processors:
 ```yaml
 exporters:
   otlp/newrelic:
-    endpoint: https://otlp.nr-data.net:4317  # US datacenter
-    # endpoint: https://otlp.eu01.nr-data.net:4317  # EU datacenter
+    endpoint: otlp.nr-data.net:4317  # US datacenter (no https://)
+    # endpoint: otlp.eu01.nr-data.net:4317  # EU datacenter
     headers:
       api-key: ${NEW_RELIC_LICENSE_KEY}
+    compression: gzip  # Required for New Relic
 ```
 
 2. **Check network connectivity:**

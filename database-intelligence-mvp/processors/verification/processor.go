@@ -225,7 +225,7 @@ func newVerificationProcessor(
 	// Initialize PII detector with common patterns
 	vp.piiDetector = &PIIDetector{
 		patterns: initializePIIPatterns(),
-		commonPIIFields: []string{\"email\", \"phone\", \"ssn\", \"credit_card\", \"password\", \"token\"},
+		commonPIIFields: []string{"email", "phone", "ssn", "credit_card", "password", "token"},
 	}
 	
 	// Initialize health checker
@@ -362,7 +362,7 @@ func (vp *VerificationProcessor) ConsumeLogs(ctx context.Context, ld plog.Logs) 
 		
 		// Attempt self-healing if enabled
 		if vp.selfHealer.healingEnabled {
-			vp.attemptSelfHealing(\"consumer_error\", err, ld)
+			vp.attemptSelfHealing("consumer_error", err, ld)
 		}
 	}
 	

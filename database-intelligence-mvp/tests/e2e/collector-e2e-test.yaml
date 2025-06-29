@@ -1,0 +1,39 @@
+# Golden E2E Test Configuration
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  postgresql:
+    endpoint: ${PG_HOST}:${PG_PORT}
+    username: ${PG_USER}
+    password: ${PG_PASSWORD}
+    databases:
+      - ${PG_DATABASE}
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+  batch:
+    timeout: 5s
+
+exporters:
+  otlp:
+    endpoint: ${OTLP_ENDPOINT}
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+  debug:
+    verbosity: detailed
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [postgresql]
+      processors: [memory_limiter, batch]
+      exporters: [otlp, debug]
