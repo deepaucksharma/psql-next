@@ -1,0 +1,253 @@
+{
+  "name": "Database Intelligence - Verification & Feedback Platform",
+  "description": "Comprehensive verification dashboard for monitoring integration health, data flow, and entity synthesis",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Integration Health Overview",
+      "description": "Real-time health status and alerts",
+      "widgets": [
+        {
+          "title": "🚨 Silent Failures Detection",
+          "visualization": "billboard",
+          "configuration": {
+            "nrql": "SELECT count(*) as 'Integration Errors' FROM NrIntegrationError WHERE newRelicFeature = 'Metrics' AND (message LIKE '%database%' OR message LIKE '%otel%') SINCE 5 minutes ago COMPARE WITH 1 hour ago",
+            "thresholds": [
+              {"value": 0, "color": "green"},
+              {"value": 1, "color": "yellow"},
+              {"value": 10, "color": "red"}
+            ]
+          }
+        },
+        {
+          "title": "📊 Data Ingestion Rate",
+          "visualization": "line",
+          "configuration": {
+            "nrql": "SELECT rate(count(*), 1 minute) as 'Records/min' FROM Log WHERE collector.name = 'database-intelligence' SINCE 30 minutes ago TIMESERIES 1 minute"
+          }
+        },
+        {
+          "title": "✅ Health Check Status",
+          "visualization": "table",
+          "configuration": {
+            "nrql": "SELECT latest(timestamp) as 'Last Data', count(*) as 'Records (5m)', filter(count(*), WHERE entity.guid IS NOT NULL) / count(*) * 100 as 'Entity Correlation %' FROM Log WHERE collector.name = 'database-intelligence' FACET database_name SINCE 5 minutes ago"
+          }
+        },
+        {
+          "title": "⚠️ Latest Integration Errors",
+          "visualization": "event_table",
+          "configuration": {
+            "nrql": "SELECT timestamp, message, category FROM NrIntegrationError WHERE newRelicFeature = 'Metrics' AND (message LIKE '%database%' OR message LIKE '%otel%') SINCE 1 hour ago LIMIT 10"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Data Verification",
+      "description": "Verify data ingestion and quality",
+      "widgets": [
+        {
+          "title": "Database Coverage",
+          "visualization": "pie",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM Log WHERE collector.name = 'database-intelligence' FACET database_name SINCE 1 hour ago"
+          }
+        },
+        {
+          "title": "Query Pattern Distribution",
+          "visualization": "bar",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM Log WHERE db.query.fingerprint IS NOT NULL FACET db.query.complexity SINCE 1 hour ago"
+          }
+        },
+        {
+          "title": "Cardinality Compression Effectiveness",
+          "visualization": "billboard",
+          "configuration": {
+            "nrql": "SELECT uniqueCount(db.query.fingerprint) as 'Unique Patterns', uniqueCount(query_text) as 'Raw Queries', (1 - (uniqueCount(db.query.fingerprint) / uniqueCount(query_text))) * 100 as 'Compression %' FROM Log WHERE collector.name = 'database-intelligence' SINCE 1 hour ago"
+          }
+        },
+        {
+          "title": "Data Freshness by Database",
+          "visualization": "table",
+          "configuration": {
+            "nrql": "SELECT latest(timestamp) as 'Last Seen', count(*) as 'Records (1h)' FROM Log WHERE collector.name = 'database-intelligence' FACET database_name SINCE 1 hour ago"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Entity Synthesis Validation",
+      "description": "Verify entity creation and relationships",
+      "widgets": [
+        {
+          "title": "Database Entities Created",
+          "visualization": "billboard",
+          "configuration": {
+            "nrql": "SELECT uniques(entity.guid) as 'Total Entities' FROM Log WHERE entity.type = 'DATABASE' AND instrumentation.provider = 'opentelemetry' SINCE 24 hours ago"
+          }
+        },
+        {
+          "title": "Entity Correlation Success",
+          "visualization": "line",
+          "configuration": {
+            "nrql": "SELECT percentage(count(*), WHERE entity.guid IS NOT NULL) as 'Correlation %' FROM Log WHERE database_name IS NOT NULL AND collector.name = 'database-intelligence' SINCE 1 hour ago TIMESERIES 5 minutes"
+          }
+        },
+        {
+          "title": "Missing Entity Correlations",
+          "visualization": "table",
+          "configuration": {
+            "nrql": "SELECT count(*) as 'Missing Correlations', sample(query_text, 3) as 'Sample Queries' FROM Log WHERE entity.guid IS NULL AND database_name IS NOT NULL AND collector.name = 'database-intelligence' FACET database_name SINCE 1 hour ago"
+          }
+        },
+        {
+          "title": "Entity Attributes Coverage",
+          "visualization": "heat_map",
+          "configuration": {
+            "nrql": "SELECT filter(count(*), WHERE service.name IS NOT NULL) as 'Service', filter(count(*), WHERE host.id IS NOT NULL) as 'Host', filter(count(*), WHERE entity.guid IS NOT NULL) as 'Entity', filter(count(*), WHERE entity.type IS NOT NULL) as 'Type' FROM Log WHERE collector.name = 'database-intelligence' FACET database_name SINCE 1 hour ago"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Circuit Breaker & Sampling",
+      "description": "Monitor safety mechanisms",
+      "widgets": [
+        {
+          "title": "Circuit Breaker States",
+          "visualization": "stacked_bar",
+          "configuration": {
+            "nrql": "SELECT filter(count(*), WHERE cb.state = 'closed') as 'Closed', filter(count(*), WHERE cb.state = 'half-open') as 'Half-Open', filter(count(*), WHERE cb.state = 'open') as 'Open' FROM Log WHERE cb.state IS NOT NULL FACET database_name SINCE 1 hour ago"
+          }
+        },
+        {
+          "title": "Circuit Breaker Opens Timeline",
+          "visualization": "line",
+          "configuration": {
+            "nrql": "SELECT sum(cb.opened_count) FROM Log WHERE cb.opened_count > 0 FACET database_name SINCE 24 hours ago TIMESERIES 30 minutes"
+          }
+        },
+        {
+          "title": "Sampling Decisions",
+          "visualization": "pie",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM Log WHERE sampling.decision IS NOT NULL FACET sampling.decision SINCE 1 hour ago"
+          }
+        },
+        {
+          "title": "Queries Dropped by Circuit Breaker",
+          "visualization": "billboard",
+          "configuration": {
+            "nrql": "SELECT sum(cb.queries_dropped) as 'Total Dropped' FROM Log WHERE cb.queries_dropped > 0 SINCE 1 hour ago"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance Metrics",
+      "description": "Monitor collector and export performance",
+      "widgets": [
+        {
+          "title": "Export Success Rate",
+          "visualization": "billboard",
+          "configuration": {
+            "nrql": "SELECT (sum(otelcol_exporter_sent_log_records) / (sum(otelcol_exporter_sent_log_records) + sum(otelcol_exporter_send_failed_log_records))) * 100 as 'Success %' FROM Metric WHERE otelcol_exporter_sent_log_records IS NOT NULL SINCE 1 hour ago",
+            "thresholds": [
+              {"value": 99, "color": "green"},
+              {"value": 95, "color": "yellow"},
+              {"value": 0, "color": "red"}
+            ]
+          }
+        },
+        {
+          "title": "Export Latency",
+          "visualization": "line",
+          "configuration": {
+            "nrql": "SELECT average(otelcol_exporter_send_duration_milliseconds) as 'Avg', percentile(otelcol_exporter_send_duration_milliseconds, 95) as 'P95', max(otelcol_exporter_send_duration_milliseconds) as 'Max' FROM Metric WHERE otelcol_exporter_send_duration_milliseconds IS NOT NULL SINCE 1 hour ago TIMESERIES 5 minutes"
+          }
+        },
+        {
+          "title": "Batch Size Distribution",
+          "visualization": "histogram",
+          "configuration": {
+            "nrql": "SELECT histogram(otelcol_processor_batch_batch_send_size, 10, 20) FROM Metric WHERE otelcol_processor_batch_batch_send_size IS NOT NULL SINCE 1 hour ago"
+          }
+        },
+        {
+          "title": "Memory Usage",
+          "visualization": "line",
+          "configuration": {
+            "nrql": "SELECT average(otelcol_process_memory_rss) / 1024 / 1024 as 'RSS MB' FROM Metric WHERE otelcol_process_memory_rss IS NOT NULL SINCE 1 hour ago TIMESERIES 5 minutes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Troubleshooting",
+      "description": "Debug issues and monitor errors",
+      "widgets": [
+        {
+          "title": "Error Categories",
+          "visualization": "pie",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM NrIntegrationError WHERE newRelicFeature = 'Metrics' FACET category SINCE 24 hours ago"
+          }
+        },
+        {
+          "title": "Error Messages Breakdown",
+          "visualization": "bar",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM NrIntegrationError WHERE newRelicFeature = 'Metrics' FACET message SINCE 1 hour ago LIMIT 20"
+          }
+        },
+        {
+          "title": "PII Sanitization Check",
+          "visualization": "billboard",
+          "configuration": {
+            "nrql": "SELECT count(*) as 'Potential PII' FROM Log WHERE query_text RLIKE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}' OR query_text RLIKE '\\b\\d{3}-\\d{2}-\\d{4}\\b' SINCE 1 hour ago",
+            "thresholds": [
+              {"value": 0, "color": "green"},
+              {"value": 1, "color": "red"}
+            ]
+          }
+        },
+        {
+          "title": "Configuration Validation",
+          "visualization": "table",
+          "configuration": {
+            "nrql": "SELECT latest(service.name) as 'Service', latest(instrumentation.provider) as 'Provider', latest(telemetry.sdk.name) as 'SDK', latest(telemetry.sdk.version) as 'Version' FROM Log WHERE collector.name = 'database-intelligence' SINCE 10 minutes ago"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Feedback Actions",
+      "description": "Actionable insights and next steps",
+      "widgets": [
+        {
+          "title": "Action Required",
+          "visualization": "markdown",
+          "configuration": {
+            "text": "## Quick Actions\n\n### 🔴 Critical\n- Check for NrIntegrationError events\n- Verify data freshness\n- Monitor circuit breaker states\n\n### 🟡 Important\n- Review cardinality compression\n- Check entity correlation rates\n- Monitor export success rates\n\n### 🟢 Maintenance\n- Review sampling effectiveness\n- Update alert thresholds\n- Check collector memory usage"
+          }
+        },
+        {
+          "title": "Verification Queries",
+          "visualization": "markdown",
+          "configuration": {
+            "text": "## Key Verification Queries\n\n```sql\n-- Check for silent failures\nSELECT count(*) FROM NrIntegrationError \nWHERE newRelicFeature = 'Metrics' \nSINCE 5 minutes ago\n\n-- Verify entity creation\nSELECT uniques(entity.guid) \nFROM Log \nWHERE entity.type = 'DATABASE'\nSINCE 1 hour ago\n\n-- Check data freshness\nSELECT latest(timestamp) \nFROM Log \nWHERE collector.name = 'database-intelligence'\nFACET database_name\n```"
+          }
+        },
+        {
+          "title": "Troubleshooting Steps",
+          "visualization": "markdown",
+          "configuration": {
+            "text": "## Troubleshooting Guide\n\n1. **No Data?**\n   - Check collector: `docker logs db-intel-primary`\n   - Verify config: `docker exec db-intel-primary cat /etc/otel/config.yaml`\n\n2. **Integration Errors?**\n   - Check license key in `.env`\n   - Review error messages in NrIntegrationError\n\n3. **High Cardinality?**\n   - Increase sampling rate\n   - Review query normalization\n   - Check for unbounded attributes"
+          }
+        }
+      ]
+    }
+  ],
+  "variables": []
+}

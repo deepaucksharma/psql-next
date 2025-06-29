@@ -1,0 +1,164 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  memory_ballast:
+    size_mib: 128
+
+receivers:
+  # Standard OTEL receivers for database metrics
+  postgresql:
+    endpoint: postgres-primary:5432
+    username: postgres
+    password: postgres123
+    databases:
+      - testdb
+    tls:
+      insecure: true
+    collection_interval: 60s
+
+  mysql:
+    endpoint: mysql-primary:3306
+    username: root
+    password: mysql123
+    database: testdb
+    collection_interval: 60s
+
+  # SQL query receiver for custom query statistics
+  sqlquery/postgresql:
+    driver: postgres
+    collection_interval: 300s
+    timeout: 10s
+    queries:
+      logs:
+        - sql: |
+            -- Safety timeouts to prevent long-running queries
+            SET LOCAL statement_timeout = '3000ms';
+            SET LOCAL lock_timeout = '100ms';
+
+            -- Find the worst-performing query based on total execution time
+            WITH worst_query AS (
+              SELECT
+                queryid,
+                query,
+                mean_exec_time,
+                calls,
+                total_exec_time,
+                (mean_exec_time * calls) as impact_score
+              FROM pg_stat_statements
+              WHERE
+                mean_exec_time > 50        -- Only consider queries over 50ms
+                AND calls > 5              -- And those that are somewhat frequent
+                AND query NOT LIKE '%pg_%' -- Exclude system queries
+                AND query NOT LIKE '%EXPLAIN%'
+                AND query NOT LIKE '%SET LOCAL%'
+              ORDER BY impact_score DESC
+              LIMIT 1
+            )
+            SELECT
+              queryid::text as query_id,
+              query as query_text,
+              round(mean_exec_time::numeric, 2) as avg_duration_ms,
+              calls as execution_count,
+              round(total_exec_time::numeric, 2) as total_duration_ms,
+              -- This is a placeholder for the plan, as we are not collecting actual plans
+              json_build_object(
+                'plan_available', false,
+                'approach', 'metadata_only_for_safety'
+              ) as plan_metadata
+            FROM worst_query;
+
+  sqlquery/mysql:
+    driver: mysql
+    datasource: "root:mysql123@tcp(mysql-primary:3306)/testdb"
+    collection_interval: 300s
+    timeout: 10s
+    queries:
+      - sql: |
+          queries:
+      - sql: |
+          SELECT
+            DIGEST as query_id,
+            DIGEST_TEXT as query_text,
+            ROUND(AVG_TIMER_WAIT/1000000, 2) as avg_duration_ms,
+            COUNT_STAR as execution_count,
+            ROUND((AVG_TIMER_WAIT * COUNT_STAR)/1000000, 2) as total_duration_ms,
+            JSON_OBJECT(
+              'plan_available', false,
+              'approach', 'performance_schema_metadata'
+            ) as plan_metadata
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE
+            SCHEMA_NAME = DATABASE()
+            AND SCHEMA_NAME IS NOT NULL
+            AND AVG_TIMER_WAIT > 50000000  -- 50ms+
+            AND COUNT_STAR > 5
+          ORDER BY (AVG_TIMER_WAIT * COUNT_STAR) DESC
+          LIMIT 1;
+
+processors:
+  memory_limiter:
+    check_interval: 2s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  transform/sanitize_pii:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - replace_all_patterns(attributes["query_text"], "'[^']*'", "'[REDACTED]'")
+          - replace_all_patterns(attributes["query_text"], "\\b\\d{6,}\\b", "[ID]")
+          - replace_all_patterns(body, "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "[EMAIL_REDACTED]")
+
+  resource:
+    attributes:
+      - key: "collector.instance.id"
+        value: "${env:HOSTNAME}"
+        action: upsert
+
+  probabilistic_sampler:
+    hash_seed: 22
+    sampling_percentage: 25
+
+  batch:
+    timeout: 30s
+    send_batch_size: 50
+    send_batch_max_size: 100
+
+exporters:
+  otlp/newrelic:
+    endpoint: "${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}"
+    headers:
+      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 120s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 256
+
+service:
+  extensions: [health_check, memory_ballast]
+  pipelines:
+    metrics/databases:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/newrelic]
+    
+    logs/database_intelligence:
+      receivers: [sqlquery/postgresql, sqlquery/mysql]
+      processors: [memory_limiter, transform/sanitize_pii, resource, probabilistic_sampler, batch]
+      exporters: [otlp/newrelic]
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

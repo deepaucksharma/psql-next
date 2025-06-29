@@ -1,0 +1,47 @@
+# PostgreSQL receiver configuration
+receivers:
+  postgresql:
+    endpoint: host.docker.internal:5432
+    username: newrelic_monitor
+    password: monitor123
+    databases:
+      - testdb
+    collection_interval: 10s
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+
+processors:
+  batch:
+    timeout: 5s
+    
+  attributes:
+    actions:
+      - key: collector.name
+        value: database-intelligence
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+    
+  otlp:
+    endpoint: "https://otlp.nr-data.net:4318"
+    headers:
+      api-key: "fdd7bc15d64d85dc910f34aa35f0cc0eFFFFNRAL"
+
+service:
+  telemetry:
+    logs:
+      level: debug
+      
+  pipelines:
+    metrics:
+      receivers: [postgresql]
+      processors: [attributes, batch]
+      exporters: [debug, otlp]

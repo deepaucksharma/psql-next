@@ -1,0 +1,262 @@
+# OpenTelemetry Collector Configuration - EXPERIMENTAL
+#
+# This configuration shows how to use the custom experimental components
+# that have been developed but are not yet integrated into production.
+#
+# ⚠️ WARNING: This configuration requires a custom-built collector binary
+# See otelcol-builder.yaml for build instructions
+#
+# Notable differences from production:
+# 1. Uses postgresqlquery receiver with ASH sampling
+# 2. Includes circuit breaker for database protection
+# 3. Uses adaptive sampler instead of probabilistic
+# 4. Includes plan attribute extraction (requires pg_querylens)
+# 5. Adds verification processor for data quality
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  zpages:
+    endpoint: localhost:55679
+
+  pprof:
+    endpoint: localhost:6060
+
+  memory_ballast:
+    size_mib: 128
+
+receivers:
+  # EXPERIMENTAL: Advanced PostgreSQL receiver with ASH sampling
+  postgresqlquery:
+    connection:
+      dsn: "${env:PG_REPLICA_DSN}"
+      max_open: 5
+      max_idle: 2
+      max_lifetime: 300s
+    
+    collection:
+      interval: 60s
+      timeout: 10s
+      
+    # Active Session History sampling
+    ash_sampling:
+      enabled: true
+      interval: 1s
+      buffer_size: 3600  # 1 hour of samples
+      
+    # Query plan collection (requires pg_querylens extension)
+    plan_collection:
+      enabled: false  # Enable when pg_querylens is available
+      max_plans_per_query: 3
+      explain_options:
+        analyze: false  # Never use ANALYZE on production
+        buffers: false
+        costs: true
+        format: json
+        
+    # Multi-database support
+    databases:
+      - name: primary
+        dsn: "${env:PG_REPLICA_DSN}"
+        tags:
+          environment: production
+          role: primary
+      - name: analytics
+        dsn: "${env:PG_ANALYTICS_DSN}"
+        tags:
+          environment: production
+          role: analytics
+          
+    # Cloud provider detection
+    cloud_detection:
+      enabled: true
+      
+    # Performance thresholds
+    thresholds:
+      slow_query_ms: 100
+      blocked_session_ms: 5000
+
+  # Fallback to standard receiver for MySQL (no custom receiver yet)
+  sqlquery/mysql:
+    driver: mysql
+    dsn: "${env:MYSQL_READONLY_DSN}"
+    collection_interval: 300s
+    timeout: 10s
+    queries:
+      - sql: |
+          SELECT
+            DIGEST as query_id,
+            DIGEST_TEXT as query_text,
+            ROUND(AVG_TIMER_WAIT/1000000, 2) as avg_duration_ms,
+            COUNT_STAR as execution_count
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE SCHEMA_NAME = DATABASE()
+          ORDER BY (AVG_TIMER_WAIT * COUNT_STAR) DESC
+          LIMIT 100;
+
+processors:
+  # Standard memory limiter (always first)
+  memory_limiter:
+    check_interval: 2s
+    limit_mib: 2048
+    spike_limit_mib: 512
+
+  # EXPERIMENTAL: Circuit breaker for database protection
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 30s
+    
+    # Database-specific configuration
+    databases:
+      default:
+        max_error_rate: 0.1
+        max_latency_ms: 5000
+        
+    # Throughput monitoring
+    throughput:
+      check_interval: 60s
+      min_throughput: 10
+      
+    # Memory pressure protection
+    memory:
+      max_usage_percent: 80
+      pause_collection_percent: 90
+
+  # Standard PII sanitization
+  transform/sanitize_pii:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - replace_all_patterns(attributes["query_text"], "'[^']*'", "'[REDACTED]'")
+          - replace_all_patterns(attributes["query_text"], "\\b\\d{6,}\\b", "[ID]")
+
+  # EXPERIMENTAL: Plan attribute extraction (when plans available)
+  planattributeextractor:
+    enabled: false  # Enable when plan collection is active
+    extract_fields:
+      - total_cost
+      - rows
+      - width
+      - node_types
+      - join_types
+      - index_names
+      - table_names
+    
+    # Plan regression detection
+    regression_detection:
+      enabled: true
+      cost_increase_threshold: 2.0
+      row_increase_threshold: 10.0
+
+  # EXPERIMENTAL: Adaptive sampler with state management
+  adaptivesampler:
+    initial_sampling_percentage: 100
+    min_sampling_percentage: 10
+    max_sampling_percentage: 100
+    
+    # Adaptive strategies
+    strategies:
+      - type: "query_cost"
+        high_cost_threshold_ms: 1000
+        high_cost_sampling: 100
+        low_cost_sampling: 25
+        
+      - type: "error_rate"
+        error_threshold: 0.05
+        error_sampling: 100
+        normal_sampling: 50
+        
+      - type: "volume"
+        high_volume_threshold: 1000
+        high_volume_sampling: 10
+        low_volume_sampling: 100
+    
+    # State persistence (requires single instance or external state)
+    state_storage:
+      type: memory  # Use 'redis' for multi-instance
+      
+  # EXPERIMENTAL: Data verification
+  verification:
+    enabled: true
+    checks:
+      - required_fields: ["query_id", "query_text", "database"]
+      - value_ranges:
+          avg_duration_ms: [0, 3600000]  # 0ms to 1 hour
+          execution_count: [1, 1000000000]
+      - data_quality:
+          check_null_values: true
+          check_empty_strings: true
+
+  # Standard batch processor
+  batch:
+    timeout: 30s
+    send_batch_size: 100
+    send_batch_max_size: 200
+
+exporters:
+  # Standard OTLP exporter (can be replaced with custom version if needed)
+  otlp/newrelic:
+    endpoint: "${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}"
+    headers:
+      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 120s
+
+  # Debug exporter for development
+  logging/debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # Prometheus metrics for monitoring
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: db_intelligence
+
+service:
+  extensions: [health_check, zpages, pprof, memory_ballast]
+  
+  pipelines:
+    # Experimental pipeline for PostgreSQL
+    logs/postgresql_experimental:
+      receivers: [postgresqlquery]
+      processors: 
+        - memory_limiter
+        - circuitbreaker
+        - transform/sanitize_pii
+        - planattributeextractor
+        - adaptivesampler
+        - verification
+        - batch
+      exporters: [otlp/newrelic, logging/debug]
+    
+    # Standard pipeline for MySQL (no experimental receiver)
+    logs/mysql_standard:
+      receivers: [sqlquery/mysql]
+      processors:
+        - memory_limiter
+        - transform/sanitize_pii
+        - batch
+      exporters: [otlp/newrelic]
+    
+    # Metrics pipeline for self-monitoring
+    metrics/internal:
+      receivers: []  # Internal metrics only
+      processors: [batch]
+      exporters: [prometheus]
+      
+  telemetry:
+    logs:
+      level: debug
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

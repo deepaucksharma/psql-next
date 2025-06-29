@@ -1,0 +1,350 @@
+# OpenTelemetry Collector Configuration - OHI Capabilities with OTEL Metrics
+# Collects same data as PostgreSQL OHI but as dimensional metrics
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+    
+  file_storage:
+    directory: /var/lib/otel/file_storage
+    timeout: 10s
+
+receivers:
+  # PostgreSQL receiver for basic metrics
+  postgresql:
+    endpoint: ${env:PG_HOST:-host.docker.internal}:${env:PG_PORT:-5432}
+    username: ${env:PG_USER:-newrelic_monitor}
+    password: ${env:PG_PASSWORD:-monitor123}
+    databases:
+      - ${env:PG_DATABASE:-testdb}
+    collection_interval: 60s
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+      
+  # SQL Query receiver for slow query metrics
+  sqlquery/postgresql_queries:
+    driver: postgres
+    dsn: "${env:PG_REPLICA_DSN}"
+    collection_interval: 300s
+    timeout: 10s
+    storage: file_storage
+    queries:
+      # Slow query metrics - converted to dimensional metrics
+      - sql: |
+          SELECT 
+            pss.queryid::text AS query_id,
+            pd.datname AS database_name,
+            current_schema() AS schema_name,
+            pss.calls AS execution_count,
+            pss.total_exec_time AS total_time_ms,
+            pss.mean_exec_time AS mean_time_ms,
+            pss.min_exec_time AS min_time_ms,
+            pss.max_exec_time AS max_time_ms,
+            pss.stddev_exec_time AS stddev_time_ms,
+            pss.rows AS rows_returned,
+            pss.shared_blks_hit + pss.local_blks_hit AS cache_hits,
+            pss.shared_blks_read + pss.local_blks_read AS disk_reads,
+            pss.shared_blks_written + pss.local_blks_written AS disk_writes,
+            pss.shared_blks_dirtied + pss.local_blks_dirtied AS blocks_dirtied,
+            pss.temp_blks_read AS temp_reads,
+            pss.temp_blks_written AS temp_writes,
+            pss.blk_read_time AS io_read_time_ms,
+            pss.blk_write_time AS io_write_time_ms,
+            CASE
+              WHEN pss.query ILIKE 'SELECT%%' THEN 'SELECT'
+              WHEN pss.query ILIKE 'INSERT%%' THEN 'INSERT'
+              WHEN pss.query ILIKE 'UPDATE%%' THEN 'UPDATE'
+              WHEN pss.query ILIKE 'DELETE%%' THEN 'DELETE'
+              ELSE 'OTHER'
+            END AS statement_type,
+            LEFT(regexp_replace(pss.query, '\s+', ' ', 'g'), 100) AS query_pattern
+          FROM pg_stat_statements pss
+          JOIN pg_database pd ON pss.dbid = pd.oid
+          WHERE pd.datname = current_database()
+            AND pss.calls > 0
+          ORDER BY pss.mean_exec_time DESC;
+        metrics:
+          - metric_name: db.query.count
+            value_column: execution_count
+            value_type: int
+            data_point_type: sum
+            aggregation: cumulative
+            monotonic: true
+            attribute_columns:
+              - query_id
+              - database_name
+              - schema_name
+              - statement_type
+              - query_pattern
+              
+          - metric_name: db.query.duration
+            value_column: total_time_ms
+            value_type: double
+            data_point_type: sum
+            aggregation: cumulative
+            monotonic: true
+            unit: ms
+            attribute_columns:
+              - query_id
+              - database_name
+              - schema_name
+              - statement_type
+              
+          - metric_name: db.query.mean_duration
+            value_column: mean_time_ms
+            value_type: double
+            data_point_type: gauge
+            unit: ms
+            attribute_columns:
+              - query_id
+              - database_name
+              - schema_name
+              - statement_type
+              
+          - metric_name: db.query.rows
+            value_column: rows_returned
+            value_type: int
+            data_point_type: sum
+            aggregation: cumulative
+            monotonic: true
+            attribute_columns:
+              - query_id
+              - database_name
+              - statement_type
+              
+          - metric_name: db.io.cache_hits
+            value_column: cache_hits
+            value_type: int
+            data_point_type: sum
+            aggregation: cumulative
+            monotonic: true
+            attribute_columns:
+              - query_id
+              - database_name
+              
+          - metric_name: db.io.disk_reads
+            value_column: disk_reads
+            value_type: int
+            data_point_type: sum
+            aggregation: cumulative
+            monotonic: true
+            attribute_columns:
+              - query_id
+              - database_name
+
+      # Active sessions/blocking metrics
+      - sql: |
+          SELECT 
+            COUNT(*) FILTER (WHERE state = 'active') as active_sessions,
+            COUNT(*) FILTER (WHERE state = 'idle') as idle_sessions,
+            COUNT(*) FILTER (WHERE state = 'idle in transaction') as idle_in_transaction,
+            COUNT(*) FILTER (WHERE wait_event_type IS NOT NULL) as waiting_sessions,
+            COUNT(DISTINCT pid) FILTER (WHERE wait_event_type = 'Lock') as blocked_sessions,
+            MAX(EXTRACT(EPOCH FROM (now() - query_start)) * 1000) FILTER (WHERE state = 'active') as max_query_duration_ms,
+            AVG(EXTRACT(EPOCH FROM (now() - query_start)) * 1000) FILTER (WHERE state = 'active') as avg_query_duration_ms,
+            current_database() as database_name
+          FROM pg_stat_activity
+          WHERE backend_type = 'client backend';
+        metrics:
+          - metric_name: db.connections.active
+            value_column: active_sessions
+            value_type: int
+            data_point_type: gauge
+            attribute_columns:
+              - database_name
+              
+          - metric_name: db.connections.idle
+            value_column: idle_sessions
+            value_type: int
+            data_point_type: gauge
+            attribute_columns:
+              - database_name
+              
+          - metric_name: db.connections.waiting
+            value_column: waiting_sessions
+            value_type: int
+            data_point_type: gauge
+            attribute_columns:
+              - database_name
+              
+          - metric_name: db.connections.blocked
+            value_column: blocked_sessions
+            value_type: int
+            data_point_type: gauge
+            attribute_columns:
+              - database_name
+
+      # Wait event metrics (dimensional)
+      - sql: |
+          SELECT 
+            wait_event_type,
+            wait_event,
+            COUNT(*) as count,
+            current_database() as database_name
+          FROM pg_stat_activity
+          WHERE wait_event IS NOT NULL
+            AND backend_type = 'client backend'
+          GROUP BY wait_event_type, wait_event;
+        metrics:
+          - metric_name: db.wait_events
+            value_column: count
+            value_type: int
+            data_point_type: gauge
+            attribute_columns:
+              - database_name
+              - wait_event_type
+              - wait_event
+
+      # Replication metrics
+      - sql: |
+          SELECT 
+            application_name,
+            state,
+            sync_state,
+            EXTRACT(EPOCH FROM (now() - backend_start)) as connection_age_seconds,
+            COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), flush_lsn), 0) as flush_lag_bytes,
+            COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), 0) as replay_lag_bytes,
+            COALESCE(EXTRACT(EPOCH FROM write_lag) * 1000, 0) as write_lag_ms,
+            COALESCE(EXTRACT(EPOCH FROM flush_lag) * 1000, 0) as flush_lag_ms,
+            COALESCE(EXTRACT(EPOCH FROM replay_lag) * 1000, 0) as replay_lag_ms
+          FROM pg_stat_replication;
+        metrics:
+          - metric_name: db.replication.lag
+            value_column: replay_lag_bytes
+            value_type: int
+            data_point_type: gauge
+            unit: By
+            attribute_columns:
+              - application_name
+              - state
+              - sync_state
+              
+          - metric_name: db.replication.lag_time
+            value_column: replay_lag_ms
+            value_type: double
+            data_point_type: gauge
+            unit: ms
+            attribute_columns:
+              - application_name
+              - state
+
+processors:
+  # Memory protection
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+    
+  # Add metadata attributes
+  attributes:
+    actions:
+      - key: db.system
+        value: postgresql
+        action: insert
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENV:-production}
+        action: insert
+        
+  # Normalize query patterns for cardinality control
+  transform/query_normalization:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Normalize query patterns to reduce cardinality
+          - replace_pattern(attributes["query_pattern"], "\\b\\d+\\b", "?")
+          - replace_pattern(attributes["query_pattern"], "'[^']*'", "?")
+          - replace_pattern(attributes["query_pattern"], "\"[^\"]*\"", "?")
+          
+  # Resource attributes for entity correlation
+  resource:
+    attributes:
+      - key: service.name
+        value: postgresql
+        action: insert
+      - key: service.namespace
+        value: database-intelligence
+        action: insert
+      - key: host.name
+        value: ${env:PG_HOST:-localhost}
+        action: insert
+      - key: db.connection_string
+        value: ${env:PG_HOST:-localhost}:${env:PG_PORT:-5432}
+        action: insert
+        
+  # Metric filtering for high cardinality control
+  filter/cardinality:
+    error_mode: ignore
+    metrics:
+      # Only keep queries with significant execution count or duration
+      datapoint:
+        - 'name == "db.query.count" and value < 10'
+        - 'name == "db.query.mean_duration" and value < 100'
+        
+  # Batch for optimal sending
+  batch:
+    timeout: 30s
+    send_batch_size: 5000
+    send_batch_max_size: 10000
+
+exporters:
+  # Debug exporter
+  debug:
+    verbosity: normal
+    sampling_initial: 5
+    sampling_thereafter: 100
+    
+  # New Relic OTLP exporter
+  otlp/newrelic:
+    endpoint: "${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4318}"
+    headers:
+      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+      
+  # Prometheus for local debugging
+  prometheus:
+    endpoint: "0.0.0.0:9090"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  extensions: [health_check, pprof, zpages, file_storage]
+  
+  telemetry:
+    logs:
+      level: "${env:LOG_LEVEL:-info}"
+      encoding: json
+      
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      
+  pipelines:
+    # All metrics pipeline
+    metrics:
+      receivers: [postgresql, sqlquery/postgresql_queries]
+      processors:
+        - memory_limiter
+        - attributes
+        - transform/query_normalization
+        - resource
+        - filter/cardinality
+        - batch
+      exporters: [otlp/newrelic, prometheus, debug]

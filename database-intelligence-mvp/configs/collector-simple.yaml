@@ -1,0 +1,195 @@
+# Simple Single-Server Configuration
+# Optimized for single-server deployment with minimal external dependencies
+
+receivers:
+  # Standard SQL query receiver for basic metrics
+  sqlquery:
+    driver: postgres
+    datasource: "${POSTGRES_DSN}"
+    queries:
+      - sql: |
+          SELECT 
+            current_database() as db_name,
+            pg_database_size(current_database()) as size_bytes,
+            numbackends as connections,
+            xact_commit as commits,
+            xact_rollback as rollbacks,
+            blks_read as blocks_read,
+            blks_hit as blocks_hit
+          FROM pg_stat_database
+          WHERE datname = current_database()
+        metrics:
+          - metric_name: postgresql.database.size
+            value_column: size_bytes
+            attribute_columns: [db_name]
+          - metric_name: postgresql.database.connections
+            value_column: connections
+            attribute_columns: [db_name]
+    collection_interval: 30s
+
+  # Custom PostgreSQL receiver for advanced features
+  postgresqlquery/advanced:
+    databases:
+      - name: "${DB_NAME:-postgres}"
+        dsn: "${POSTGRES_DSN}"
+        max_open_connections: 2
+        max_idle_connections: 1
+    collection_interval: 10s
+    query_timeout: 5s
+    enable_stat_statements: true
+    enable_ash_sampling: true
+    enable_wait_sampling: false # Requires pg_wait_sampling extension
+
+  # File log receiver for auto_explain logs
+  filelog/auto_explain:
+    include: 
+      - /var/log/postgresql/postgresql*.log
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \w+) \[(?P<pid>\d+)\] (?P<level>\w+):  duration: (?P<duration>[\d\.]+) ms  plan:'
+      - type: move
+        from: attributes.timestamp
+        to: body.timestamp
+      - type: move
+        from: attributes.duration
+        to: body.duration_ms
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Batch processor for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    send_batch_max_size: 2000
+
+  # Transform processor for PII sanitization
+  transform/sanitize:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Remove sensitive data from query text
+          - replace_pattern(attributes["query.text"], "('[^']*')", "'?'")
+          - replace_pattern(attributes["query.text"], "(\d{3,})", "?")
+    log_statements:
+      - context: log
+        statements:
+          # Sanitize SQL in logs
+          - replace_pattern(body["query"], "('[^']*')", "'?'")
+          - replace_pattern(body["query"], "(\d{3,})", "?")
+
+  # Simple circuit breaker for database protection
+  circuitbreaker/simple:
+    circuit_id_attribute: "db.name"
+    failure_threshold: 5
+    success_threshold: 3
+    timeout: 30s
+    persistence:
+      enabled: true
+      path: "/var/lib/otel/circuit_states.json"
+
+  # Probabilistic sampler as fallback
+  probabilistic_sampler:
+    sampling_percentage: 10
+
+  # Resource processor to add metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: "postgresql-collector"
+        action: insert
+      - key: deployment.environment
+        value: "${ENVIRONMENT:-production}"
+        action: insert
+      - key: host.name
+        from_attribute: "${HOSTNAME}"
+        action: insert
+
+  # Attributes processor to ensure consistent naming
+  attributes/rename:
+    actions:
+      - key: db.system
+        value: "postgresql"
+        action: insert
+      - key: telemetry.sdk.name
+        value: "opentelemetry"
+        action: insert
+
+exporters:
+  # OTLP exporter (standard)
+  otlp:
+    endpoint: "${OTLP_ENDPOINT}"
+    headers:
+      api-key: "${NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # File exporter for debugging
+  file/debug:
+    path: "/var/log/otel/metrics.json"
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+
+  # Logging exporter for development
+  logging:
+    loglevel: debug
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+extensions:
+  # Health check
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+
+  # Performance profiler
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+service:
+  extensions: [health_check, pprof]
+  
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers: [sqlquery, postgresqlquery/advanced]
+      processors: 
+        - memory_limiter
+        - circuitbreaker/simple
+        - transform/sanitize
+        - resource
+        - attributes/rename
+        - batch
+      exporters: [otlp]
+
+    # Logs pipeline for query analysis
+    logs:
+      receivers: [filelog/auto_explain, postgresqlquery/advanced]
+      processors:
+        - memory_limiter
+        - transform/sanitize
+        - resource
+        - probabilistic_sampler
+        - batch
+      exporters: [otlp]
+
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: "postgresql-collector"
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

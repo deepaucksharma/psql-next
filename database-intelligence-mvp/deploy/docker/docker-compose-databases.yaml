@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Primary Database
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: db-intel-postgres-primary
+    hostname: postgres-primary
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-primary-data:/var/lib/postgresql/data
+      - ./init-scripts/postgres-init-simple.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - db-intelligence
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL Read Replica (simulated with another instance)
+  postgres-replica:
+    image: postgres:15-alpine
+    container_name: db-intel-postgres-replica
+    hostname: postgres-replica
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql/data
+      - ./init-scripts/postgres-init-simple.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - db-intelligence
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MySQL Primary Database
+  mysql-primary:
+    image: mysql:8.0
+    container_name: db-intel-mysql-primary
+    hostname: mysql-primary
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql123
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: mysql
+      MYSQL_PASSWORD: mysql123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-primary-data:/var/lib/mysql
+      - ./init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - db-intelligence
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --performance-schema=ON
+      --performance-schema-instrument='%=ON'
+      --performance-schema-consumer-events-statements-current=ON
+      --performance-schema-consumer-events-statements-history=ON
+      --performance-schema-consumer-events-statements-history-long=ON
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pmysql123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MySQL Read Replica (simulated)
+  mysql-replica:
+    image: mysql:8.0
+    container_name: db-intel-mysql-replica
+    hostname: mysql-replica
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql123
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: mysql
+      MYSQL_PASSWORD: mysql123
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-replica-data:/var/lib/mysql
+      - ./init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - db-intelligence
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --performance-schema=ON
+      --performance-schema-instrument='%=ON'
+      --performance-schema-consumer-events-statements-current=ON
+      --performance-schema-consumer-events-statements-history=ON
+      --performance-schema-consumer-events-statements-history-long=ON
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pmysql123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Sample Application to Generate Database Load
+  load-generator:
+    image: alpine:latest
+    container_name: db-intel-load-generator
+    networks:
+      - db-intelligence
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      mysql-primary:
+        condition: service_healthy
+    volumes:
+      - ./scripts/generate-load.sh:/generate-load.sh:ro
+    command: |
+      sh -c '
+        apk add --no-cache postgresql-client mysql-client bash
+        chmod +x /generate-load.sh
+        /generate-load.sh
+      '
+    restart: unless-stopped
+
+volumes:
+  postgres-primary-data:
+  postgres-replica-data:
+  mysql-primary-data:
+  mysql-replica-data:
+
+networks:
+  db-intelligence:
+    external: true

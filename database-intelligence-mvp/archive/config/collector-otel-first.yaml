@@ -1,0 +1,275 @@
+# OTEL-First Configuration for Database Intelligence
+# Uses standard OTEL components wherever possible
+# Custom processors only for specific gaps
+
+receivers:
+  # Standard PostgreSQL receiver for infrastructure metrics
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB}
+    collection_interval: 15s
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+
+  # SQL Query receiver for data PostgreSQL receiver can't get
+  sqlquery/pg_statements:
+    driver: postgres
+    datasource: ${env:POSTGRES_DSN}
+    queries:
+      # Collect pg_stat_statements data
+      - sql: |
+          SELECT 
+            queryid::text as query_id,
+            query,
+            calls,
+            total_exec_time,
+            mean_exec_time,
+            stddev_exec_time,
+            rows,
+            shared_blks_hit,
+            shared_blks_read,
+            blk_read_time,
+            blk_write_time
+          FROM pg_stat_statements
+          WHERE mean_exec_time > 0
+          ORDER BY total_exec_time DESC
+          LIMIT 100
+        metrics:
+          - metric_name: postgresql.query.calls
+            value_column: calls
+            attribute_columns: [query_id]
+            value_type: int
+          - metric_name: postgresql.query.total_time
+            value_column: total_exec_time
+            attribute_columns: [query_id]
+            value_type: double
+        logs:
+          - body_column: query
+            attribute_columns: 
+              - query_id
+              - mean_exec_time
+              - rows
+    collection_interval: 30s
+
+  # Active Session History sampling
+  sqlquery/ash:
+    driver: postgres
+    datasource: ${env:POSTGRES_DSN}
+    queries:
+      - sql: |
+          SELECT 
+            pid,
+            state,
+            wait_event_type,
+            wait_event,
+            query_start,
+            EXTRACT(EPOCH FROM (now() - query_start)) as query_duration_seconds
+          FROM pg_stat_activity
+          WHERE state != 'idle'
+            AND pid != pg_backend_pid()
+        metrics:
+          - metric_name: postgresql.active_sessions
+            value_column: "1"
+            attribute_columns: [state, wait_event_type, wait_event]
+            value_type: int
+            aggregation: count
+    collection_interval: 1s  # ASH sampling every second
+
+  # MySQL receiver (if needed)
+  mysql:
+    endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    collection_interval: 15s
+    tls:
+      insecure: true
+
+  # File log receiver for auto_explain logs
+  filelog/auto_explain:
+    include: 
+      - /var/log/postgresql/postgresql*.log
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: 'duration: (?P<duration>\d+\.\d+) ms  plan:'
+        parse_to: body
+      - type: json_parser
+        parse_from: body.plan
+        parse_to: attributes.plan
+
+processors:
+  # Standard OTEL processors
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  # Transform processor for PII sanitization
+  transform/sanitize_pii:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Remove sensitive data from queries
+          - replace_pattern(body, "('[^']*')", "'?'")
+          - replace_pattern(body, "= *([0-9]{3,})", "= ?")
+          - replace_pattern(body, "IN *\([^)]+\)", "IN (?)")
+
+  # Resource processor to add metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: "database-monitoring"
+        action: insert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: db.system
+        value: "postgresql"
+        action: insert
+
+  # Attributes processor for consistent naming
+  attributes/normalize:
+    actions:
+      - key: db.query.text
+        from_attribute: query
+        action: insert
+      - key: db.query.id  
+        from_attribute: query_id
+        action: insert
+      - key: query
+        action: delete
+      - key: query_id
+        action: delete
+
+  # Standard probabilistic sampler as baseline
+  probabilistic_sampler:
+    sampling_percentage: 10
+
+  # === CUSTOM PROCESSORS FOR GAPS ===
+  
+  # Gap 1: Adaptive sampling based on query performance
+  adaptive_sampler/queries:
+    # Sample expensive/slow queries more frequently
+    rules:
+      - name: "expensive_queries"
+        condition: "mean_exec_time > 1000"  # > 1 second
+        sampling_rate: 100  # Always sample
+      - name: "moderate_queries"
+        condition: "mean_exec_time > 100"   # > 100ms
+        sampling_rate: 50   # 50% sampling
+      - name: "fast_queries"
+        condition: "mean_exec_time <= 100"
+        sampling_rate: 10   # 10% sampling
+    default_sampling_rate: 10
+
+  # Gap 2: Circuit breaker for database protection
+  circuit_breaker/database:
+    # Protect database from monitoring overload
+    error_threshold_percent: 50
+    volume_threshold_qps: 1000
+    evaluation_interval: 30s
+    break_duration: 5m
+    half_open_requests: 10
+
+  # Gap 3: Query plan analyzer (simplified using transform)
+  transform/extract_plan_attributes:
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Extract key plan attributes using OTTL
+          - set(attributes["plan.total_cost"], ParseJSON(attributes["plan"], "$.Total Cost"))
+          - set(attributes["plan.execution_time"], ParseJSON(attributes["plan"], "$.Execution Time"))
+          - set(attributes["plan.has_sequential_scan"], 
+                ContainsSubstring(ToString(attributes["plan"]), "Seq Scan"))
+          - set(attributes["plan.has_nested_loop"], 
+                ContainsSubstring(ToString(attributes["plan"]), "Nested Loop"))
+
+exporters:
+  # Standard OTLP exporter
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+
+  # Debug exporter for development
+  debug:
+    verbosity: detailed
+    sampling_initial: 2
+    sampling_thereafter: 500
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: database_intelligence
+
+extensions:
+  # Standard health check
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  # Performance profiler
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  # Basic auth extension
+  basicauth/client:
+    client_auth:
+      username: ${env:OTLP_USERNAME}
+      password: ${env:OTLP_PASSWORD}
+
+service:
+  extensions: [health_check, pprof]
+  
+  pipelines:
+    # Infrastructure metrics pipeline
+    metrics/infrastructure:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp, prometheus]
+
+    # Query performance metrics pipeline  
+    metrics/queries:
+      receivers: [sqlquery/pg_statements, sqlquery/ash]
+      processors: 
+        - memory_limiter
+        - resource
+        - attributes/normalize
+        - adaptive_sampler/queries
+        - circuit_breaker/database
+        - batch
+      exporters: [otlp]
+
+    # Query logs pipeline
+    logs/queries:
+      receivers: [sqlquery/pg_statements, filelog/auto_explain]
+      processors:
+        - memory_limiter
+        - transform/sanitize_pii
+        - transform/extract_plan_attributes
+        - resource
+        - adaptive_sampler/queries
+        - batch
+      exporters: [otlp]
+
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: "database-monitoring"
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

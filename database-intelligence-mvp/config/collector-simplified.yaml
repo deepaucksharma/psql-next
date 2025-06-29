@@ -1,0 +1,166 @@
+# Database Intelligence Collector - Simplified OTEL-First Configuration
+# This configuration maximizes standard OTEL components with minimal custom processors
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  # PostgreSQL metrics using standard receiver
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST:localhost}:${env:POSTGRES_PORT:5432}
+    username: ${env:POSTGRES_USER:postgres}
+    password: ${env:POSTGRES_PASSWORD:postgres}
+    databases:
+      - ${env:POSTGRES_DB:postgres}
+    collection_interval: 15s
+    tls:
+      insecure: true
+
+  # Custom queries for data PostgreSQL receiver can't get
+  sqlquery:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:localhost} port=${env:POSTGRES_PORT:5432} user=${env:POSTGRES_USER:postgres} password=${env:POSTGRES_PASSWORD:postgres} dbname=${env:POSTGRES_DB:postgres} sslmode=disable"
+    queries:
+      # pg_stat_statements for query performance
+      - sql: |
+          SELECT 
+            queryid::text as query_id,
+            query,
+            calls,
+            total_exec_time,
+            mean_exec_time,
+            rows
+          FROM pg_stat_statements
+          WHERE calls > 0
+          ORDER BY mean_exec_time DESC
+          LIMIT 100
+        metrics:
+          - metric_name: db.query.calls
+            value_column: calls
+            attribute_columns: [query_id]
+            value_type: int
+          - metric_name: db.query.mean_time
+            value_column: mean_exec_time
+            attribute_columns: [query_id]
+            value_type: double
+        collection_interval: 30s
+
+      # Active sessions (ASH-like sampling)
+      - sql: |
+          SELECT 
+            COUNT(*) as active_sessions,
+            state,
+            wait_event_type
+          FROM pg_stat_activity
+          WHERE state != 'idle'
+          GROUP BY state, wait_event_type
+        metrics:
+          - metric_name: db.active_sessions
+            value_column: active_sessions
+            attribute_columns: [state, wait_event_type]
+            value_type: int
+        collection_interval: 1s
+
+processors:
+  # Standard OTEL processors
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  resource:
+    attributes:
+      - key: service.name
+        value: database-monitoring
+        action: insert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT:production}
+        action: insert
+
+  attributes:
+    actions:
+      - key: db.system
+        value: postgresql
+        action: insert
+
+  # Transform processor for PII sanitization
+  transform:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Sanitize query text if present
+          - replace_pattern(attributes["query"], "('[^']*')", "'?'") where attributes["query"] != nil
+          - replace_pattern(attributes["query"], "(\\d{3,})", "?") where attributes["query"] != nil
+
+  # Custom processors for gaps only
+  adaptive_sampler:
+    rules:
+      - name: "slow_queries"
+        condition: "mean_exec_time > 1000"
+        sampling_rate: 100
+      - name: "normal_queries"
+        condition: "mean_exec_time <= 1000"
+        sampling_rate: 10
+    default_sampling_rate: 10
+
+  circuit_breaker:
+    error_threshold_percent: 50
+    volume_threshold_qps: 1000
+    evaluation_interval: 30s
+    break_duration: 5m
+
+exporters:
+  # OTLP to New Relic
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT:otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+
+  # Debug for development
+  debug:
+    verbosity: detailed
+    sampling_initial: 2
+    sampling_thereafter: 100
+
+  # Prometheus for local metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: db_intelligence
+
+service:
+  extensions: [health_check]
+  
+  pipelines:
+    # Standard metrics pipeline
+    metrics/standard:
+      receivers: [postgresql]
+      processors: [memory_limiter, resource, attributes, batch]
+      exporters: [otlp, prometheus]
+
+    # Query performance pipeline with adaptive sampling
+    metrics/queries:
+      receivers: [sqlquery]
+      processors: 
+        - memory_limiter
+        - resource
+        - attributes
+        - transform
+        - adaptive_sampler
+        - circuit_breaker
+        - batch
+      exporters: [otlp]
+
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:info}
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

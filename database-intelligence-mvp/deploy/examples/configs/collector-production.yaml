@@ -1,0 +1,423 @@
+# Production OTEL-First Collector Configuration
+# Full feature set with custom processors for production use
+
+receivers:
+  # Standard PostgreSQL receiver
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: monitoring
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB}
+    collection_interval: ${env:COLLECTION_INTERVAL}
+    tls:
+      insecure: true
+
+  # Standard MySQL receiver  
+  mysql:
+    endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+    username: monitoring
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DATABASE}
+    collection_interval: ${env:COLLECTION_INTERVAL}
+    tls:
+      insecure: true
+
+  # PostgreSQL query analytics
+  sqlquery/pg_statements:
+    driver: postgres
+    datasource: ${env:POSTGRES_DSN}
+    queries:
+      # Top queries by execution time
+      - sql: |
+          SELECT 
+            queryid::text as query_id,
+            LEFT(query, 500) as query_text,
+            calls,
+            total_exec_time,
+            mean_exec_time,
+            stddev_exec_time,
+            rows,
+            shared_blks_hit,
+            shared_blks_read,
+            shared_blks_dirtied,
+            blk_read_time,
+            blk_write_time,
+            temp_blks_read,
+            temp_blks_written
+          FROM pg_stat_statements
+          WHERE mean_exec_time > 0
+          ORDER BY total_exec_time DESC
+          LIMIT 200
+        metrics:
+          - metric_name: postgresql.query.calls
+            value_column: calls
+            attribute_columns: [query_id, query_text]
+            value_type: int
+          - metric_name: postgresql.query.total_time_ms
+            value_column: total_exec_time
+            attribute_columns: [query_id, query_text]
+            value_type: double
+          - metric_name: postgresql.query.mean_time_ms
+            value_column: mean_exec_time
+            attribute_columns: [query_id, query_text]
+            value_type: double
+          - metric_name: postgresql.query.rows
+            value_column: rows
+            attribute_columns: [query_id, query_text]
+            value_type: int
+          - metric_name: postgresql.query.shared_blks_hit
+            value_column: shared_blks_hit
+            attribute_columns: [query_id, query_text]
+            value_type: int
+        logs:
+          - body_column: query_text
+            attribute_columns: 
+              - query_id
+              - calls
+              - mean_exec_time
+              - rows
+    collection_interval: 60s
+
+  # Active Session History for PostgreSQL
+  sqlquery/pg_ash:
+    driver: postgres
+    datasource: ${env:POSTGRES_DSN}
+    queries:
+      - sql: |
+          SELECT 
+            pid,
+            state,
+            wait_event_type,
+            wait_event,
+            query_start,
+            EXTRACT(EPOCH FROM (now() - query_start)) as query_duration_seconds,
+            LEFT(query, 200) as current_query
+          FROM pg_stat_activity
+          WHERE state != 'idle'
+            AND pid != pg_backend_pid()
+        metrics:
+          - metric_name: postgresql.active_sessions
+            value_column: "1"
+            attribute_columns: [state, wait_event_type, wait_event, current_query]
+            value_type: int
+            aggregation: count
+          - metric_name: postgresql.session_duration_seconds
+            value_column: query_duration_seconds
+            attribute_columns: [state, wait_event_type, wait_event]
+            value_type: double
+    collection_interval: 5s
+
+  # MySQL query analytics
+  sqlquery/mysql_queries:
+    driver: mysql
+    datasource: ${env:MYSQL_DSN}
+    queries:
+      - sql: |
+          SELECT 
+            DIGEST_TEXT as query_text,
+            COUNT_STAR as execution_count,
+            SUM_TIMER_WAIT/1000000000 as total_time_ms,
+            AVG_TIMER_WAIT/1000000000 as avg_time_ms,
+            SUM_ROWS_EXAMINED as rows_examined,
+            SUM_ROWS_SENT as rows_sent
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE DIGEST_TEXT IS NOT NULL
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 100
+        metrics:
+          - metric_name: mysql.query.calls
+            value_column: execution_count
+            attribute_columns: [query_text]
+            value_type: int
+          - metric_name: mysql.query.total_time_ms
+            value_column: total_time_ms
+            attribute_columns: [query_text]
+            value_type: double
+          - metric_name: mysql.query.avg_time_ms
+            value_column: avg_time_ms
+            attribute_columns: [query_text]
+            value_type: double
+    collection_interval: 60s
+
+  # File log receivers for database logs
+  filelog/postgres_logs:
+    include:
+      - /var/log/postgresql/*.log
+      - /var/log/postgresql/*.csv
+    start_at: end
+    operators:
+      - type: csv_parser
+        header: "timestamp,username,database,process_id,connection_from,session_id,session_line_num,command_tag,session_start_time,virtual_transaction_id,transaction_id,error_severity,sql_state_code,message,detail,hint,internal_query,internal_query_pos,context,query,query_pos,location,application_name"
+        parse_to: attributes
+      - type: move
+        from: attributes.message
+        to: body
+
+  filelog/mysql_logs:
+    include:
+      - /var/log/mysql/*.log
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+(?P<thread_id>\d+)\s+(?P<command>\w+)\s+(?P<message>.*)'
+        parse_to: attributes
+
+  # OTLP receiver for other collectors or applications
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Memory limiter with production settings
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1536
+    spike_limit_mib: 384
+
+  # Batch processor optimized for production
+  batch:
+    timeout: 5s
+    send_batch_size: 2000
+    send_batch_max_size: 4000
+
+  # Resource processor with production metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: "database-monitoring"
+        action: insert
+      - key: service.namespace
+        value: "db-intelligence"
+        action: insert
+      - key: service.version
+        value: "2.0.0"
+        action: insert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: collector.role
+        value: ${env:INSTANCE_ROLE}
+        action: insert
+      - key: collector.id
+        value: ${env:COLLECTOR_ID}
+        action: insert
+
+  # Advanced PII sanitization
+  transform/sanitize_pii:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Remove passwords and sensitive data
+          - replace_pattern(body, "password\\s*=\\s*'[^']*'", "password='***'")
+          - replace_pattern(body, "password\\s*=\\s*\"[^\"]*\"", "password=\"***\"")
+          # Remove literal values
+          - replace_pattern(body, "('[^']*')", "'***'")
+          - replace_pattern(body, "(\"[^\"]*\")", "\"***\"")
+          # Remove numeric constants (but preserve small numbers that might be meaningful)
+          - replace_pattern(body, "= *([0-9]{4,})", "= ***")
+          - replace_pattern(body, "IN *\\([^)]+\\)", "IN (***)")
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Sanitize query text in metrics
+          - replace_pattern(attributes["query_text"], "('[^']*')", "'***'")
+          - replace_pattern(attributes["query_text"], "= *([0-9]{4,})", "= ***")
+
+  # Standard probabilistic sampling as baseline
+  probabilistic_sampler:
+    sampling_percentage: 20
+
+  # === CUSTOM PROCESSORS FOR PRODUCTION FEATURES ===
+
+  # Custom adaptive sampler for intelligent sampling
+  adaptive_sampler/intelligent:
+    enabled: ${env:ADAPTIVE_SAMPLING_ENABLED}
+    rules:
+      - name: "critical_errors"
+        condition: "severity == 'ERROR' or severity == 'FATAL'"
+        sampling_rate: 100
+      - name: "slow_queries"
+        condition: "mean_exec_time > 5000"  # > 5 seconds
+        sampling_rate: 100
+      - name: "expensive_queries"
+        condition: "mean_exec_time > 1000"  # > 1 second
+        sampling_rate: 75
+      - name: "moderate_queries"
+        condition: "mean_exec_time > 100"   # > 100ms
+        sampling_rate: 25
+      - name: "fast_queries"
+        condition: "mean_exec_time <= 100"
+        sampling_rate: 5
+    default_sampling_rate: 10
+    time_window: "5m"
+    max_traces_per_second: 1000
+
+  # Custom circuit breaker for database protection
+  circuit_breaker/database_protection:
+    enabled: ${env:CIRCUIT_BREAKER_ENABLED}
+    failure_threshold: 50
+    recovery_timeout: 300s
+    half_open_max_requests: 25
+    evaluation_interval: 30s
+    metrics:
+      - "postgresql.query.calls"
+      - "mysql.query.calls"
+    conditions:
+      - "query_duration > 30s"
+      - "error_rate > 0.1"
+
+  # Custom verification processor for data quality
+  verification/data_quality:
+    enabled: ${env:VERIFICATION_ENABLED}
+    checks:
+      - name: "query_text_present"
+        condition: "attributes['query_text'] != ''"
+        action: "flag"
+      - name: "reasonable_execution_time"
+        condition: "mean_exec_time > 0 and mean_exec_time < 3600000"  # < 1 hour
+        action: "flag"
+      - name: "positive_call_count"
+        condition: "calls > 0"
+        action: "drop"
+    reporting_interval: 60s
+
+  # Query plan analyzer using transform
+  transform/query_analysis:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Categorize queries by type
+          - set(attributes["query.type"], "SELECT") where IsMatch(attributes["query_text"], "(?i)^\\s*SELECT")
+          - set(attributes["query.type"], "INSERT") where IsMatch(attributes["query_text"], "(?i)^\\s*INSERT")
+          - set(attributes["query.type"], "UPDATE") where IsMatch(attributes["query_text"], "(?i)^\\s*UPDATE")
+          - set(attributes["query.type"], "DELETE") where IsMatch(attributes["query_text"], "(?i)^\\s*DELETE")
+          # Flag potentially expensive operations
+          - set(attributes["query.has_join"], true) where IsMatch(attributes["query_text"], "(?i)\\bJOIN\\b")
+          - set(attributes["query.has_subquery"], true) where IsMatch(attributes["query_text"], "(?i)\\bSELECT.*\\bSELECT\\b")
+          - set(attributes["query.has_order_by"], true) where IsMatch(attributes["query_text"], "(?i)\\bORDER BY\\b")
+          - set(attributes["query.has_group_by"], true) where IsMatch(attributes["query_text"], "(?i)\\bGROUP BY\\b")
+
+exporters:
+  # Primary OTLP exporter to New Relic
+  otlp/newrelic:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: database_intelligence
+    const_labels:
+      environment: ${env:ENVIRONMENT}
+      collector_role: ${env:INSTANCE_ROLE}
+      collector_id: ${env:COLLECTOR_ID}
+
+  # File exporter for backup/debugging
+  file/backup:
+    path: /var/lib/otel/backup
+    rotation:
+      max_megabytes: 100
+      max_days: 7
+      max_backups: 10
+
+  # Debug exporter (conditional)
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 1000
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /health
+
+  # Performance profiler
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  # File storage for persistent state
+  file_storage:
+    directory: /var/lib/otel/storage
+    timeout: 1s
+
+  # zpages for debugging
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, file_storage, zpages]
+  
+  pipelines:
+    # Infrastructure metrics - standard OTEL components only
+    metrics/infrastructure:
+      receivers: [postgresql, mysql, otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/newrelic, prometheus]
+
+    # Query performance - includes custom processors
+    metrics/query_performance:
+      receivers: [sqlquery/pg_statements, sqlquery/mysql_queries, sqlquery/pg_ash]
+      processors: 
+        - memory_limiter
+        - resource
+        - transform/sanitize_pii
+        - transform/query_analysis
+        - adaptive_sampler/intelligent
+        - circuit_breaker/database_protection
+        - verification/data_quality
+        - batch
+      exporters: [otlp/newrelic, prometheus, file/backup]
+
+    # Database logs
+    logs/database:
+      receivers: [filelog/postgres_logs, filelog/mysql_logs, otlp]
+      processors:
+        - memory_limiter
+        - transform/sanitize_pii
+        - resource
+        - adaptive_sampler/intelligent
+        - batch
+      exporters: [otlp/newrelic, file/backup]
+
+    # Query logs from SQL receivers
+    logs/queries:
+      receivers: [sqlquery/pg_statements]
+      processors:
+        - memory_limiter
+        - transform/sanitize_pii
+        - resource
+        - verification/data_quality
+        - batch
+      exporters: [otlp/newrelic]
+
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}
+      initial_fields:
+        service: "database-monitoring"
+        environment: ${env:ENVIRONMENT}
+        collector_role: ${env:INSTANCE_ROLE}
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      readers:
+        - periodic:
+            interval: 30s

@@ -1,0 +1,104 @@
+-- Initialize test database with extensions and sample data
+-- This is used for testing experimental components
+
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+CREATE EXTENSION IF NOT EXISTS pg_wait_sampling;
+
+-- Create sample schema
+CREATE SCHEMA IF NOT EXISTS app;
+
+-- Create sample tables
+CREATE TABLE IF NOT EXISTS app.users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS app.orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES app.users(id),
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    total_amount DECIMAL(10, 2),
+    status VARCHAR(20) DEFAULT 'pending'
+);
+
+CREATE TABLE IF NOT EXISTS app.order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER REFERENCES app.orders(id),
+    product_name VARCHAR(100),
+    quantity INTEGER,
+    price DECIMAL(10, 2)
+);
+
+-- Create indexes for testing plan variations
+CREATE INDEX idx_users_email ON app.users(email);
+CREATE INDEX idx_orders_user_date ON app.orders(user_id, order_date);
+CREATE INDEX idx_orders_status ON app.orders(status);
+
+-- Insert sample data
+INSERT INTO app.users (username, email) 
+SELECT 
+    'user_' || generate_series,
+    'user' || generate_series || '@example.com'
+FROM generate_series(1, 1000);
+
+INSERT INTO app.orders (user_id, total_amount, status)
+SELECT 
+    (random() * 999 + 1)::int,
+    (random() * 1000)::decimal(10,2),
+    CASE 
+        WHEN random() < 0.7 THEN 'completed'
+        WHEN random() < 0.9 THEN 'pending'
+        ELSE 'cancelled'
+    END
+FROM generate_series(1, 10000);
+
+-- Create some slow queries for testing
+CREATE OR REPLACE FUNCTION app.slow_function(sleep_time float DEFAULT 0.1)
+RETURNS void AS $$
+BEGIN
+    PERFORM pg_sleep(sleep_time);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create view for monitoring
+CREATE OR REPLACE VIEW app.active_queries AS
+SELECT 
+    pid,
+    now() - pg_stat_activity.query_start AS duration,
+    query,
+    state,
+    wait_event_type,
+    wait_event
+FROM pg_stat_activity
+WHERE state != 'idle'
+    AND query NOT ILIKE '%pg_stat_activity%'
+ORDER BY duration DESC;
+
+-- Grant permissions to monitoring user
+GRANT USAGE ON SCHEMA app TO dbuser;
+GRANT SELECT ON ALL TABLES IN SCHEMA app TO dbuser;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO dbuser;
+
+-- Reset pg_stat_statements
+SELECT pg_stat_statements_reset();
+
+-- Generate some initial query patterns
+SELECT COUNT(*) FROM app.users WHERE email LIKE '%@example.com';
+SELECT * FROM app.orders WHERE status = 'pending' ORDER BY order_date DESC LIMIT 10;
+SELECT u.username, COUNT(o.id) as order_count 
+FROM app.users u 
+LEFT JOIN app.orders o ON u.id = o.user_id 
+GROUP BY u.username 
+HAVING COUNT(o.id) > 5;
+
+-- Notify that initialization is complete
+DO $$
+BEGIN
+    RAISE NOTICE 'Test database initialized successfully';
+    RAISE NOTICE 'Extensions enabled: pg_stat_statements, pg_wait_sampling';
+    RAISE NOTICE 'Sample data loaded: 1000 users, 10000 orders';
+END $$;

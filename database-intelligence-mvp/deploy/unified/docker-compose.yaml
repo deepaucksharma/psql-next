@@ -1,0 +1,224 @@
+version: '3.8'
+
+services:
+  # Primary OpenTelemetry Collector instance
+  otel-collector-primary:
+    image: otel/opentelemetry-collector-contrib:0.89.0
+    container_name: db-intel-primary
+    hostname: otel-collector-primary
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector/config.yaml", "--feature-gates=+pkg.translator.prometheus.NormalizeName"]
+    environment:
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
+      
+      # Database Connections
+      PG_REPLICA_DSN: ${PG_REPLICA_DSN}
+      MYSQL_READONLY_DSN: ${MYSQL_READONLY_DSN:-}
+      MONGODB_SECONDARY_DSN: ${MONGODB_SECONDARY_DSN:-}
+      
+      # Collection Settings
+      COLLECTION_INTERVAL_SECONDS: ${COLLECTION_INTERVAL_SECONDS:-60}
+      QUERY_TIMEOUT_MS: ${QUERY_TIMEOUT_MS:-3000}
+      MIN_QUERY_TIME_MS: ${MIN_QUERY_TIME_MS:-10}
+      MAX_QUERIES_PER_COLLECTION: ${MAX_QUERIES_PER_COLLECTION:-100}
+      
+      # Sampling Configuration
+      ENABLE_ADAPTIVE_SAMPLER: ${ENABLE_ADAPTIVE_SAMPLER:-true}
+      SAMPLING_PERCENTAGE: ${SAMPLING_PERCENTAGE:-10}
+      SAMPLING_HASH_SEED: ${SAMPLING_HASH_SEED:-22}
+      SLOW_QUERY_THRESHOLD_MS: ${SLOW_QUERY_THRESHOLD_MS:-1000}
+      BASE_SAMPLING_RATE: ${BASE_SAMPLING_RATE:-0.1}
+      MAX_SAMPLING_RATE: ${MAX_SAMPLING_RATE:-1.0}
+      
+      # Resource Limits
+      MEMORY_LIMIT_PERCENTAGE: ${MEMORY_LIMIT_PERCENTAGE:-75}
+      MEMORY_SPIKE_LIMIT_PERCENTAGE: ${MEMORY_SPIKE_LIMIT_PERCENTAGE:-20}
+      BALLAST_SIZE_MIB: ${BALLAST_SIZE_MIB:-256}
+      
+      # Database Pool Settings
+      PG_MAX_CONNECTIONS: ${PG_MAX_CONNECTIONS:-2}
+      PG_MAX_IDLE_CONNECTIONS: ${PG_MAX_IDLE_CONNECTIONS:-1}
+      
+      # Batch Processing
+      BATCH_SEND_SIZE: ${BATCH_SEND_SIZE:-1000}
+      BATCH_TIMEOUT: ${BATCH_TIMEOUT:-10s}
+      BATCH_MAX_SIZE: ${BATCH_MAX_SIZE:-2000}
+      
+      # OTLP Exporter Settings
+      OTLP_COMPRESSION: ${OTLP_COMPRESSION:-gzip}
+      OTLP_NUM_CONSUMERS: ${OTLP_NUM_CONSUMERS:-10}
+      OTLP_QUEUE_SIZE: ${OTLP_QUEUE_SIZE:-5000}
+      OTLP_TIMEOUT: ${OTLP_TIMEOUT:-30s}
+      
+      # Feature Flags
+      ENABLE_PLAN_EXTRACTOR: ${ENABLE_PLAN_EXTRACTOR:-true}
+      ENABLE_FILE_LOG_RECEIVER: ${ENABLE_FILE_LOG_RECEIVER:-false}
+      ENABLE_PII_SANITIZATION: ${ENABLE_PII_SANITIZATION:-true}
+      
+      # Environment Settings
+      DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-2.0.0}
+      CLOUD_PROVIDER: ${CLOUD_PROVIDER:-aws}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      
+      # Security Settings
+      TLS_INSECURE_SKIP_VERIFY: ${TLS_INSECURE_SKIP_VERIFY:-false}
+      
+      # Telemetry Settings
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEBUG_VERBOSITY: ${DEBUG_VERBOSITY:-basic}
+      DEBUG_SAMPLING_INITIAL: ${DEBUG_SAMPLING_INITIAL:-5}
+      DEBUG_SAMPLING_THEREAFTER: ${DEBUG_SAMPLING_THEREAFTER:-100}
+      
+      # Collector Version for tracking
+      COLLECTOR_VERSION: "2.0.0-unified"
+      
+    volumes:
+      - ../../config/collector-unified.yaml:/etc/otel-collector/config.yaml:ro
+      - ../../config/attribute-mapping.yaml:/etc/otel-collector/attribute-mapping.yaml:ro
+      - otel-storage:/var/lib/otel/file_storage
+      - /var/log/postgresql:/var/log/postgresql:ro
+      - /var/log/mysql:/var/log/mysql:ro
+      - ./logs:/var/log
+    ports:
+      - "13133:13133"  # Health check
+      - "8888:8888"    # Metrics
+      - "8889:8889"    # Prometheus exporter
+      - "55679:55679"  # zpages
+      - "1777:1777"    # pprof
+      - "6060:6060"    # HTTP forwarder
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    networks:
+      - db-intelligence
+
+  # Secondary OpenTelemetry Collector instance (for HA in same host)
+  otel-collector-secondary:
+    image: otel/opentelemetry-collector-contrib:0.89.0
+    container_name: db-intel-secondary
+    hostname: otel-collector-secondary
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector/config.yaml", "--feature-gates=+pkg.translator.prometheus.NormalizeName"]
+    environment:
+      # Copy all environment variables from primary
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
+      PG_REPLICA_DSN: ${PG_REPLICA_DSN}
+      MYSQL_READONLY_DSN: ${MYSQL_READONLY_DSN:-}
+      MONGODB_SECONDARY_DSN: ${MONGODB_SECONDARY_DSN:-}
+      COLLECTION_INTERVAL_SECONDS: ${COLLECTION_INTERVAL_SECONDS:-60}
+      QUERY_TIMEOUT_MS: ${QUERY_TIMEOUT_MS:-3000}
+      MIN_QUERY_TIME_MS: ${MIN_QUERY_TIME_MS:-10}
+      MAX_QUERIES_PER_COLLECTION: ${MAX_QUERIES_PER_COLLECTION:-100}
+      ENABLE_ADAPTIVE_SAMPLER: ${ENABLE_ADAPTIVE_SAMPLER:-true}
+      SAMPLING_PERCENTAGE: ${SAMPLING_PERCENTAGE:-10}
+      SAMPLING_HASH_SEED: ${SAMPLING_HASH_SEED:-22}
+      SLOW_QUERY_THRESHOLD_MS: ${SLOW_QUERY_THRESHOLD_MS:-1000}
+      BASE_SAMPLING_RATE: ${BASE_SAMPLING_RATE:-0.1}
+      MAX_SAMPLING_RATE: ${MAX_SAMPLING_RATE:-1.0}
+      MEMORY_LIMIT_PERCENTAGE: ${MEMORY_LIMIT_PERCENTAGE:-75}
+      MEMORY_SPIKE_LIMIT_PERCENTAGE: ${MEMORY_SPIKE_LIMIT_PERCENTAGE:-20}
+      BALLAST_SIZE_MIB: ${BALLAST_SIZE_MIB:-256}
+      PG_MAX_CONNECTIONS: ${PG_MAX_CONNECTIONS:-2}
+      PG_MAX_IDLE_CONNECTIONS: ${PG_MAX_IDLE_CONNECTIONS:-1}
+      BATCH_SEND_SIZE: ${BATCH_SEND_SIZE:-1000}
+      BATCH_TIMEOUT: ${BATCH_TIMEOUT:-10s}
+      BATCH_MAX_SIZE: ${BATCH_MAX_SIZE:-2000}
+      OTLP_COMPRESSION: ${OTLP_COMPRESSION:-gzip}
+      OTLP_NUM_CONSUMERS: ${OTLP_NUM_CONSUMERS:-10}
+      OTLP_QUEUE_SIZE: ${OTLP_QUEUE_SIZE:-5000}
+      OTLP_TIMEOUT: ${OTLP_TIMEOUT:-30s}
+      ENABLE_PLAN_EXTRACTOR: ${ENABLE_PLAN_EXTRACTOR:-true}
+      ENABLE_FILE_LOG_RECEIVER: ${ENABLE_FILE_LOG_RECEIVER:-false}
+      ENABLE_PII_SANITIZATION: ${ENABLE_PII_SANITIZATION:-true}
+      DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-development}
+      SERVICE_VERSION: ${SERVICE_VERSION:-2.0.0}
+      CLOUD_PROVIDER: ${CLOUD_PROVIDER:-aws}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      TLS_INSECURE_SKIP_VERIFY: ${TLS_INSECURE_SKIP_VERIFY:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEBUG_VERBOSITY: ${DEBUG_VERBOSITY:-basic}
+      DEBUG_SAMPLING_INITIAL: ${DEBUG_SAMPLING_INITIAL:-5}
+      DEBUG_SAMPLING_THEREAFTER: ${DEBUG_SAMPLING_THEREAFTER:-100}
+      COLLECTOR_VERSION: "2.0.0-unified"
+    volumes:
+      - ../../config/collector-unified.yaml:/etc/otel-collector/config.yaml:ro
+      - ../../config/attribute-mapping.yaml:/etc/otel-collector/attribute-mapping.yaml:ro
+      - otel-storage-secondary:/var/lib/otel/file_storage
+      - /var/log/postgresql:/var/log/postgresql:ro
+      - /var/log/mysql:/var/log/mysql:ro
+      - ./logs:/var/log
+    ports:
+      - "13134:13133"  # Health check (different external port)
+      - "8890:8888"    # Metrics (different external port)
+      - "8891:8889"    # Prometheus exporter (different external port)
+      - "55680:55679"  # zpages (different external port)
+      - "1778:1777"    # pprof (different external port)
+      - "6061:6060"    # HTTP forwarder (different external port)
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    networks:
+      - db-intelligence
+    depends_on:
+      - otel-collector-primary
+
+  # Load balancer for high availability
+  nginx-lb:
+    image: nginx:alpine
+    container_name: db-intel-lb
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "4317:4317"  # gRPC OTLP
+      - "4318:4318"  # HTTP OTLP
+      - "8080:8080"  # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - otel-collector-primary
+      - otel-collector-secondary
+    networks:
+      - db-intelligence
+
+networks:
+  db-intelligence:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+
+volumes:
+  otel-storage:
+    driver: local
+  otel-storage-secondary:
+    driver: local

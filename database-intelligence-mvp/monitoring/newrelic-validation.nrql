@@ -1,0 +1,283 @@
+# New Relic Validation Queries for Database Intelligence MVP
+# Based on OpenTelemetry-New Relic Integration Best Practices
+
+# ===========================================
+# 1. INGESTION VALIDATION
+# ===========================================
+
+# Check for NrIntegrationError events (Critical!)
+# This is your only window into silent failures
+SELECT count(*) 
+FROM NrIntegrationError 
+WHERE newRelicFeature = 'Metrics' 
+  AND (message LIKE '%database%' OR message LIKE '%otel%')
+FACET message 
+SINCE 1 hour ago
+
+# Verify data is arriving from OTEL collector
+SELECT count(*)
+FROM Log
+WHERE instrumentation.provider = 'opentelemetry'
+  AND collector.name = 'database-intelligence'
+FACET database_name
+SINCE 10 minutes ago
+
+# Check for cardinality warnings
+SELECT count(*)
+FROM NrIntegrationError
+WHERE message LIKE '%cardinality%' 
+   OR message LIKE '%unique time series%'
+   OR message LIKE '%exceeds limit%'
+FACET message
+SINCE 1 day ago
+
+# ===========================================
+# 2. ENTITY SYNTHESIS VALIDATION
+# ===========================================
+
+# Verify database entities are being created
+SELECT uniques(entity.guid) as 'Database Entities',
+       uniques(database_name) as 'Unique Databases',
+       latest(entity.type),
+       latest(entity.name)
+FROM Log
+WHERE entity.type = 'DATABASE'
+  AND instrumentation.provider = 'opentelemetry'
+FACET database_name
+SINCE 1 hour ago
+
+# Check entity relationships
+FROM Relationship
+SELECT sourceEntityGuid, 
+       targetEntityGuid,
+       relationshipType
+WHERE sourceEntityGuid IN (
+  SELECT entity.guid 
+  FROM Log 
+  WHERE entity.type = 'DATABASE'
+  LIMIT 100
+)
+SINCE 1 hour ago
+
+# Validate service correlation
+SELECT count(*) as 'Correlated Records',
+       percentage(count(*), WHERE service.name IS NOT NULL) as 'Service Correlation %',
+       percentage(count(*), WHERE host.id IS NOT NULL) as 'Host Correlation %'
+FROM Log
+WHERE collector.name = 'database-intelligence'
+FACET database_name
+SINCE 1 hour ago
+
+# ===========================================
+# 3. CARDINALITY MONITORING
+# ===========================================
+
+# Monitor query pattern cardinality
+SELECT 
+  uniqueCount(db.query.fingerprint) as 'Unique Query Patterns',
+  uniqueCount(query_text) as 'Unique Raw Queries',
+  percentage(uniqueCount(db.query.fingerprint), uniqueCount(query_text)) as 'Compression Rate'
+FROM Log
+WHERE db.query.fingerprint IS NOT NULL
+FACET database_name
+SINCE 1 day ago
+
+# Identify high-cardinality attributes
+SELECT 
+  uniqueCount(username) as 'Unique Users',
+  uniqueCount(application_name) as 'Unique Apps',
+  uniqueCount(client_addr) as 'Unique IPs',
+  uniqueCount(wait_event) as 'Unique Wait Events'
+FROM Log
+WHERE database_name IS NOT NULL
+FACET database_name
+SINCE 1 hour ago
+
+# Monitor cardinality growth rate
+SELECT 
+  derivative(uniqueCount(db.query.fingerprint), 1 minute) as 'New Patterns/min'
+FROM Log
+WHERE db.query.fingerprint IS NOT NULL
+FACET database_name
+SINCE 1 hour ago
+TIMESERIES 1 minute
+
+# ===========================================
+# 4. CIRCUIT BREAKER MONITORING
+# ===========================================
+
+# Monitor circuit breaker state
+SELECT 
+  latest(cb.state) as 'Circuit State',
+  sum(cb.opened_count) as 'Times Opened',
+  sum(cb.queries_dropped) as 'Queries Dropped',
+  average(cb.error_rate) as 'Avg Error Rate'
+FROM Log
+WHERE cb.state IS NOT NULL
+FACET database_name
+SINCE 1 hour ago
+
+# Database-specific circuit breaker status
+SELECT 
+  filter(count(*), WHERE cb.state = 'open') as 'Open Circuits',
+  filter(count(*), WHERE cb.state = 'half-open') as 'Half-Open Circuits',
+  filter(count(*), WHERE cb.state = 'closed') as 'Closed Circuits'
+FROM Log
+WHERE database_name IS NOT NULL
+FACET database_name
+SINCE 30 minutes ago
+TIMESERIES 1 minute
+
+# ===========================================
+# 5. SAMPLING EFFECTIVENESS
+# ===========================================
+
+# Monitor sampling rates and decisions
+SELECT 
+  filter(count(*), WHERE sampling.decision = 'sampled') as 'Sampled',
+  filter(count(*), WHERE sampling.decision = 'dropped') as 'Dropped',
+  average(sampling.rate) as 'Avg Sampling Rate',
+  percentage(count(*), WHERE sampling.priority >= 100) as 'High Priority %'
+FROM Log
+WHERE sampling.decision IS NOT NULL
+FACET db.query.complexity
+SINCE 1 hour ago
+
+# Validate priority sampling is working
+SELECT 
+  average(duration_ms) as 'Avg Duration',
+  percentage(count(*), WHERE sampling.decision = 'sampled') as 'Sample Rate'
+FROM Log
+WHERE duration_ms IS NOT NULL
+FACET CASES(
+  WHERE duration_ms > 1000 as 'Slow Queries',
+  WHERE duration_ms > 500 as 'Medium Queries',
+  WHERE duration_ms <= 500 as 'Fast Queries'
+)
+SINCE 1 hour ago
+
+# ===========================================
+# 6. PERFORMANCE MONITORING
+# ===========================================
+
+# Collector performance metrics
+SELECT 
+  rate(sum(otelcol_exporter_sent_metric_points), 1 minute) as 'Metrics/min',
+  rate(sum(otelcol_exporter_sent_log_records), 1 minute) as 'Logs/min',
+  average(otelcol_processor_batch_batch_send_size) as 'Avg Batch Size',
+  sum(otelcol_exporter_send_failed_metric_points) as 'Failed Exports'
+FROM Metric
+WHERE instrumentation.provider = 'opentelemetry'
+SINCE 1 hour ago
+TIMESERIES 1 minute
+
+# Monitor batch effectiveness
+SELECT 
+  histogram(otelcol_processor_batch_batch_send_size, 10, 20) as 'Batch Size Distribution'
+FROM Metric
+WHERE otelcol_processor_batch_batch_send_size IS NOT NULL
+SINCE 1 hour ago
+
+# Export latency monitoring
+SELECT 
+  average(otelcol_exporter_send_duration_milliseconds) as 'Avg Export Duration',
+  percentile(otelcol_exporter_send_duration_milliseconds, 95) as 'P95 Export Duration',
+  max(otelcol_exporter_send_duration_milliseconds) as 'Max Export Duration'
+FROM Metric
+WHERE otelcol_exporter_send_duration_milliseconds IS NOT NULL
+FACET exporter_name
+SINCE 1 hour ago
+
+# ===========================================
+# 7. DATA QUALITY VALIDATION
+# ===========================================
+
+# Check for PII leakage
+SELECT count(*) as 'Potential PII Leaks'
+FROM Log
+WHERE query_text RLIKE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}'
+   OR query_text RLIKE '\b\d{3}-\d{2}-\d{4}\b'
+   OR query_text RLIKE '\b(?:\d{4}[- ]?){3}\d{4}\b'
+SINCE 1 hour ago
+
+# Validate query normalization
+SELECT 
+  filter(count(*), WHERE db.query.normalized IS NOT NULL) as 'Normalized',
+  filter(count(*), WHERE db.query.normalized IS NULL) as 'Not Normalized',
+  percentage(count(*), WHERE db.query.normalized IS NOT NULL) as 'Normalization Rate'
+FROM Log
+WHERE query_text IS NOT NULL
+SINCE 1 hour ago
+
+# ===========================================
+# 8. ALERTING RECOMMENDATIONS
+# ===========================================
+
+# Alert: High NrIntegrationError rate
+SELECT count(*)
+FROM NrIntegrationError
+WHERE newRelicFeature = 'Metrics'
+FACET message
+SINCE 5 minutes ago
+# Alert when > 10 errors in 5 minutes
+
+# Alert: Circuit breaker open
+SELECT latest(cb.state)
+FROM Log
+WHERE cb.state = 'open'
+FACET database_name
+SINCE 5 minutes ago
+# Alert immediately when circuit opens
+
+# Alert: High cardinality warning
+SELECT uniqueCount(db.query.fingerprint)
+FROM Log
+WHERE database_name IS NOT NULL
+FACET database_name
+SINCE 1 hour ago
+# Alert when > 5000 unique patterns per database
+
+# Alert: Low sampling rate (possible overload)
+SELECT average(sampling.rate)
+FROM Log
+WHERE sampling.rate IS NOT NULL
+FACET database_name
+SINCE 10 minutes ago
+# Alert when sampling rate < 0.1 (10%)
+
+# ===========================================
+# 9. TROUBLESHOOTING QUERIES
+# ===========================================
+
+# Find missing entity correlations
+SELECT count(*) as 'Missing Correlations',
+       sample(query_text) as 'Sample Query'
+FROM Log
+WHERE service.name IS NULL 
+  AND entity.guid IS NULL
+  AND database_name IS NOT NULL
+FACET database_name
+SINCE 1 hour ago
+
+# Identify rejected batches
+SELECT count(*) as 'Rejections',
+       latest(error.message)
+FROM Log
+WHERE attributes.drop = true
+   OR cb.state = 'open'
+FACET database_name, cb.state
+SINCE 30 minutes ago
+
+# Debug entity synthesis issues
+SELECT 
+  entity.guid,
+  entity.type,
+  entity.name,
+  service.name,
+  host.id,
+  instrumentation.provider,
+  telemetry.sdk.name
+FROM Log
+WHERE database_name = 'YOUR_DATABASE_NAME'
+SINCE 10 minutes ago
+LIMIT 10

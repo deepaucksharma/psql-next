@@ -1,0 +1,171 @@
+# Simple OTEL-First Collector Configuration
+# Uses only standard OTEL components for basic database monitoring
+
+receivers:
+  # Standard PostgreSQL receiver for infrastructure metrics
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: monitoring
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB}
+    collection_interval: ${env:COLLECTION_INTERVAL}
+    tls:
+      insecure: true
+
+  # SQL Query receiver for pg_stat_statements data
+  sqlquery/statements:
+    driver: postgres
+    datasource: ${env:POSTGRES_DSN}
+    queries:
+      # Top queries by total execution time
+      - sql: |
+          SELECT 
+            queryid::text as query_id,
+            LEFT(query, 200) as query_text,
+            calls,
+            total_exec_time,
+            mean_exec_time,
+            rows
+          FROM pg_stat_statements
+          WHERE mean_exec_time > 0
+          ORDER BY total_exec_time DESC
+          LIMIT 50
+        metrics:
+          - metric_name: postgresql.query.calls
+            value_column: calls
+            attribute_columns: [query_id, query_text]
+            value_type: int
+          - metric_name: postgresql.query.total_time_ms
+            value_column: total_exec_time
+            attribute_columns: [query_id, query_text]
+            value_type: double
+          - metric_name: postgresql.query.mean_time_ms
+            value_column: mean_exec_time
+            attribute_columns: [query_id, query_text]
+            value_type: double
+          - metric_name: postgresql.query.rows
+            value_column: rows
+            attribute_columns: [query_id, query_text]
+            value_type: int
+    collection_interval: 60s
+
+  # Active session monitoring
+  sqlquery/sessions:
+    driver: postgres
+    datasource: ${env:POSTGRES_DSN}
+    queries:
+      - sql: |
+          SELECT 
+            state,
+            wait_event_type,
+            wait_event,
+            COUNT(*) as session_count
+          FROM pg_stat_activity
+          WHERE state != 'idle'
+            AND pid != pg_backend_pid()
+          GROUP BY state, wait_event_type, wait_event
+        metrics:
+          - metric_name: postgresql.active_sessions
+            value_column: session_count
+            attribute_columns: [state, wait_event_type, wait_event]
+            value_type: int
+    collection_interval: 30s
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # Batch processor for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 500
+
+  # Resource processor to add service metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: "database-monitoring"
+        action: insert
+      - key: service.namespace
+        value: "db-intelligence"
+        action: insert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: db.system
+        value: "postgresql"
+        action: insert
+
+  # Transform processor to sanitize sensitive data
+  transform/sanitize:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Remove sensitive values from query text
+          - replace_pattern(attributes["query_text"], "('[^']*')", "'***'")
+          - replace_pattern(attributes["query_text"], "= *([0-9]{3,})", "= ***")
+
+exporters:
+  # Primary OTLP exporter to New Relic
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Prometheus exporter for local metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: database_intelligence
+    const_labels:
+      environment: ${env:ENVIRONMENT}
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: normal
+    sampling_initial: 2
+    sampling_thereafter: 100
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  # Performance profiler for troubleshooting
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+service:
+  extensions: [health_check, pprof]
+  
+  pipelines:
+    # Infrastructure metrics pipeline
+    metrics/infra:
+      receivers: [postgresql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp, prometheus]
+
+    # Query performance metrics pipeline
+    metrics/queries:
+      receivers: [sqlquery/statements, sqlquery/sessions]
+      processors: [memory_limiter, transform/sanitize, resource, batch]
+      exporters: [otlp, prometheus]
+
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}
+      initial_fields:
+        service: "database-monitoring"
+    metrics:
+      level: normal
+      address: 0.0.0.0:8888

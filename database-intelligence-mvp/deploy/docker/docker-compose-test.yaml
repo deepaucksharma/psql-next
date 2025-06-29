@@ -1,0 +1,74 @@
+# Test setup for Database Intelligence MVP
+version: '3.8'
+
+services:
+  # PostgreSQL test database
+  postgres:
+    image: postgres:15
+    container_name: db-intel-postgres
+    
+    environment:
+      - POSTGRES_DB=testdb
+      - POSTGRES_USER=testuser
+      - POSTGRES_PASSWORD=testpass
+    
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-scripts/postgres-init-simple.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    
+    ports:
+      - "5432:5432"
+    
+    # Enable pg_stat_statements
+    command: |
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.max=10000
+      -c pg_stat_statements.track=all
+      -c log_statement=all
+      -c log_destination=stderr
+      -c logging_collector=off
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # OpenTelemetry Collector
+  collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: db-intel-collector
+    
+    volumes:
+      - ../../config/collector-working.yaml:/etc/otelcol/config.yaml:ro
+    
+    environment:
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=newrelic_monitor
+      - PG_PASSWORD=monitor123
+      - PG_DATABASE=testdb
+    
+    ports:
+      - "13133:13133"  # Health check
+      - "8888:8888"    # Metrics
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+    
+    command: ["--config=/etc/otelcol/config.yaml"]
+
+volumes:
+  postgres-data:
+    driver: local
+
+networks:
+  default:
+    name: db-intelligence-test
+    driver: bridge

@@ -1,0 +1,239 @@
+# OpenTelemetry Collector configuration with PostgreSQL Query Receiver
+# This configuration demonstrates advanced PostgreSQL monitoring capabilities
+
+receivers:
+  # PostgreSQL Query Receiver for advanced telemetry
+  postgresqlquery:
+    # Database connections
+    databases:
+      - name: "production_db"
+        dsn: "postgresql://user:password@localhost:5432/production?sslmode=require"
+        enabled: true
+        max_open_connections: 3
+        max_idle_connections: 2
+        connection_max_lifetime: 5m
+        
+      - name: "analytics_db" 
+        dsn: "postgresql://user:password@localhost:5432/analytics?sslmode=require"
+        enabled: true
+        max_open_connections: 2
+        max_idle_connections: 1
+        # Override collection interval for this database
+        collection_interval: 30s
+        # Override slow query threshold
+        slow_query_threshold_ms: 500.0
+    
+    # Collection settings
+    collection_interval: 60s
+    query_timeout: 10s
+    slow_query_threshold_ms: 100.0
+    max_queries_per_cycle: 100
+    max_plans_per_cycle: 20
+    plan_collection_threshold_ms: 1000.0
+    
+    # Features
+    enable_plan_regression: true
+    enable_ash: true
+    ash_sampling_interval: 1s
+    enable_extended_metrics: true
+    minimal_mode: false
+    
+    # Safety settings
+    max_errors_per_database: 10
+    sanitize_pii: true
+    
+    # Adaptive sampling configuration
+    adaptive_sampling:
+      enabled: true
+      default_rate: 1.0
+      max_queries_per_minute: 1000
+      max_memory_mb: 100
+      rules:
+        # Always sample very slow queries
+        - name: "always_sample_very_slow"
+          priority: 100
+          conditions:
+            - attribute: "mean_time_ms"
+              operator: "gt"
+              value: 5000.0
+          sample_rate: 1.0
+        
+        # Sample queries with errors
+        - name: "sample_errors"
+          priority: 90
+          conditions:
+            - attribute: "error_count"
+              operator: "gt"
+              value: 0
+          sample_rate: 1.0
+        
+        # Sample high-frequency queries
+        - name: "sample_frequent"
+          priority: 80
+          conditions:
+            - attribute: "calls"
+              operator: "gt"
+              value: 1000
+          sample_rate: 0.5
+        
+        # Sample queries using temp files
+        - name: "sample_temp_usage"
+          priority: 70
+          conditions:
+            - attribute: "temp_blocks"
+              operator: "gt"
+              value: 0
+          sample_rate: 0.8
+        
+        # Reduce sampling for normal queries
+        - name: "sample_normal"
+          priority: 50
+          conditions:
+            - attribute: "mean_time_ms"
+              operator: "lt"
+              value: 100.0
+          sample_rate: 0.1
+
+  # Standard PostgreSQL receiver for basic metrics
+  postgresql:
+    endpoint: localhost:5432
+    transport: tcp
+    username: monitoring_user
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - production
+      - analytics
+    collection_interval: 60s
+
+  # Host metrics for correlation
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      memory:
+      disk:
+      network:
+
+processors:
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: environment
+        value: production
+      - key: service.namespace
+        value: database
+      - key: cloud.provider
+        value: aws
+      - key: cloud.region
+        value: us-east-1
+        action: insert
+
+  # Batch processing for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    send_batch_max_size: 2000
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Circuit breaker from our custom processor
+  circuitbreaker:
+    failure_threshold: 5
+    recovery_timeout: 30s
+    half_open_requests: 3
+    monitored_endpoints:
+      - "postgresql/*"
+      - "otlp/*"
+
+  # Adaptive sampling processor
+  adaptivesampler:
+    initial_sampling_rate: 1.0
+    target_throughput: 1000
+    min_sampling_rate: 0.001
+    max_sampling_rate: 1.0
+    check_interval: 30s
+
+exporters:
+  # OTLP exporter for New Relic
+  otlp:
+    endpoint: "otlp.nr-data.net:4317"
+    headers:
+      api-key: ${env:NEW_RELIC_API_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 5m
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+  # File exporter for backup
+  file:
+    path: /var/log/otel/postgresql-telemetry.json
+    rotation:
+      max_megabytes: 100
+      max_days: 7
+      max_backups: 3
+
+service:
+  # Extensions for additional functionality
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers: [postgresqlquery, postgresql, hostmetrics]
+      processors: [memory_limiter, resource, adaptivesampler, batch]
+      exporters: [otlp, file]
+    
+    # Logs pipeline for slow queries and plan regressions
+    logs:
+      receivers: [postgresqlquery]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp, debug]
+    
+    # Traces pipeline (ready for future pg_tracing integration)
+    traces:
+      receivers: []
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp]
+
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: otel-collector
+        component: postgresql-monitoring
+    
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+extensions:
+  # Health check endpoint
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: 10s
+      exporter_failure_threshold: 5
+  
+  # Performance profiling
+  pprof:
+    endpoint: 0.0.0.0:6060
+    block_profile_fraction: 3
+    mutex_profile_fraction: 5
+  
+  # zPages for debugging
+  zpages:
+    endpoint: 0.0.0.0:55679

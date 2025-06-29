@@ -1,0 +1,80 @@
+# OpenTelemetry Collector Builder Configuration
+# This file defines how to build a custom collector with experimental components
+
+dist:
+  name: db-intelligence-custom
+  description: Custom OpenTelemetry Collector with Database Intelligence components
+  output_path: ./dist
+  otelcol_version: 0.96.0
+
+# Extensions - Production ready
+extensions:
+  - gomod: go.opentelemetry.io/collector/extension/ballastextension v0.96.0
+  - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.96.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.96.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/pprofextension v0.96.0
+
+# Receivers
+receivers:
+  # Production receivers
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sqlqueryreceiver v0.96.0
+  
+  # Note: Custom postgresqlquery receiver removed - use standard receivers instead
+  # - postgresql receiver for database metrics  
+  # - sqlquery receiver for query performance data
+
+# Processors
+processors:
+  # Production processors
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.96.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.96.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.96.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/probabilisticsamplerprocessor v0.96.0
+  
+  # Experimental processors (require local modules)
+  - gomod: github.com/newrelic/database-intelligence-mvp/processors/adaptivesampler v0.0.0
+    path: ./processors/adaptivesampler
+    # Note: Stateful processor - requires single instance or state coordination
+    
+  - gomod: github.com/newrelic/database-intelligence-mvp/processors/circuitbreaker v0.0.0
+    path: ./processors/circuitbreaker
+    # Note: Provides database protection and isolation
+    
+  - gomod: github.com/newrelic/database-intelligence-mvp/processors/planattributeextractor v0.0.0
+    path: ./processors/planattributeextractor
+    # Note: Requires pg_querylens extension for safe EXPLAIN
+    
+  - gomod: github.com/newrelic/database-intelligence-mvp/processors/verification v0.0.0
+    path: ./processors/verification
+    # Note: Validates data quality and correctness
+
+# Exporters
+exporters:
+  # Production exporters
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.96.0
+  - gomod: go.opentelemetry.io/collector/exporter/loggingexporter v0.96.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter v0.96.0
+  
+  # Experimental exporters (if custom OTLP enhancements needed)
+  - gomod: github.com/newrelic/database-intelligence-mvp/exporters/otlpexporter v0.0.0
+    path: ./exporters/otlpexporter
+    # Note: Enhanced with PostgreSQL-specific entity synthesis
+
+# Connectors (for pipeline interconnection)
+connectors:
+  - gomod: go.opentelemetry.io/collector/connector/forwardconnector v0.96.0
+
+# Build configuration
+replaces:
+  # Replace with local modules during development
+  - github.com/newrelic/database-intelligence-mvp/processors/adaptivesampler: ./processors/adaptivesampler
+  - github.com/newrelic/database-intelligence-mvp/processors/circuitbreaker: ./processors/circuitbreaker
+  - github.com/newrelic/database-intelligence-mvp/processors/planattributeextractor: ./processors/planattributeextractor
+  - github.com/newrelic/database-intelligence-mvp/processors/verification: ./processors/verification
+  - github.com/newrelic/database-intelligence-mvp/exporters/otlpexporter: ./exporters/otlpexporter
+
+# Exclude default modules to reduce binary size
+excludes:
+  - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/jaegerreceiver
+  - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver
+  - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/zipkinreceiver

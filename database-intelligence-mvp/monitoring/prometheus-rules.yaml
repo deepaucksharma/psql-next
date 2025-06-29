@@ -1,0 +1,234 @@
+# Database Intelligence MVP - Prometheus Monitoring Rules
+# Comprehensive alerting for production safety
+
+groups:
+- name: database-intelligence.rules
+  rules:
+  
+  # Collector Health Rules
+  - alert: CollectorDown
+    expr: up{job="db-intelligence-collector"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      component: collector
+    annotations:
+      summary: "Database Intelligence Collector is down"
+      description: "Collector instance {{ $labels.instance }} has been down for more than 1 minute"
+      runbook_url: "https://docs.company.com/runbooks/db-intelligence/collector-down"
+      
+  - alert: CollectorMemoryHigh
+    expr: |
+      (
+        process_resident_memory_bytes{job="db-intelligence-collector"}
+        / 1024 / 1024
+      ) > 800
+    for: 5m
+    labels:
+      severity: warning
+      component: collector
+    annotations:
+      summary: "Collector memory usage high"
+      description: "Collector {{ $labels.instance }} using {{ $value }}MB memory (>800MB)"
+      
+  - alert: CollectorMemoryCritical
+    expr: |
+      (
+        process_resident_memory_bytes{job="db-intelligence-collector"}
+        / 1024 / 1024
+      ) > 950
+    for: 2m
+    labels:
+      severity: critical
+      component: collector
+    annotations:
+      summary: "Collector memory usage critical"
+      description: "Collector {{ $labels.instance }} using {{ $value }}MB memory (>950MB)"
+      action: "Scale down immediately or restart collector"
+
+  # Data Collection Rules
+  - alert: NoDataCollected
+    expr: |
+      rate(otelcol_receiver_accepted_log_records_total{job="db-intelligence-collector"}[5m]) == 0
+    for: 10m
+    labels:
+      severity: warning
+      component: data-collection
+    annotations:
+      summary: "No data being collected"
+      description: "No log records received in the last 10 minutes from {{ $labels.instance }}"
+      
+  - alert: HighDataDropRate
+    expr: |
+      (
+        rate(otelcol_processor_dropped_log_records_total{job="db-intelligence-collector"}[5m])
+        /
+        rate(otelcol_receiver_accepted_log_records_total{job="db-intelligence-collector"}[5m])
+      ) > 0.1
+    for: 5m
+    labels:
+      severity: warning
+      component: data-processing
+    annotations:
+      summary: "High data drop rate"
+      description: "{{ $value | humanizePercentage }} of data being dropped on {{ $labels.instance }}"
+
+  # Database Impact Rules  
+  - alert: DatabaseConnectionsHigh
+    expr: |
+      pg_stat_activity_count{job="postgres-exporter", state="active", usename="newrelic_monitor"} > 5
+    for: 2m
+    labels:
+      severity: warning
+      component: database-impact
+    annotations:
+      summary: "Too many database connections from collector"
+      description: "{{ $value }} active connections from newrelic_monitor user"
+      action: "Check collector connection pooling configuration"
+      
+  - alert: SlowDatabaseQueries
+    expr: |
+      pg_stat_statements_mean_time_ms{job="postgres-exporter"} > 5000
+    for: 1m
+    labels:
+      severity: critical
+      component: database-impact
+    annotations:
+      summary: "Database queries from collector are slow"
+      description: "Mean query time is {{ $value }}ms (>5000ms threshold)"
+      action: "Immediately stop collector and investigate"
+
+  # Exporter Rules
+  - alert: ExportFailureRate
+    expr: |
+      (
+        rate(otelcol_exporter_send_failed_log_records_total{job="db-intelligence-collector"}[5m])
+        /
+        rate(otelcol_exporter_sent_log_records_total{job="db-intelligence-collector"}[5m])
+      ) > 0.05
+    for: 5m
+    labels:
+      severity: warning
+      component: export
+    annotations:
+      summary: "High export failure rate"
+      description: "{{ $value | humanizePercentage }} of exports failing to New Relic"
+      
+  - alert: ExportQueueFull
+    expr: otelcol_exporter_queue_size{job="db-intelligence-collector"} > 400
+    for: 2m
+    labels:
+      severity: warning
+      component: export
+    annotations:
+      summary: "Export queue nearly full"
+      description: "Export queue size {{ $value }}/512 on {{ $labels.instance }}"
+
+  # Performance Rules
+  - alert: HighCPUUsage
+    expr: |
+      rate(process_cpu_seconds_total{job="db-intelligence-collector"}[5m]) * 100 > 80
+    for: 5m
+    labels:
+      severity: warning
+      component: performance
+    annotations:
+      summary: "Collector CPU usage high"
+      description: "CPU usage {{ $value }}% on {{ $labels.instance }}"
+      
+  - alert: HighGCTime
+    expr: |
+      rate(go_gc_duration_seconds{job="db-intelligence-collector", quantile="0.75"}[5m]) > 0.1
+    for: 5m
+    labels:
+      severity: warning
+      component: performance
+    annotations:
+      summary: "High garbage collection time"
+      description: "GC taking {{ $value }}s (75th percentile) on {{ $labels.instance }}"
+
+  # Security Rules
+  - alert: PIIDetectionFailure
+    expr: |
+      increase(otelcol_processor_transform_errors_total{processor="transform/sanitize_pii"}[1h]) > 10
+    for: 0m
+    labels:
+      severity: warning
+      component: security
+    annotations:
+      summary: "PII sanitization errors detected"
+      description: "{{ $value }} PII sanitization errors in the last hour"
+      action: "Review logs for potential PII leakage"
+
+  # Storage Rules (for persistent state)
+  - alert: StorageDiskUsageHigh
+    expr: |
+      (
+        (node_filesystem_size_bytes{mountpoint="/var/lib/otel/storage"} - node_filesystem_free_bytes{mountpoint="/var/lib/otel/storage"})
+        / node_filesystem_size_bytes{mountpoint="/var/lib/otel/storage"}
+      ) > 0.8
+    for: 5m
+    labels:
+      severity: warning
+      component: storage
+    annotations:
+      summary: "Collector storage usage high"
+      description: "Storage {{ $value | humanizePercentage }} full"
+
+- name: database-intelligence.recording-rules
+  rules:
+  
+  # Collection rate metrics
+  - record: db_intelligence:collection_rate_5m
+    expr: |
+      rate(otelcol_receiver_accepted_log_records_total{job="db-intelligence-collector"}[5m])
+      
+  - record: db_intelligence:drop_rate_5m
+    expr: |
+      rate(otelcol_processor_dropped_log_records_total{job="db-intelligence-collector"}[5m])
+      /
+      rate(otelcol_receiver_accepted_log_records_total{job="db-intelligence-collector"}[5m])
+      
+  # Export success rate
+  - record: db_intelligence:export_success_rate_5m
+    expr: |
+      rate(otelcol_exporter_sent_log_records_total{job="db-intelligence-collector"}[5m])
+      /
+      (
+        rate(otelcol_exporter_sent_log_records_total{job="db-intelligence-collector"}[5m])
+        +
+        rate(otelcol_exporter_send_failed_log_records_total{job="db-intelligence-collector"}[5m])
+      )
+      
+  # Database impact metrics
+  - record: db_intelligence:db_connections
+    expr: |
+      pg_stat_activity_count{usename="newrelic_monitor", state="active"}
+      
+  - record: db_intelligence:avg_query_time_5m
+    expr: |
+      rate(pg_stat_statements_total_time_ms{job="postgres-exporter"}[5m])
+      /
+      rate(pg_stat_statements_calls_total{job="postgres-exporter"}[5m])
+
+- name: database-intelligence.slo
+  rules:
+  
+  # SLO: 99.9% collector uptime
+  - record: db_intelligence:uptime_slo
+    expr: |
+      avg_over_time(up{job="db-intelligence-collector"}[30d]) * 100
+      
+  # SLO: <1% data loss
+  - record: db_intelligence:data_loss_slo
+    expr: |
+      1 - (
+        sum(rate(otelcol_exporter_sent_log_records_total{job="db-intelligence-collector"}[30d]))
+        /
+        sum(rate(otelcol_receiver_accepted_log_records_total{job="db-intelligence-collector"}[30d]))
+      )
+      
+  # SLO: <5% database impact
+  - record: db_intelligence:db_impact_slo
+    expr: |
+      avg_over_time(db_intelligence:avg_query_time_5m[30d])

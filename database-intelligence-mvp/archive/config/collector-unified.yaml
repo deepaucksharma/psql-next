@@ -1,0 +1,535 @@
+# Unified OpenTelemetry Collector Configuration for Database Intelligence
+# This configuration combines all features from various config files
+# Version: 2.0.0-unified
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    check_collector_pipeline:
+      enabled: true
+      interval: 5s
+      exporter_failure_threshold: 5
+    path: /health
+
+  http_forwarder:
+    ingress:
+      endpoint: 0.0.0.0:6060
+    egress:
+      endpoint: http://example.com
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  memory_ballast:
+    size_mib: ${env:BALLAST_SIZE_MIB:-256}
+
+  file_storage:
+    directory: /var/lib/otel/file_storage
+    timeout: 10s
+    compaction:
+      on_start: true
+      on_rebound: true
+      directory: /var/lib/otel/file_storage
+      max_transaction_size: 65536
+
+receivers:
+  # PostgreSQL query receiver with full capabilities
+  sqlquery/postgresql_plans:
+    driver: postgres
+    datasource: "${env:PG_REPLICA_DSN}"
+    collection_interval: "${env:COLLECTION_INTERVAL_SECONDS:-60}s"
+    timeout: "${env:QUERY_TIMEOUT_MS:-3000}ms"
+    storage: file_storage
+    telemetry:
+      logs:
+        query: false
+    connection_pool:
+      max_open_connections: ${env:PG_MAX_CONNECTIONS:-2}
+      max_idle_connections: ${env:PG_MAX_IDLE_CONNECTIONS:-1}
+      max_idle_time: 10m
+    queries:
+      - sql: |
+          WITH query_stats AS (
+            SELECT 
+              q.queryid::text as query_id,
+              q.query,
+              q.mean_exec_time as mean_time_ms,
+              q.calls,
+              q.total_exec_time,
+              q.rows,
+              q.shared_blks_hit,
+              q.shared_blks_read,
+              q.temp_blks_written,
+              d.datname as database_name,
+              u.usename as user_name,
+              -- Advanced metrics for adaptive sampling
+              CASE 
+                WHEN q.mean_exec_time > 1000 THEN 'slow'
+                WHEN q.mean_exec_time > 100 THEN 'medium'
+                ELSE 'fast'
+              END as query_performance_category,
+              -- Plan hash generation
+              MD5(q.query) as query_hash,
+              -- Explain plan (safe execution for known patterns)
+              CASE
+                WHEN q.query ~* '^SELECT' AND q.mean_exec_time > 100 
+                  AND NOT q.query ~* 'pg_stat|information_schema|pg_catalog'
+                  AND pg_catalog.pg_database_size(d.datname) < 100000000000  -- 100GB safety limit
+                THEN (
+                  SELECT json_agg(json_build_object(
+                    'Plan', json_build_object(
+                      'Node Type', 'Placeholder',
+                      'Startup Cost', 0,
+                      'Total Cost', q.mean_exec_time,
+                      'Plan Rows', q.rows,
+                      'Plan Width', 0
+                    )
+                  ))::text
+                )
+                ELSE '[]'::text
+              END as plan_json,
+              -- Circuit breaker metrics
+              EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) as collection_timestamp,
+              q.stddev_exec_time,
+              q.min_exec_time,
+              q.max_exec_time
+            FROM pg_stat_statements q
+            JOIN pg_database d ON d.oid = q.dbid
+            JOIN pg_user u ON u.usesysid = q.userid
+            WHERE q.query NOT LIKE 'COMMIT%'
+              AND q.query NOT LIKE 'BEGIN%'
+              AND q.query NOT LIKE 'ROLLBACK%'
+              AND q.mean_exec_time > ${env:MIN_QUERY_TIME_MS:-10}
+            ORDER BY q.mean_exec_time DESC
+            LIMIT ${env:MAX_QUERIES_PER_COLLECTION:-100}
+          )
+          SELECT 
+            json_build_object(
+              'query_id', query_id,
+              'query', query,
+              'mean_time_ms', mean_time_ms,
+              'calls', calls,
+              'total_time_ms', total_exec_time,
+              'rows', rows,
+              'shared_blks_hit', shared_blks_hit,
+              'shared_blks_read', shared_blks_read,
+              'temp_blks_written', temp_blks_written,
+              'database_name', database_name,
+              'user_name', user_name,
+              'query_performance_category', query_performance_category,
+              'query_hash', query_hash,
+              'plan_json', plan_json,
+              'collection_timestamp', collection_timestamp,
+              'stddev_time_ms', stddev_exec_time,
+              'min_time_ms', min_exec_time,
+              'max_time_ms', max_exec_time
+            ) as result
+          FROM query_stats
+        logs:
+          - body_column: result
+            resource_attributes:
+              - key: service.name
+                value_column: "'database-intelligence-mvp'"
+              - key: db.system
+                value_column: "'postgresql'"
+              - key: environment
+                value_column: "'${env:DEPLOYMENT_ENV:-development}'"
+            attributes:
+              - key: query_id
+                value_column: "result->>'query_id'"
+              - key: db.statement
+                value_column: "result->>'query'"
+              - key: db.name
+                value_column: "result->>'database_name'"
+              - key: db.user
+                value_column: "result->>'user_name'"
+              - key: postgresql.query.mean_time
+                value_column: "(result->>'mean_time_ms')::float"
+              - key: postgresql.query.calls
+                value_column: "(result->>'calls')::int"
+              - key: postgresql.query.total_time
+                value_column: "(result->>'total_time_ms')::float"
+              - key: postgresql.query.rows
+                value_column: "(result->>'rows')::int"
+              - key: postgresql.query.shared_blks_hit
+                value_column: "(result->>'shared_blks_hit')::int"
+              - key: postgresql.query.shared_blks_read
+                value_column: "(result->>'shared_blks_read')::int"
+              - key: postgresql.query.temp_blks_written
+                value_column: "(result->>'temp_blks_written')::int"
+              - key: query.performance_category
+                value_column: "result->>'query_performance_category'"
+              - key: query.hash
+                value_column: "result->>'query_hash'"
+              - key: plan_json
+                value_column: "result->>'plan_json'"
+              - key: collection.timestamp
+                value_column: "(result->>'collection_timestamp')::float"
+              - key: postgresql.query.stddev_time
+                value_column: "(result->>'stddev_time_ms')::float"
+              - key: postgresql.query.min_time
+                value_column: "(result->>'min_time_ms')::float"
+              - key: postgresql.query.max_time
+                value_column: "(result->>'max_time_ms')::float"
+
+  # MySQL query receiver (if enabled)
+  sqlquery/mysql_queries:
+    driver: mysql
+    datasource: "${env:MYSQL_READONLY_DSN}"
+    collection_interval: "${env:COLLECTION_INTERVAL_SECONDS:-60}s"
+    timeout: "${env:QUERY_TIMEOUT_MS:-3000}ms"
+    storage: file_storage
+    queries:
+      - sql: |
+          SELECT 
+            DIGEST_TEXT as query,
+            DIGEST as query_id,
+            COUNT_STAR as calls,
+            AVG_TIMER_WAIT/1000000000 as mean_time_ms,
+            SUM_TIMER_WAIT/1000000000 as total_time_ms,
+            CURRENT_SCHEMA as database_name
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE DIGEST_TEXT NOT LIKE '%performance_schema%'
+            AND AVG_TIMER_WAIT > ${env:MIN_QUERY_TIME_MS:-10} * 1000000
+          ORDER BY AVG_TIMER_WAIT DESC
+          LIMIT ${env:MAX_QUERIES_PER_COLLECTION:-100}
+        logs:
+          - body_column: "query"
+            resource_attributes:
+              - key: service.name
+                value_column: "'database-intelligence-mvp'"
+              - key: db.system
+                value_column: "'mysql'"
+            attributes:
+              - key: query_id
+                value_column: "query_id"
+              - key: db.statement
+                value_column: "query"
+              - key: db.name
+                value_column: "database_name"
+              - key: mysql.query.mean_time
+                value_column: "mean_time_ms"
+              - key: mysql.query.calls
+                value_column: "calls"
+              - key: mysql.query.total_time
+                value_column: "total_time_ms"
+
+  # File log receiver for application logs
+  filelog:
+    enabled: ${env:ENABLE_FILE_LOG_RECEIVER:-false}
+    include:
+      - /var/log/postgresql/*.log
+      - /var/log/mysql/*.log
+    start_at: beginning
+    storage: file_storage
+    operators:
+      - type: regex_parser
+        regex: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) (?P<level>\w+): (?P<message>.*)'
+      - type: time_parser
+        parse_from: attributes.timestamp
+        layout: '%Y-%m-%d %H:%M:%S.%L'
+      - type: severity_parser
+        parse_from: attributes.level
+      - type: move
+        from: attributes.message
+        to: body
+
+  # Prometheus receiver for internal metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['0.0.0.0:8888']
+
+processors:
+  # Memory limiter - unified configuration
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: ${env:MEMORY_LIMIT_PERCENTAGE:-75}
+    spike_limit_percentage: ${env:MEMORY_SPIKE_LIMIT_PERCENTAGE:-20}
+    ballast_size_mib: ${env:BALLAST_SIZE_MIB:-256}
+
+  # Circuit breaker implementation using transform processor
+  transform/circuit_breaker:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Track error rates
+          - set(attributes["error.count"], 0) where attributes["postgresql.query.mean_time"] == nil
+          - set(attributes["error.count"], 1) where attributes["postgresql.query.mean_time"] == nil
+          # Circuit breaker logic
+          - set(attributes["circuit.breaker.status"], "open") where attributes["error.count"] > 5
+          - set(attributes["circuit.breaker.status"], "closed") where attributes["error.count"] <= 5
+          # Database health scoring
+          - set(attributes["db.health.score"], 100) where attributes["postgresql.query.mean_time"] < 100
+          - set(attributes["db.health.score"], 75) where attributes["postgresql.query.mean_time"] >= 100 and attributes["postgresql.query.mean_time"] < 1000
+          - set(attributes["db.health.score"], 50) where attributes["postgresql.query.mean_time"] >= 1000 and attributes["postgresql.query.mean_time"] < 5000
+          - set(attributes["db.health.score"], 25) where attributes["postgresql.query.mean_time"] >= 5000
+
+  # PII sanitization - comprehensive rules
+  transform/sanitize_pii:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Sanitize query statements
+          - replace_pattern(attributes["db.statement"], "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "***@***.***")
+          - replace_pattern(attributes["db.statement"], "'[^']*'", "'***'")
+          - replace_pattern(attributes["db.statement"], "\\b\\d{3}-\\d{2}-\\d{4}\\b", "***-**-****")
+          - replace_pattern(attributes["db.statement"], "\\b\\d{16}\\b", "****-****-****-****")
+          - replace_pattern(attributes["db.statement"], "\\b\\d{4}-\\d{4}-\\d{4}-\\d{4}\\b", "****-****-****-****")
+          - replace_pattern(attributes["db.statement"], "\\b(?:\\+?1[-.]?)?\\(?[0-9]{3}\\)?[-.]?[0-9]{3}[-.]?[0-9]{4}\\b", "***-***-****")
+          # Apply same rules to body if needed
+          - replace_pattern(body, "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "***@***.***")
+          - replace_pattern(body, "'[^']*'", "'***'")
+
+  # Attribute mapping for receiver-processor alignment
+  transform/attribute_mapper:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Map PostgreSQL attributes to common format
+          - set(attributes["avg_duration_ms"], attributes["postgresql.query.mean_time"]) where attributes["postgresql.query.mean_time"] != nil
+          - set(attributes["mean_time_ms"], attributes["postgresql.query.mean_time"]) where attributes["postgresql.query.mean_time"] != nil
+          - set(attributes["database_name"], attributes["db.name"]) where attributes["db.name"] != nil
+          - set(attributes["db.query.plan.hash"], attributes["query.hash"]) where attributes["query.hash"] != nil
+          # Map MySQL attributes to common format
+          - set(attributes["avg_duration_ms"], attributes["mysql.query.mean_time"]) where attributes["mysql.query.mean_time"] != nil
+          - set(attributes["mean_time_ms"], attributes["mysql.query.mean_time"]) where attributes["mysql.query.mean_time"] != nil
+
+  # Unified adaptive sampler with enhanced rules
+  probabilistic_sampler:
+    sampling_percentage: ${env:SAMPLING_PERCENTAGE:-10}
+    hash_seed: ${env:SAMPLING_HASH_SEED:-22}
+    attribute_source: record
+
+  # Enhanced adaptive sampler (custom processor integration)
+  adaptivesampler:
+    enabled: ${env:ENABLE_ADAPTIVE_SAMPLER:-true}
+    slow_query_threshold_ms: ${env:SLOW_QUERY_THRESHOLD_MS:-1000}
+    base_sampling_rate: ${env:BASE_SAMPLING_RATE:-0.1}
+    max_sampling_rate: ${env:MAX_SAMPLING_RATE:-1.0}
+    conditions:
+      - attribute: "avg_duration_ms"
+        operator: ">"
+        value: 5000
+        sampling_rate: 1.0
+      - attribute: "avg_duration_ms"
+        operator: ">"
+        value: 1000
+        sampling_rate: 0.5
+      - attribute: "query.performance_category"
+        operator: "=="
+        value: "slow"
+        sampling_rate: 0.8
+      - attribute: "postgresql.query.temp_blks_written"
+        operator: ">"
+        value: 1000
+        sampling_rate: 1.0
+    hash_attributes:
+      - "query_id"
+      - "database_name"
+    deduplication:
+      enabled: true
+      window: 300s
+
+  # Plan attribute extraction with enhanced logic
+  planattributeextractor:
+    enabled: ${env:ENABLE_PLAN_EXTRACTOR:-true}
+    plan_json_attribute: "plan_json"
+    extracted_attributes:
+      - name: "db.query.plan.total_cost"
+        json_path: "$[0].Plan.Total Cost"
+        type: "float"
+      - name: "db.query.plan.rows"
+        json_path: "$[0].Plan.Plan Rows"
+        type: "int"
+      - name: "db.query.plan.node_type"
+        json_path: "$[0].Plan.Node Type"
+        type: "string"
+    derived_attributes:
+      - name: "db.query.plan.has_seq_scan"
+        condition: 'contains(plan_json, "Seq Scan")'
+        type: "bool"
+      - name: "db.query.plan.has_index_scan"
+        condition: 'contains(plan_json, "Index Scan")'
+        type: "bool"
+      - name: "db.query.plan.efficiency"
+        formula: '(db.query.plan.rows > 0) ? (1000 / db.query.plan.total_cost) : 0'
+        type: "float"
+    hash_algorithm: "sha256"
+    hash_attribute_name: "db.query.plan.hash"
+
+  # Metadata enrichment
+  transform/enrich_metadata:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["collector.version"], "${env:COLLECTOR_VERSION:-2.0.0}")
+          - set(attributes["deployment.environment"], "${env:DEPLOYMENT_ENV:-development}")
+          - set(attributes["region"], "${env:AWS_REGION:-us-east-1}")
+          - set(attributes["cloud.provider"], "${env:CLOUD_PROVIDER:-aws}")
+          - set(attributes["instrumentation.name"], "database-intelligence-mvp")
+
+  # Metric generation from logs
+  transform/generate_metrics:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(metric.name, "database.query.duration") where attributes["avg_duration_ms"] != nil
+          - set(metric.unit, "ms")
+          - set(metric.data_points[0].value, attributes["avg_duration_ms"])
+          - set(metric.data_points[0].attributes["database"], attributes["database_name"])
+          - set(metric.data_points[0].attributes["query_id"], attributes["query_id"])
+
+  # Resource processor for consistent resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: "database-intelligence-mvp"
+        action: upsert
+      - key: service.version
+        value: "${env:SERVICE_VERSION:-2.0.0}"
+        action: upsert
+      - key: deployment.environment
+        value: "${env:DEPLOYMENT_ENV:-development}"
+        action: upsert
+
+  # Batch processor with optimized settings
+  batch:
+    send_batch_size: ${env:BATCH_SEND_SIZE:-1000}
+    timeout: ${env:BATCH_TIMEOUT:-10s}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE:-2000}
+
+  # Filter processor for removing unwanted data
+  filter:
+    logs:
+      log_record:
+        - 'attributes["db.statement"] == nil'
+        - 'attributes["avg_duration_ms"] < 1'
+
+exporters:
+  # New Relic OTLP exporter - unified configuration
+  otlp/newrelic:
+    endpoint: ${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
+    compression: ${env:OTLP_COMPRESSION:-gzip}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    tls:
+      insecure_skip_verify: ${env:TLS_INSECURE_SKIP_VERIFY:-false}
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:OTLP_NUM_CONSUMERS:-10}
+      queue_size: ${env:OTLP_QUEUE_SIZE:-5000}
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 5m
+    timeout: ${env:OTLP_TIMEOUT:-30s}
+
+  # Debug exporter for development
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:-basic}
+    sampling_initial: ${env:DEBUG_SAMPLING_INITIAL:-5}
+    sampling_thereafter: ${env:DEBUG_SAMPLING_THEREAFTER:-100}
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "db_intelligence"
+    const_labels:
+      environment: "${env:DEPLOYMENT_ENV:-development}"
+      version: "${env:SERVICE_VERSION:-2.0.0}"
+
+service:
+  extensions: 
+    - health_check
+    - zpages
+    - pprof
+    - memory_ballast
+    - file_storage
+
+  pipelines:
+    # Main database logs pipeline
+    logs/database:
+      receivers: 
+        - sqlquery/postgresql_plans
+        - sqlquery/mysql_queries
+      processors:
+        - memory_limiter
+        - transform/circuit_breaker
+        - transform/sanitize_pii
+        - transform/attribute_mapper
+        - adaptivesampler
+        - planattributeextractor
+        - transform/enrich_metadata
+        - resource
+        - filter
+        - batch
+      exporters:
+        - otlp/newrelic
+        - debug
+
+    # Application logs pipeline (if enabled)
+    logs/application:
+      receivers: 
+        - filelog
+      processors:
+        - memory_limiter
+        - transform/sanitize_pii
+        - resource
+        - batch
+      exporters:
+        - otlp/newrelic
+
+    # Metrics pipeline
+    metrics/database:
+      receivers:
+        - prometheus
+      processors:
+        - memory_limiter
+        - transform/generate_metrics
+        - resource
+        - batch
+      exporters:
+        - otlp/newrelic
+        - prometheus
+
+    # Internal metrics pipeline
+    metrics/internal:
+      receivers:
+        - prometheus
+      processors:
+        - memory_limiter
+        - resource
+        - batch
+      exporters:
+        - prometheus
+
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      development: false
+      encoding: json
+      disable_caller: false
+      disable_stacktrace: true
+      output_paths:
+        - stdout
+        - /var/log/otel-collector.log
+      error_output_paths:
+        - stderr
+        - /var/log/otel-collector-error.log
+    metrics:
+      level: basic
+      address: 0.0.0.0:8888

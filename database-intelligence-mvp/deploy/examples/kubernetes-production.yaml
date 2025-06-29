@@ -1,0 +1,680 @@
+# Database Intelligence MVP - Production Kubernetes Deployment
+# Full feature set with HA, custom processors, and production monitoring
+# Includes PostgreSQL, MySQL, monitoring stack, and scaling
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: db-intelligence
+  labels:
+    app: db-intelligence
+    tier: monitoring
+    environment: production
+---
+# ConfigMap for the main collector configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: db-intelligence
+data:
+  collector.yaml: |
+    # Production OTEL-first configuration
+    receivers:
+      # PostgreSQL infrastructure metrics
+      postgresql:
+        endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+        username: monitoring
+        password: ${env:POSTGRES_PASSWORD}
+        databases:
+          - ${env:POSTGRES_DB}
+        collection_interval: 30s
+        tls:
+          insecure: true
+
+      # MySQL infrastructure metrics
+      mysql:
+        endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+        username: monitoring
+        password: ${env:MYSQL_PASSWORD}
+        database: ${env:MYSQL_DATABASE}
+        collection_interval: 30s
+        tls:
+          insecure: true
+
+      # PostgreSQL query analytics
+      sqlquery/pg_queries:
+        driver: postgres
+        datasource: ${env:POSTGRES_DSN}
+        queries:
+          - sql: |
+              SELECT 
+                queryid::text as query_id,
+                LEFT(query, 500) as query_text,
+                calls,
+                total_exec_time,
+                mean_exec_time,
+                stddev_exec_time,
+                rows,
+                shared_blks_hit,
+                shared_blks_read,
+                blk_read_time,
+                blk_write_time
+              FROM pg_stat_statements
+              WHERE mean_exec_time > 0
+              ORDER BY total_exec_time DESC
+              LIMIT 100
+            metrics:
+              - metric_name: postgresql.query.calls
+                value_column: calls
+                attribute_columns: [query_id, query_text]
+                value_type: int
+              - metric_name: postgresql.query.total_time_ms
+                value_column: total_exec_time
+                attribute_columns: [query_id, query_text]
+                value_type: double
+              - metric_name: postgresql.query.mean_time_ms
+                value_column: mean_exec_time
+                attribute_columns: [query_id, query_text]
+                value_type: double
+              - metric_name: postgresql.query.rows
+                value_column: rows
+                attribute_columns: [query_id, query_text]
+                value_type: int
+        collection_interval: 60s
+
+      # Active session monitoring
+      sqlquery/pg_sessions:
+        driver: postgres
+        datasource: ${env:POSTGRES_DSN}
+        queries:
+          - sql: |
+              SELECT 
+                state,
+                wait_event_type,
+                wait_event,
+                COUNT(*) as session_count,
+                AVG(EXTRACT(EPOCH FROM (now() - query_start))) as avg_duration
+              FROM pg_stat_activity
+              WHERE state != 'idle' AND pid != pg_backend_pid()
+              GROUP BY state, wait_event_type, wait_event
+            metrics:
+              - metric_name: postgresql.active_sessions
+                value_column: session_count
+                attribute_columns: [state, wait_event_type, wait_event]
+                value_type: int
+              - metric_name: postgresql.session_avg_duration
+                value_column: avg_duration
+                attribute_columns: [state, wait_event_type, wait_event]
+                value_type: double
+        collection_interval: 15s
+
+      # Kubernetes metrics
+      k8s_cluster:
+        auth_type: serviceAccount
+        node_conditions_to_report: [Ready, DiskPressure, MemoryPressure, PIDPressure]
+        allocatable_types_to_report: [cpu, memory, storage]
+        
+      # Prometheus scraping for additional metrics
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'otel-collector'
+              static_configs:
+                - targets: ['localhost:8888']
+
+    processors:
+      # Production memory limiter
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 1024
+        spike_limit_mib: 256
+
+      # Optimized batch processor
+      batch:
+        timeout: 5s
+        send_batch_size: 1000
+        send_batch_max_size: 2000
+
+      # Comprehensive resource attributes
+      resource:
+        attributes:
+          - key: service.name
+            value: "database-monitoring"
+            action: insert
+          - key: service.namespace
+            value: "db-intelligence"
+            action: insert
+          - key: service.version
+            value: "2.0.0"
+            action: insert
+          - key: deployment.environment
+            value: ${env:ENVIRONMENT}
+            action: insert
+          - key: k8s.cluster.name
+            value: ${env:K8S_CLUSTER_NAME}
+            action: insert
+          - key: k8s.node.name
+            value: ${env:K8S_NODE_NAME}
+            action: insert
+          - key: k8s.pod.name
+            value: ${env:K8S_POD_NAME}
+            action: insert
+          - key: k8s.namespace.name
+            value: ${env:K8S_NAMESPACE}
+            action: insert
+          - key: collector.instance
+            value: ${env:HOSTNAME}
+            action: insert
+
+      # Advanced PII sanitization
+      transform/sanitize_pii:
+        error_mode: ignore
+        metric_statements:
+          - context: datapoint
+            statements:
+              # Remove sensitive literal values
+              - replace_pattern(attributes["query_text"], "('[^']*')", "'***'")
+              - replace_pattern(attributes["query_text"], "(\"[^\"]*\")", "\"***\"")
+              # Remove numeric constants
+              - replace_pattern(attributes["query_text"], "= *([0-9]{4,})", "= ***")
+              - replace_pattern(attributes["query_text"], "IN \([^)]+\)", "IN (***)")
+              # Remove potential passwords
+              - replace_pattern(attributes["query_text"], "password\\s*=\\s*'[^']*'", "password='***'")
+
+      # Probabilistic sampling baseline
+      probabilistic_sampler:
+        sampling_percentage: 15
+
+      # === CUSTOM PROCESSORS (simulated with transforms) ===
+      
+      # Adaptive sampling logic
+      transform/adaptive_sampling:
+        error_mode: ignore
+        metric_statements:
+          - context: datapoint
+            statements:
+              # Mark high-priority queries for full sampling
+              - set(attributes["sampling.priority"], "high") where attributes["mean_exec_time"] > 5000
+              - set(attributes["sampling.priority"], "medium") where attributes["mean_exec_time"] > 1000 and attributes["mean_exec_time"] <= 5000
+              - set(attributes["sampling.priority"], "low") where attributes["mean_exec_time"] <= 1000
+
+      # Query categorization and analysis
+      transform/query_analysis:
+        error_mode: ignore
+        metric_statements:
+          - context: datapoint
+            statements:
+              # Categorize query types
+              - set(attributes["query.type"], "SELECT") where IsString(attributes["query_text"]) and IsMatch(attributes["query_text"], "(?i)^\\s*SELECT")
+              - set(attributes["query.type"], "INSERT") where IsString(attributes["query_text"]) and IsMatch(attributes["query_text"], "(?i)^\\s*INSERT")
+              - set(attributes["query.type"], "UPDATE") where IsString(attributes["query_text"]) and IsMatch(attributes["query_text"], "(?i)^\\s*UPDATE")
+              - set(attributes["query.type"], "DELETE") where IsString(attributes["query_text"]) and IsMatch(attributes["query_text"], "(?i)^\\s*DELETE")
+              # Flag expensive operations
+              - set(attributes["query.has_join"], true) where IsString(attributes["query_text"]) and IsMatch(attributes["query_text"], "(?i)\\bJOIN\\b")
+              - set(attributes["query.has_subquery"], true) where IsString(attributes["query_text"]) and IsMatch(attributes["query_text"], "(?i)\\bSELECT.*\\bSELECT\\b")
+              - set(attributes["query.complexity"], "high") where attributes["query.has_join"] == true or attributes["query.has_subquery"] == true
+
+    exporters:
+      # Primary OTLP exporter
+      otlp/primary:
+        endpoint: ${env:OTLP_ENDPOINT}
+        headers:
+          api-key: ${env:NEW_RELIC_LICENSE_KEY}
+        compression: gzip
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+        sending_queue:
+          enabled: true
+          num_consumers: 10
+          queue_size: 3000
+
+      # Prometheus metrics for cluster monitoring
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: database_intelligence
+        const_labels:
+          environment: ${env:ENVIRONMENT}
+          cluster: ${env:K8S_CLUSTER_NAME}
+
+      # Debug exporter for troubleshooting
+      debug:
+        verbosity: basic
+        sampling_initial: 10
+        sampling_thereafter: 1000
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: /health
+
+      pprof:
+        endpoint: 0.0.0.0:1777
+
+      zpages:
+        endpoint: 0.0.0.0:55679
+
+    service:
+      extensions: [health_check, pprof, zpages]
+      
+      pipelines:
+        # Infrastructure metrics
+        metrics/infrastructure:
+          receivers: [postgresql, mysql, k8s_cluster, prometheus]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/primary, prometheus]
+
+        # Query performance with custom processing
+        metrics/query_performance:
+          receivers: [sqlquery/pg_queries, sqlquery/pg_sessions]
+          processors: 
+            - memory_limiter
+            - resource
+            - transform/sanitize_pii
+            - transform/query_analysis
+            - transform/adaptive_sampling
+            - probabilistic_sampler
+            - batch
+          exporters: [otlp/primary, prometheus]
+
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          level: detailed
+          address: 0.0.0.0:8888
+---
+# Secrets for database connections and API keys
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-intelligence-secrets
+  namespace: db-intelligence
+type: Opaque
+stringData:
+  new-relic-license-key: "${NEW_RELIC_LICENSE_KEY}"
+  postgres-password: "monitoring123"
+  postgres-dsn: "postgres://monitoring:monitoring123@postgres-primary:5432/proddb?sslmode=disable"
+  mysql-password: "monitoring123"
+  mysql-dsn: "monitoring:monitoring123@tcp(mysql-primary:3306)/proddb"
+---
+# Headless service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-headless
+  namespace: db-intelligence
+spec:
+  clusterIP: None
+  selector:
+    app: otel-collector
+  ports:
+  - name: health
+    port: 13133
+---
+# Regular service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-service
+  namespace: db-intelligence
+  labels:
+    app: otel-collector
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8889"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: otel-collector
+  ports:
+  - name: health
+    port: 13133
+    targetPort: 13133
+  - name: metrics
+    port: 8888
+    targetPort: 8888
+  - name: prometheus
+    port: 8889
+    targetPort: 8889
+  - name: zpages
+    port: 55679
+    targetPort: 55679
+  type: ClusterIP
+---
+# Pod Disruption Budget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: otel-collector-pdb
+  namespace: db-intelligence
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: otel-collector
+---
+# StatefulSet for persistent storage and stable network identity
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: otel-collector
+  namespace: db-intelligence
+  labels:
+    app: otel-collector
+spec:
+  serviceName: otel-collector-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: otel-collector
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+        version: "2.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8889"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: otel-collector
+      
+      # Anti-affinity for HA
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - otel-collector
+            topologyKey: kubernetes.io/hostname
+            
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:latest
+        imagePullPolicy: IfNotPresent
+        
+        command:
+        - /otelcol-contrib
+        - --config=/etc/otel/collector.yaml
+        
+        env:
+        # Database connection parameters
+        - name: POSTGRES_HOST
+          value: "postgres-primary"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "proddb"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-intelligence-secrets
+              key: postgres-password
+        - name: POSTGRES_DSN
+          valueFrom:
+            secretKeyRef:
+              name: db-intelligence-secrets
+              key: postgres-dsn
+        - name: MYSQL_HOST
+          value: "mysql-primary"
+        - name: MYSQL_PORT
+          value: "3306"
+        - name: MYSQL_DATABASE
+          value: "proddb"
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-intelligence-secrets
+              key: mysql-password
+        - name: MYSQL_DSN
+          valueFrom:
+            secretKeyRef:
+              name: db-intelligence-secrets
+              key: mysql-dsn
+        
+        # OpenTelemetry configuration
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: db-intelligence-secrets
+              key: new-relic-license-key
+        - name: OTLP_ENDPOINT
+          value: "https://otlp.nr-data.net:4318"
+        - name: ENVIRONMENT
+          value: "production"
+        
+        # Kubernetes metadata
+        - name: K8S_CLUSTER_NAME
+          value: "production-cluster"
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+
+        # Performance tuning
+        - name: GOMEMLIMIT
+          value: "768MiB"
+        - name: GOGC
+          value: "80"
+        - name: GOMAXPROCS
+          value: "2"
+        
+        ports:
+        - name: health
+          containerPort: 13133
+        - name: metrics
+          containerPort: 8888
+        - name: prometheus
+          containerPort: 8889
+        - name: zpages
+          containerPort: 55679
+          
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+          
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+          
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+            
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel/collector.yaml
+          subPath: collector.yaml
+        - name: storage
+          mountPath: /var/lib/otel
+          
+      volumes:
+      - name: config
+        configMap:
+          name: otel-collector-config
+          
+  volumeClaimTemplates:
+  - metadata:
+      name: storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
+---
+# ServiceAccount for RBAC
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: db-intelligence
+---
+# ClusterRole for Kubernetes resource access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "nodes/metrics", "services", "endpoints", "pods", "events"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions", "apps"]
+  resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+- kind: ServiceAccount
+  name: otel-collector
+  namespace: db-intelligence
+---
+# HorizontalPodAutoscaler for dynamic scaling
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: otel-collector-hpa
+  namespace: db-intelligence
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: otel-collector
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+---
+# NetworkPolicy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-collector-network-policy
+  namespace: db-intelligence
+spec:
+  podSelector:
+    matchLabels:
+      app: otel-collector
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - namespaceSelector:
+        matchLabels:
+          name: db-intelligence
+    ports:
+    - protocol: TCP
+      port: 8888
+    - protocol: TCP
+      port: 8889
+    - protocol: TCP
+      port: 13133
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow HTTPS to New Relic
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 4318
+  # Allow database connections
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres
+    - podSelector:
+        matchLabels:
+          app: mysql
+    ports:
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 3306

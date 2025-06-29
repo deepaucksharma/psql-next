@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: db-intelligence
+  labels:
+    app: load-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+    spec:
+      initContainers:
+      - name: decode-script
+        image: alpine/git
+        command: ["sh", "-c", "mkdir -p /scripts && base64 -d /scripts-encoded/generate-load.sh > /scripts/generate-load.sh && chmod +x /scripts/generate-load.sh"]
+        volumeMounts:
+        - name: load-script-encoded
+          mountPath: /scripts-encoded
+        - name: load-script
+          mountPath: /scripts
+      containers:
+      - name: load-generator
+        image: alpine/git
+        command: ["/scripts/generate-load.sh"]
+        volumeMounts:
+        - name: load-script
+          mountPath: /scripts
+        env:
+        - name: PG_HOST
+          value: postgres-primary
+        - name: MYSQL_HOST
+          value: mysql-primary
+      volumes:
+      - name: load-script-encoded
+        configMap:
+          name: load-generator-script
+      - name: load-script
+        emptyDir: {}
+      restartPolicy: Always

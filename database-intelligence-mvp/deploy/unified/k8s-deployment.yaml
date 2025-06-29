@@ -1,0 +1,513 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    version: "2.0.0"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: configuration
+data:
+  collector-config.yaml: |
+    # This references the unified collector configuration
+    # The actual config is mounted from a separate ConfigMap
+  attribute-mapping.yaml: |
+    # This references the attribute mapping configuration
+    # The actual config is mounted from a separate ConfigMap
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-env-config
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: environment
+data:
+  # Collection settings
+  COLLECTION_INTERVAL_SECONDS: "60"
+  QUERY_TIMEOUT_MS: "3000"
+  MIN_QUERY_TIME_MS: "10"
+  MAX_QUERIES_PER_COLLECTION: "100"
+  
+  # Sampling configuration
+  ENABLE_ADAPTIVE_SAMPLER: "true"
+  SAMPLING_PERCENTAGE: "10"
+  SAMPLING_HASH_SEED: "22"
+  SLOW_QUERY_THRESHOLD_MS: "1000"
+  BASE_SAMPLING_RATE: "0.1"
+  MAX_SAMPLING_RATE: "1.0"
+  
+  # Resource limits
+  MEMORY_LIMIT_PERCENTAGE: "75"
+  MEMORY_SPIKE_LIMIT_PERCENTAGE: "20"
+  BALLAST_SIZE_MIB: "256"
+  
+  # Database pool settings
+  PG_MAX_CONNECTIONS: "2"
+  PG_MAX_IDLE_CONNECTIONS: "1"
+  
+  # Batch processing
+  BATCH_SEND_SIZE: "1000"
+  BATCH_TIMEOUT: "10s"
+  BATCH_MAX_SIZE: "2000"
+  
+  # OTLP exporter settings
+  OTLP_COMPRESSION: "gzip"
+  OTLP_NUM_CONSUMERS: "10"
+  OTLP_QUEUE_SIZE: "5000"
+  OTLP_TIMEOUT: "30s"
+  
+  # Feature flags
+  ENABLE_PLAN_EXTRACTOR: "true"
+  ENABLE_FILE_LOG_RECEIVER: "false"
+  ENABLE_PII_SANITIZATION: "true"
+  
+  # Environment settings
+  DEPLOYMENT_ENV: "production"
+  SERVICE_VERSION: "2.0.0"
+  CLOUD_PROVIDER: "kubernetes"
+  
+  # Security settings
+  TLS_INSECURE_SKIP_VERIFY: "false"
+  
+  # Telemetry settings
+  LOG_LEVEL: "info"
+  DEBUG_VERBOSITY: "basic"
+  DEBUG_SAMPLING_INITIAL: "5"
+  DEBUG_SAMPLING_THEREAFTER: "100"
+  
+  # Collector version
+  COLLECTOR_VERSION: "2.0.0-unified"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: otel-collector-secrets
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: secrets
+type: Opaque
+stringData:
+  NEW_RELIC_LICENSE_KEY: "YOUR_LICENSE_KEY_HERE"
+  PG_REPLICA_DSN: "postgresql://readonly_user:password@postgres-replica:5432/mydb?sslmode=require"
+  MYSQL_READONLY_DSN: "readonly_user:password@tcp(mysql-replica:3306)/mydb"
+  MONGODB_SECONDARY_DSN: "mongodb://readonly_user:password@mongodb-secondary:27017/mydb?authSource=admin"
+  OTLP_ENDPOINT: "https://otlp.nr-data.net:4317"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+  labels:
+    app: database-intelligence-mvp
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "nodes/stats", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+  labels:
+    app: database-intelligence-mvp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector
+    namespace: database-intelligence
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: collector
+spec:
+  type: ClusterIP
+  selector:
+    app: database-intelligence-mvp
+    component: collector
+  ports:
+    - name: health
+      port: 13133
+      targetPort: 13133
+      protocol: TCP
+    - name: metrics
+      port: 8888
+      targetPort: 8888
+      protocol: TCP
+    - name: prometheus
+      port: 8889
+      targetPort: 8889
+      protocol: TCP
+    - name: zpages
+      port: 55679
+      targetPort: 55679
+      protocol: TCP
+    - name: pprof
+      port: 1777
+      targetPort: 1777
+      protocol: TCP
+    - name: http-forwarder
+      port: 6060
+      targetPort: 6060
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-headless
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: collector
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: database-intelligence-mvp
+    component: collector
+  ports:
+    - name: health
+      port: 13133
+      targetPort: 13133
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: otel-collector
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: collector
+    version: "2.0.0"
+spec:
+  serviceName: otel-collector-headless
+  replicas: 3  # For high availability
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: database-intelligence-mvp
+      component: collector
+  template:
+    metadata:
+      labels:
+        app: database-intelligence-mvp
+        component: collector
+        version: "2.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8888"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: otel-collector
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - database-intelligence-mvp
+                    - key: component
+                      operator: In
+                      values:
+                        - collector
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.89.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/otelcol-contrib"
+            - "--config=/etc/otel-collector/config.yaml"
+            - "--feature-gates=+pkg.translator.prometheus.NormalizeName"
+          envFrom:
+            - configMapRef:
+                name: otel-env-config
+            - secretRef:
+                name: otel-collector-secrets
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+            - name: metrics
+              containerPort: 8888
+              protocol: TCP
+            - name: prometheus
+              containerPort: 8889
+              protocol: TCP
+            - name: zpages
+              containerPort: 55679
+              protocol: TCP
+            - name: pprof
+              containerPort: 1777
+              protocol: TCP
+            - name: http-forwarder
+              containerPort: 6060
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otel-collector
+            - name: storage
+              mountPath: /var/lib/otel/file_storage
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 13133
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 13133
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 13133
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+            items:
+              - key: collector-config.yaml
+                path: config.yaml
+              - key: attribute-mapping.yaml
+                path: attribute-mapping.yaml
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+        labels:
+          app: database-intelligence-mvp
+          component: collector
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-lb
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: collector
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: database-intelligence-mvp
+    component: collector
+  ports:
+    - name: metrics
+      port: 8888
+      targetPort: 8888
+      protocol: TCP
+    - name: prometheus
+      port: 8889
+      targetPort: 8889
+      protocol: TCP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: otel-collector-hpa
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: collector
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: otel-collector
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: otel-collector-pdb
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: collector
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: database-intelligence-mvp
+      component: collector
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-collector-network-policy
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-mvp
+    component: collector
+spec:
+  podSelector:
+    matchLabels:
+      app: database-intelligence-mvp
+      component: collector
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+        - namespaceSelector:
+            matchLabels:
+              name: database-intelligence
+      ports:
+        - protocol: TCP
+          port: 8888
+        - protocol: TCP
+          port: 8889
+        - protocol: TCP
+          port: 13133
+        - protocol: TCP
+          port: 55679
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432  # PostgreSQL
+        - protocol: TCP
+          port: 3306  # MySQL
+        - protocol: TCP
+          port: 27017 # MongoDB
+    - to:
+        - namespaceSelector: {}
+          podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 53   # DNS
+        - protocol: UDP
+          port: 53   # DNS
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32  # AWS metadata service
+              - 10.0.0.0/8          # Private networks
+              - 192.168.0.0/16      # Private networks
+              - 172.16.0.0/12       # Private networks
+      ports:
+        - protocol: TCP
+          port: 443  # HTTPS for New Relic
+        - protocol: TCP
+          port: 4317 # OTLP gRPC
+        - protocol: TCP
+          port: 4318 # OTLP HTTP
