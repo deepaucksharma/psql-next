@@ -1,0 +1,432 @@
+# Database Intelligence MVP - Minimal Kubernetes Deployment
+# Basic OTEL-first setup for Kubernetes environments
+# Single collector instance with PostgreSQL monitoring
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: db-intelligence
+  labels:
+    app: db-intelligence
+    tier: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: db-intelligence
+data:
+  collector.yaml: |
+    # Minimal OTEL-first configuration for Kubernetes
+    receivers:
+      # Standard PostgreSQL receiver
+      postgresql:
+        endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+        username: monitoring
+        password: ${env:POSTGRES_PASSWORD}
+        databases:
+          - ${env:POSTGRES_DB}
+        collection_interval: 30s
+        tls:
+          insecure: true
+
+      # Basic query monitoring
+      sqlquery/statements:
+        driver: postgres
+        datasource: ${env:POSTGRES_DSN}
+        queries:
+          - sql: |
+              SELECT 
+                queryid::text as query_id,
+                LEFT(query, 200) as query_text,
+                calls,
+                total_exec_time,
+                mean_exec_time,
+                rows
+              FROM pg_stat_statements
+              WHERE mean_exec_time > 0
+              ORDER BY total_exec_time DESC
+              LIMIT 50
+            metrics:
+              - metric_name: postgresql.query.calls
+                value_column: calls
+                attribute_columns: [query_id, query_text]
+                value_type: int
+              - metric_name: postgresql.query.total_time_ms
+                value_column: total_exec_time
+                attribute_columns: [query_id, query_text]
+                value_type: double
+        collection_interval: 60s
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+        spike_limit_mib: 64
+
+      batch:
+        timeout: 10s
+        send_batch_size: 500
+
+      resource:
+        attributes:
+          - key: service.name
+            value: "database-monitoring"
+            action: insert
+          - key: service.namespace
+            value: "db-intelligence"
+            action: insert
+          - key: deployment.environment
+            value: ${env:ENVIRONMENT}
+            action: insert
+          - key: k8s.cluster.name
+            value: ${env:K8S_CLUSTER_NAME}
+            action: insert
+          - key: k8s.node.name
+            value: ${env:K8S_NODE_NAME}
+            action: insert
+          - key: k8s.pod.name
+            value: ${env:K8S_POD_NAME}
+            action: insert
+
+      # Basic PII sanitization
+      transform/sanitize:
+        error_mode: ignore
+        metric_statements:
+          - context: datapoint
+            statements:
+              - replace_pattern(attributes["query_text"], "('[^']*')", "'***'")
+              - replace_pattern(attributes["query_text"], "= *([0-9]{3,})", "= ***")
+
+    exporters:
+      otlp:
+        endpoint: ${env:OTLP_ENDPOINT}
+        headers:
+          api-key: ${env:NEW_RELIC_LICENSE_KEY}
+        compression: gzip
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: database_intelligence
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      extensions: [health_check]
+      
+      pipelines:
+        metrics/infra:
+          receivers: [postgresql]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp, prometheus]
+
+        metrics/queries:
+          receivers: [sqlquery/statements]
+          processors: [memory_limiter, transform/sanitize, resource, batch]
+          exporters: [otlp, prometheus]
+
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          level: normal
+          address: 0.0.0.0:8888
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-intelligence-secrets
+  namespace: db-intelligence
+type: Opaque
+stringData:
+  new-relic-license-key: "${NEW_RELIC_LICENSE_KEY}"
+  postgres-password: "monitoring123"
+  postgres-dsn: "postgres://monitoring:monitoring123@postgres-service:5432/testdb?sslmode=disable"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-service
+  namespace: db-intelligence
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: health
+      port: 13133
+      targetPort: 13133
+    - name: metrics
+      port: 8888
+      targetPort: 8888
+    - name: prometheus
+      port: 8889
+      targetPort: 8889
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: db-intelligence
+  labels:
+    app: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8889"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: otel-collector
+      
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:latest
+        imagePullPolicy: IfNotPresent
+        
+        command:
+        - /otelcol-contrib
+        - --config=/etc/otel/collector.yaml
+        
+        env:
+        - name: POSTGRES_HOST
+          value: "postgres-service"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "testdb"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-intelligence-secrets
+              key: postgres-password
+        - name: POSTGRES_DSN
+          valueFrom:
+            secretKeyRef:
+              name: db-intelligence-secrets
+              key: postgres-dsn
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: db-intelligence-secrets
+              key: new-relic-license-key
+        - name: OTLP_ENDPOINT
+          value: "https://otlp.nr-data.net:4318"
+        - name: ENVIRONMENT
+          value: "kubernetes"
+        - name: K8S_CLUSTER_NAME
+          value: "minimal-cluster"
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        
+        ports:
+        - name: health
+          containerPort: 13133
+        - name: metrics
+          containerPort: 8888
+        - name: prometheus
+          containerPort: 8889
+          
+        livenessProbe:
+          httpGet:
+            path: /
+            port: health
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+          
+        readinessProbe:
+          httpGet:
+            path: /
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+          
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+            
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel/collector.yaml
+          subPath: collector.yaml
+          
+      volumes:
+      - name: config
+        configMap:
+          name: otel-collector-config
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: db-intelligence
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+- kind: ServiceAccount
+  name: otel-collector
+  namespace: db-intelligence
+---
+# PostgreSQL deployment for testing (optional)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: db-intelligence
+data:
+  init.sql: |
+    -- Enable pg_stat_statements
+    CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+    
+    -- Create monitoring user
+    CREATE USER monitoring WITH PASSWORD 'monitoring123';
+    GRANT SELECT ON pg_stat_statements TO monitoring;
+    GRANT SELECT ON pg_stat_activity TO monitoring;
+    GRANT SELECT ON pg_stat_database TO monitoring;
+    GRANT CONNECT ON DATABASE testdb TO monitoring;
+    
+    -- Create test data
+    CREATE TABLE test_table (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100),
+        value NUMERIC,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    INSERT INTO test_table (name, value) 
+    SELECT 'test_' || i, RANDOM() * 1000
+    FROM generate_series(1, 100) i;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: db-intelligence
+spec:
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: db-intelligence
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        env:
+        - name: POSTGRES_DB
+          value: testdb
+        - name: POSTGRES_USER
+          value: testuser
+        - name: POSTGRES_PASSWORD
+          value: testpass
+        - name: POSTGRES_INITDB_ARGS
+          value: "--auth-host=md5"
+        
+        ports:
+        - containerPort: 5432
+        
+        command:
+        - postgres
+        - -c
+        - shared_preload_libraries=pg_stat_statements
+        - -c
+        - pg_stat_statements.max=1000
+        - -c
+        - pg_stat_statements.track=all
+        
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        - name: init-script
+          mountPath: /docker-entrypoint-initdb.d
+        
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - testuser
+            - -d
+            - testdb
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          
+      volumes:
+      - name: postgres-storage
+        emptyDir: {}
+      - name: init-script
+        configMap:
+          name: postgres-init
+      
+      profiles: ["test-database"]

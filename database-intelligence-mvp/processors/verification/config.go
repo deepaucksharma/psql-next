@@ -38,6 +38,39 @@ type Config struct {
 	
 	// VerificationQueries are custom NRQL queries to run for verification
 	VerificationQueries []VerificationQuery `mapstructure:"verification_queries"`
+	
+	// EnableContinuousHealthChecks enables continuous system health monitoring
+	EnableContinuousHealthChecks bool `mapstructure:"enable_continuous_health_checks"`
+	
+	// HealthCheckInterval sets how often to perform health checks
+	HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`
+	
+	// HealthThresholds defines system resource alert thresholds
+	HealthThresholds HealthThresholdsConfig `mapstructure:"health_thresholds"`
+	
+	// QualityRules defines data quality validation rules
+	QualityRules QualityRulesConfig `mapstructure:"quality_rules"`
+	
+	// PIIDetection configures PII detection and sanitization
+	PIIDetection PIIDetectionConfig `mapstructure:"pii_detection"`
+	
+	// EnableAutoTuning enables automatic performance tuning
+	EnableAutoTuning bool `mapstructure:"enable_auto_tuning"`
+	
+	// AutoTuningInterval sets how often to run auto-tuning analysis
+	AutoTuningInterval time.Duration `mapstructure:"auto_tuning_interval"`
+	
+	// AutoTuningConfig configures auto-tuning behavior
+	AutoTuningConfig AutoTuningConfig `mapstructure:"auto_tuning_config"`
+	
+	// EnableSelfHealing enables automatic issue remediation
+	EnableSelfHealing bool `mapstructure:"enable_self_healing"`
+	
+	// SelfHealingInterval sets how often to process self-healing actions
+	SelfHealingInterval time.Duration `mapstructure:"self_healing_interval"`
+	
+	// SelfHealingConfig configures self-healing behavior
+	SelfHealingConfig SelfHealingConfig `mapstructure:"self_healing_config"`
 }
 
 // VerificationQuery defines a custom verification query
@@ -47,6 +80,47 @@ type VerificationQuery struct {
 	Interval    time.Duration `mapstructure:"interval"`
 	Threshold   float64       `mapstructure:"threshold"`
 	Comparison  string        `mapstructure:"comparison"` // gt, lt, eq
+}
+
+// HealthThresholdsConfig defines system resource alert thresholds
+type HealthThresholdsConfig struct {
+	MemoryPercent  float64       `mapstructure:"memory_percent"`
+	CPUPercent     float64       `mapstructure:"cpu_percent"`
+	DiskPercent    float64       `mapstructure:"disk_percent"`
+	NetworkLatency time.Duration `mapstructure:"network_latency"`
+}
+
+// QualityRulesConfig defines data quality validation rules
+type QualityRulesConfig struct {
+	RequiredFields         []string          `mapstructure:"required_fields"`
+	EnableSchemaValidation bool              `mapstructure:"enable_schema_validation"`
+	CardinalityLimits      map[string]int    `mapstructure:"cardinality_limits"`
+	DataTypeValidation     map[string]string `mapstructure:"data_type_validation"`
+}
+
+// PIIDetectionConfig configures PII detection and sanitization
+type PIIDetectionConfig struct {
+	Enabled         bool     `mapstructure:"enabled"`
+	AutoSanitize    bool     `mapstructure:"auto_sanitize"`
+	CustomPatterns  []string `mapstructure:"custom_patterns"`
+	ExcludeFields   []string `mapstructure:"exclude_fields"`
+	SensitivityLevel string  `mapstructure:"sensitivity_level"` // low, medium, high
+}
+
+// AutoTuningConfig configures auto-tuning behavior
+type AutoTuningConfig struct {
+	EnableAutoApply       bool    `mapstructure:"enable_auto_apply"`
+	MinConfidenceLevel    float64 `mapstructure:"min_confidence_level"`
+	MaxParameterChange    float64 `mapstructure:"max_parameter_change"`
+	HistoryRetentionHours int     `mapstructure:"history_retention_hours"`
+}
+
+// SelfHealingConfig configures self-healing behavior
+type SelfHealingConfig struct {
+	MaxRetries        int     `mapstructure:"max_retries"`
+	BackoffMultiplier float64 `mapstructure:"backoff_multiplier"`
+	EnabledIssueTypes []string `mapstructure:"enabled_issue_types"`
+	AlertOnFailure    bool    `mapstructure:"alert_on_failure"`
 }
 
 // Validate checks if the configuration is valid
@@ -67,6 +141,65 @@ func (cfg *Config) Validate() error {
 	
 	if cfg.MinNormalizationRate < 0 || cfg.MinNormalizationRate > 1 {
 		return errors.New("min_normalization_rate must be between 0.0 and 1.0")
+	}
+	
+	// Validate health check configuration
+	if cfg.EnableContinuousHealthChecks {
+		if cfg.HealthCheckInterval <= 0 {
+			return errors.New("health_check_interval must be positive when continuous health checks are enabled")
+		}
+		
+		if cfg.HealthThresholds.MemoryPercent < 0 || cfg.HealthThresholds.MemoryPercent > 100 {
+			return errors.New("health_thresholds.memory_percent must be between 0 and 100")
+		}
+		
+		if cfg.HealthThresholds.CPUPercent < 0 || cfg.HealthThresholds.CPUPercent > 100 {
+			return errors.New("health_thresholds.cpu_percent must be between 0 and 100")
+		}
+		
+		if cfg.HealthThresholds.DiskPercent < 0 || cfg.HealthThresholds.DiskPercent > 100 {
+			return errors.New("health_thresholds.disk_percent must be between 0 and 100")
+		}
+	}
+	
+	// Validate auto-tuning configuration
+	if cfg.EnableAutoTuning {
+		if cfg.AutoTuningInterval <= 0 {
+			return errors.New("auto_tuning_interval must be positive when auto-tuning is enabled")
+		}
+		
+		if cfg.AutoTuningConfig.MinConfidenceLevel < 0 || cfg.AutoTuningConfig.MinConfidenceLevel > 1 {
+			return errors.New("auto_tuning_config.min_confidence_level must be between 0.0 and 1.0")
+		}
+		
+		if cfg.AutoTuningConfig.MaxParameterChange < 0 || cfg.AutoTuningConfig.MaxParameterChange > 1 {
+			return errors.New("auto_tuning_config.max_parameter_change must be between 0.0 and 1.0")
+		}
+	}
+	
+	// Validate self-healing configuration
+	if cfg.EnableSelfHealing {
+		if cfg.SelfHealingInterval <= 0 {
+			return errors.New("self_healing_interval must be positive when self-healing is enabled")
+		}
+		
+		if cfg.SelfHealingConfig.MaxRetries < 0 {
+			return errors.New("self_healing_config.max_retries cannot be negative")
+		}
+		
+		if cfg.SelfHealingConfig.BackoffMultiplier <= 1.0 {
+			return errors.New("self_healing_config.backoff_multiplier must be greater than 1.0")
+		}
+	}
+	
+	// Validate PII detection configuration
+	if cfg.PIIDetection.Enabled {
+		validSensitivityLevels := map[string]bool{
+			"low": true, "medium": true, "high": true,
+		}
+		if cfg.PIIDetection.SensitivityLevel != "" && !validSensitivityLevels[cfg.PIIDetection.SensitivityLevel] {
+			return errors.New("pii_detection.sensitivity_level must be 'low', 'medium', or 'high'")
+		}
 	}
 	
 	// Validate custom queries
@@ -95,6 +228,73 @@ func createDefaultConfig() component.Config {
 		MinNormalizationRate:       0.9, // 90%
 		RequireEntitySynthesis:     true,
 		ExportFeedbackAsLogs:       true,
+		
+		// Continuous health checks
+		EnableContinuousHealthChecks: true,
+		HealthCheckInterval:         30 * time.Second,
+		HealthThresholds: HealthThresholdsConfig{
+			MemoryPercent:  85.0, // 85%
+			CPUPercent:     80.0, // 80%
+			DiskPercent:    90.0, // 90%
+			NetworkLatency: 5 * time.Second,
+		},
+		
+		// Quality validation rules
+		QualityRules: QualityRulesConfig{
+			RequiredFields: []string{
+				"database_name",
+				"query_id",
+				"duration_ms",
+			},
+			EnableSchemaValidation: true,
+			CardinalityLimits: map[string]int{
+				"query_id":      10000,
+				"database_name": 100,
+				"table_name":    1000,
+			},
+			DataTypeValidation: map[string]string{
+				"duration_ms":   "double",
+				"error_count":   "int",
+				"database_name": "string",
+			},
+		},
+		
+		// PII detection
+		PIIDetection: PIIDetectionConfig{
+			Enabled:          true,
+			AutoSanitize:     false, // Conservative default
+			SensitivityLevel: "medium",
+			ExcludeFields: []string{
+				"query_hash",
+				"plan_hash",
+				"database_name",
+			},
+		},
+		
+		// Auto-tuning
+		EnableAutoTuning:   true,
+		AutoTuningInterval: 10 * time.Minute,
+		AutoTuningConfig: AutoTuningConfig{
+			EnableAutoApply:       false, // Conservative default
+			MinConfidenceLevel:    0.8,   // 80%
+			MaxParameterChange:    0.2,   // 20%
+			HistoryRetentionHours: 24,    // 24 hours
+		},
+		
+		// Self-healing
+		EnableSelfHealing:   true,
+		SelfHealingInterval: 1 * time.Minute,
+		SelfHealingConfig: SelfHealingConfig{
+			MaxRetries:        3,
+			BackoffMultiplier: 2.0,
+			EnabledIssueTypes: []string{
+				"consumer_error",
+				"high_memory",
+				"database_connectivity",
+			},
+			AlertOnFailure: true,
+		},
+		
 		VerificationQueries: []VerificationQuery{
 			{
 				Name:       "integration_errors",
@@ -108,6 +308,13 @@ func createDefaultConfig() component.Config {
 				Query:      "SELECT count(*) FROM Log WHERE collector.name = 'database-intelligence' SINCE 5 minutes ago",
 				Interval:   5 * time.Minute,
 				Threshold:  1,
+				Comparison: "gt",
+			},
+			{
+				Name:       "quality_score",
+				Query:      "SELECT average(quality_score) FROM Log WHERE collector.name = 'database-intelligence' SINCE 10 minutes ago",
+				Interval:   10 * time.Minute,
+				Threshold:  0.8,
 				Comparison: "gt",
 			},
 		},

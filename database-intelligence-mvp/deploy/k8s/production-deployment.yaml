@@ -3,26 +3,26 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: database-intelligence
+  name: db-intelligence
   labels:
-    app: database-intelligence
+    app: db-intelligence
     monitoring: enabled
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: otel-collector-config
-  namespace: database-intelligence
+  namespace: db-intelligence
 data:
   collector.yaml: |
-    # Reference to collector-newrelic-optimized.yaml
+    # Reference to collector.yaml
     # This would be populated by your CI/CD or Helm
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: database-credentials
-  namespace: database-intelligence
+  name: db-intelligence-secrets
+  namespace: db-intelligence
 type: Opaque
 stringData:
   new-relic-license-key: "${NEW_RELIC_LICENSE_KEY}"
@@ -33,7 +33,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: otel-collector
-  namespace: database-intelligence
+  namespace: db-intelligence
   labels:
     app: otel-collector
 spec:
@@ -54,7 +54,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: otel-collector-headless
-  namespace: database-intelligence
+  namespace: db-intelligence
   labels:
     app: otel-collector
 spec:
@@ -69,7 +69,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: otel-collector-pdb
-  namespace: database-intelligence
+  namespace: db-intelligence
 spec:
   minAvailable: 2
   selector:
@@ -80,7 +80,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: otel-collector
-  namespace: database-intelligence
+  namespace: db-intelligence
   labels:
     app: otel-collector
 spec:
@@ -122,16 +122,7 @@ spec:
         fsGroup: 10001
         
       # Init container to validate configuration
-      initContainers:
-      - name: config-validator
-        image: otel/opentelemetry-collector-contrib:0.89.0
-        command:
-        - /otelcol-contrib
-        - --config=/etc/otel/collector.yaml
-        - --dry-run
-        volumeMounts:
-        - name: config
-          mountPath: /etc/otel
+      
           
       containers:
       - name: otel-collector
@@ -143,68 +134,71 @@ spec:
         - --config=/etc/otel/collector.yaml
         
         env:
-        # Performance tuning
         - name: GOMEMLIMIT
-          value: "460MiB"  # 90% of memory limit
+          value: "460MiB"
         - name: GOGC
-          value: "80"      # More aggressive GC
+          value: "80"
         - name: GOMAXPROCS
-          value: "2"       # Limit CPU usage
-          
-        # New Relic configuration
+          value: "2"
         - name: NEW_RELIC_LICENSE_KEY
           valueFrom:
             secretKeyRef:
-              name: database-credentials
+              name: db-intelligence-secrets
               key: new-relic-license-key
-              
         - name: OTLP_ENDPOINT
           value: "https://otlp.nr-data.net:4318"
-          
-        # Database connections
         - name: PG_REPLICA_DSN
           valueFrom:
             secretKeyRef:
-              name: database-credentials
+              name: db-intelligence-secrets
               key: pg-replica-dsn
-              
         - name: MYSQL_READONLY_DSN
           valueFrom:
             secretKeyRef:
-              name: database-credentials
+              name: db-intelligence-secrets
               key: mysql-readonly-dsn
-              
-        # Deployment metadata
         - name: DEPLOYMENT_ENV
           value: "production"
-          
         - name: HOSTNAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-              
         - name: POD_NAME
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-              
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-              
-        # Collection parameters
         - name: COLLECTION_INTERVAL_SECONDS
           value: "60"
-          
         - name: QUERY_TIMEOUT_MS
           value: "3000"
-          
         - name: SAMPLING_PERCENTAGE
           value: "25"
-          
         - name: LOG_LEVEL
           value: "info"
+        - name: PG_HOST
+          value: "postgres-primary"
+        - name: PG_PORT
+          value: "5432"
+        - name: PG_USER
+          value: "postgres"
+        - name: PG_PASSWORD
+          value: "postgres123"
+        - name: PG_DATABASE
+          value: "testdb"
+        - name: MYSQL_HOST
+          value: "mysql-primary"
+        - name: MYSQL_PORT
+          value: "3306"
+        - name: MYSQL_USER
+          value: "root"
+        - name: MYSQL_PASSWORD
+          value: "mysql123"
+        - name: MYSQL_DATABASE
+          value: "testdb"
         
         ports:
         - name: health
@@ -244,17 +238,26 @@ spec:
             
         # Volume mounts
         volumeMounts:
-        - name: config
-          mountPath: /etc/otel
+        - name: config-collector
+          mountPath: /etc/otel/collector.yaml
+          subPath: collector.yaml
+        - name: config-attribute-mapping
+          mountPath: /etc/otel/attribute-mapping.yaml
+          subPath: attribute-mapping.yaml
         - name: file-storage
           mountPath: /var/lib/otel
         - name: logs
           mountPath: /var/log
           
+      
+          
       volumes:
-      - name: config
+      - name: config-collector
         configMap:
-          name: otel-collector-config
+          name: otel-collector-config-collector
+      - name: config-attribute-mapping
+        configMap:
+          name: otel-collector-config-attribute-mapping
           
       - name: logs
         emptyDir: {}
@@ -273,7 +276,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: otel-collector
-  namespace: database-intelligence
+  namespace: db-intelligence
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -298,14 +301,27 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: otel-collector
-  namespace: database-intelligence
+  namespace: db-intelligence
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-intelligence-leader
+  namespace: db-intelligence
+spec:
+  selector:
+    app: otel-collector
+  ports:
+  - name: leader-http
+    port: 4040
+    targetPort: 4040
 ---
 # HorizontalPodAutoscaler for scaling based on load
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: otel-collector-hpa
-  namespace: database-intelligence
+  namespace: db-intelligence
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -345,7 +361,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: otel-collector-network-policy
-  namespace: database-intelligence
+  namespace: db-intelligence
 spec:
   podSelector:
     matchLabels:
@@ -391,20 +407,3 @@ spec:
       port: 5432  # PostgreSQL
     - protocol: TCP
       port: 3306  # MySQL
----
-# Monitoring ServiceMonitor for Prometheus
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: otel-collector
-  namespace: database-intelligence
-  labels:
-    app: otel-collector
-spec:
-  selector:
-    matchLabels:
-      app: otel-collector
-  endpoints:
-  - port: metrics
-    interval: 30s
-    path: /metrics

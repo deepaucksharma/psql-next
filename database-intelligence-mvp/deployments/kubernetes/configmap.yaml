@@ -2,134 +2,363 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: otel-collector-config
-  namespace: monitoring
+  namespace: db-intelligence
 data:
-  collector-config.yaml: |
+  collector.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+      leader_election:
+        lease_name: db-intelligence-leader
+        lease_namespace: db-intelligence # This should match the namespace of your deployment
+
+      memory_ballast:
+        size_mib: 128
+
     receivers:
-      postgresqlquery:
-        databases:
-          - name: "production"
-            dsn: "${env:POSTGRES_DSN_PRODUCTION}"
-            max_open_connections: 10
-            max_idle_connections: 5
-            collection_interval: 60s
-            slow_query_threshold_ms: 100
-          - name: "staging"
-            dsn: "${env:POSTGRES_DSN_STAGING}"
-            max_open_connections: 5
-            max_idle_connections: 2
-            collection_interval: 120s
-        
-        # ASH Configuration
-        ash_config:
-          enabled: true
-          sampling_interval: 1s
-          buffer_size: 3600  # 1 hour of samples
-        
-        # Plan Analysis
-        plan_analysis:
-          enabled: true
-          cache_size: 10000
-          analyze_slow_queries: true
-          min_calls_for_analysis: 10
-        
-        # Adaptive Sampling
-        adaptive_sampling:
-          enabled: true
-          default_rate: 1.0
-          max_queries_per_minute: 10000
-          max_memory_mb: 512
-          rules:
-            - name: "critical_queries"
-              priority: 100
-              sample_rate: 1.0
-              conditions:
-                - attribute: "mean_time_ms"
-                  operator: "gt"
-                  value: 1000
-            - name: "high_frequency"
-              priority: 90
-              sample_rate: 0.1
-              conditions:
-                - attribute: "calls"
-                  operator: "gt"
-                  value: 1000
+      # PostgreSQL receiver for metadata collection
+      sqlquery/postgresql:
+        driver: postgres
+        dsn: "${env:PG_REPLICA_DSN}"
+        collection_interval: 300s
+        timeout: 10s
+        max_open_connections: 2
+        max_idle_connections: 1
+        connection_max_lifetime: 300s
+        enabled_when_leader: true # Only the leader collects data
+        queries:
+          - sql: |
+              -- Safety timeouts to prevent long-running queries
+              SET LOCAL statement_timeout = '3000ms';
+              SET LOCAL lock_timeout = '100ms';
+
+              -- Find the worst-performing query based on total execution time
+              WITH worst_query AS (
+                SELECT
+                  queryid,
+                  query,
+                  mean_exec_time,
+                  calls,
+                  total_exec_time,
+                  (mean_exec_time * calls) as impact_score
+                FROM pg_stat_statements
+                WHERE
+                  mean_exec_time > 50        -- Only consider queries over 50ms
+                  AND calls > 5              -- And those that are somewhat frequent
+                  AND query NOT LIKE '%pg_%' -- Exclude system queries
+                  AND query NOT LIKE '%EXPLAIN%'
+                  AND query NOT LIKE '%SET LOCAL%'
+                ORDER BY impact_score DESC
+                LIMIT 1
+              )
+              SELECT
+                queryid::text as query_id,
+                query as query_text,
+                round(mean_exec_time::numeric, 2) as avg_duration_ms,
+                calls as execution_count,
+                round(total_exec_time::numeric, 2) as total_duration_ms,
+                -- This is a placeholder for the plan, as we are not collecting actual plans
+                json_build_object(
+                  'plan_available', false,
+                  'approach', 'metadata_only_for_safety'
+                ) as plan_metadata
+              FROM worst_query;
+
+      # MySQL receiver for metadata collection
+      sqlquery/mysql:
+        driver: mysql
+        dsn: "${env:MYSQL_READONLY_DSN}"
+        collection_interval: 300s
+        timeout: 10s
+        max_open_connections: 2
+        max_idle_connections: 1
+        connection_max_lifetime: 300s
+        enabled_when_leader: true # Only the leader collects data
+        queries:
+          - sql: |
+              SELECT
+                DIGEST as query_id,
+                DIGEST_TEXT as query_text,
+                ROUND(AVG_TIMER_WAIT/1000000, 2) as avg_duration_ms,
+                COUNT_STAR as execution_count,
+                ROUND((AVG_TIMER_WAIT * COUNT_STAR)/1000000, 2) as total_duration_ms,
+                JSON_OBJECT(
+                  'plan_available', false,
+                  'approach', 'performance_schema_metadata'
+                ) as plan_metadata
+              FROM performance_schema.events_statements_summary_by_digest
+              WHERE
+                SCHEMA_NAME = DATABASE()
+                AND SCHEMA_NAME IS NOT NULL
+                AND AVG_TIMER_WAIT > 50000000  -- 50ms+
+                AND COUNT_STAR > 5
+              ORDER BY (AVG_TIMER_WAIT * COUNT_STAR) DESC
+              LIMIT 1;
 
     processors:
+      memory_limiter:
+        check_interval: 2s
+        limit_mib: 1024
+        spike_limit_mib: 256
+
+      transform/sanitize_pii:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              # Redact sensitive information from query text
+              - replace_all_patterns(attributes["query_text"], '[^']*', '[REDACTED]')
+              - replace_all_patterns(attributes["query_text"], '\b\d{6,}\b', '[ID]')
+              - replace_all_patterns(body, '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]')
+
+      # Add metadata to identify the collector instance
+      resource:
+        attributes:
+          - key: "collector.instance.id"
+            value: "${env:HOSTNAME}"
+            action: upsert
+
+      probabilistic_sampler:
+        hash_seed: 22
+        sampling_percentage: 25
+
       batch:
-        send_batch_size: 1000
-        timeout: 10s
-        send_batch_max_size: 2000
-      
-      circuitbreaker:
-        failure_threshold: 5
-        success_threshold: 3
-        open_state_timeout: 30s
-        max_concurrent_requests: 100
-        base_timeout: 5s
-        max_timeout: 30s
-        enable_adaptive_timeout: true
-        memory_threshold_mb: 1024
-        cpu_threshold_percent: 80.0
-        health_check_interval: 10s
-      
-      attributes:
-        actions:
-          - key: deployment.environment
-            value: "${env:ENVIRONMENT}"
-            action: insert
-          - key: cloud.provider
-            value: "${env:CLOUD_PROVIDER}"
-            action: insert
-          - key: cloud.region
-            value: "${env:CLOUD_REGION}"
-            action: insert
+        timeout: 30s
+        send_batch_size: 50
+        send_batch_max_size: 100
 
-    exporters:
-      otlp/postgresql:
-        endpoint: "${env:OTLP_ENDPOINT}"
-        headers:
-          api-key: "${env:NEW_RELIC_LICENSE_KEY}"
-        compression: gzip
-        insecure: false
-        retry:
-          enabled: true
-          initial_interval: 1s
-          max_interval: 30s
-          max_elapsed_time: 5m
-        sending_queue:
-          enabled: true
-          num_consumers: 10
-          queue_size: 5000
-        transform:
-          add_database_labels: true
-          normalize_query_text: true
-          include_query_plans: true
-          sanitize_sensitive_data: true
-          metric_prefix: "postgresql."
-      
-      debug:
-        verbosity: basic
-        sampling_initial: 10
-        sampling_thereafter: 100
+exporters:
+  otlp/newrelic:
+    endpoint: "${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}"
+    headers:
+      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 120s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 256
 
-    service:
-      pipelines:
-        metrics:
-          receivers: [postgresqlquery]
-          processors: [batch, circuitbreaker, attributes]
-          exporters: [otlp/postgresql]
+service:
+  extensions: [health_check, leader_election, memory_ballast]
+  pipelines:
+    logs/database_intelligence:
+      receivers: [sqlquery/postgresql, sqlquery/mysql]
+      processors: [memory_limiter, transform/sanitize_pii, resource, probabilistic_sampler, batch]
+      exporters: [otlp/newrelic]
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  attribute-mapping.yaml: |
+    # Attribute Mapping Configuration
+    # This file defines the standardized attribute names and mappings
+    # to ensure consistency across receivers, processors, and exporters
+
+    # Standard attribute names used throughout the pipeline
+    standard_attributes:
+      # Query identification
+      query_id: "query_id"
+      query_hash: "query.hash"
+      query_text: "db.statement"
+      
+      # Database identification
+      database_name: "db.name"
+      database_system: "db.system"
+      database_user: "db.user"
+      
+      # Performance metrics
+      mean_duration_ms: "query.mean_duration_ms"
+      total_duration_ms: "query.total_duration_ms"
+      execution_count: "query.execution_count"
+      rows_affected: "query.rows_affected"
+      
+      # Resource metrics
+      shared_blocks_hit: "query.shared_blocks_hit"
+      shared_blocks_read: "query.shared_blocks_read"
+      temp_blocks_written: "query.temp_blocks_written"
+      
+      # Query plan attributes
+      plan_json: "query.plan.json"
+      plan_hash: "query.plan.hash"
+      plan_total_cost: "query.plan.total_cost"
+      plan_rows: "query.plan.rows"
+      plan_has_seq_scan: "query.plan.has_seq_scan"
+      plan_has_index_scan: "query.plan.has_index_scan"
+      plan_efficiency: "query.plan.efficiency"
+      
+      # Performance categories
+      performance_category: "query.performance_category"
+      
+      # Circuit breaker attributes
+      circuit_breaker_status: "circuit.breaker.status"
+      health_score: "db.health.score"
+      error_count: "error.count"
+      
+      # Collection metadata
+      collection_timestamp: "collection.timestamp"
+      collector_version: "collector.version"
+      
+      # Environment attributes
+      environment: "deployment.environment"
+      region: "cloud.region"
+      cloud_provider: "cloud.provider"
+
+    # Receiver-specific mappings
+    receiver_mappings:
+      postgresql:
+        # Map PostgreSQL receiver attributes to standard names
+        "postgresql.query.mean_time": "query.mean_duration_ms"
+        "postgresql.query.total_time": "query.total_duration_ms"
+        "postgresql.query.calls": "query.execution_count"
+        "postgresql.query.rows": "query.rows_affected"
+        "postgresql.query.shared_blks_hit": "query.shared_blocks_hit"
+        "postgresql.query.shared_blks_read": "query.shared_blocks_read"
+        "postgresql.query.temp_blks_written": "query.temp_blks_written"
+        "postgresql.query.stddev_time": "query.stddev_duration_ms"
+        "postgresql.query.min_time": "query.min_duration_ms"
+        "postgresql.query.max_time": "query.max_duration_ms"
         
-        logs:
-          receivers: [postgresqlquery]
-          processors: [batch, circuitbreaker, attributes]
-          exporters: [otlp/postgresql, debug]
-      
-      telemetry:
-        logs:
-          level: info
-          output_paths: [stdout]
-          error_output_paths: [stderr]
-        metrics:
-          level: detailed
-          address: 0.0.0.0:8888
+      mysql:
+        # Map MySQL receiver attributes to standard names
+        "mysql.query.mean_time": "query.mean_duration_ms"
+        "mysql.query.total_time": "query.total_duration_ms"
+        "mysql.query.calls": "query.execution_count"
+        
+      mongodb:
+        # Map MongoDB receiver attributes to standard names
+        "mongodb.operation.duration": "query.mean_duration_ms"
+        "mongodb.operation.count": "query.execution_count"
+
+    # Processor-specific mappings
+    processor_mappings:
+      adaptive_sampler:
+        # Attributes expected by adaptive sampler
+        expects:
+          - "query.mean_duration_ms"
+          - "query.performance_category"
+          - "query_id"
+          - "db.name"
+        # Backward compatibility mappings
+        compatibility:
+          "avg_duration_ms": "query.mean_duration_ms"
+          "mean_time_ms": "query.mean_duration_ms"
+          "database_name": "db.name"
+          
+      circuit_breaker:
+        # Attributes expected by circuit breaker
+        expects:
+          - "db.name"
+          - "query.mean_duration_ms"
+          - "error.count"
+        # Backward compatibility mappings
+        compatibility:
+          "database_name": "db.name"
+          
+      plan_attribute_extractor:
+        # Attributes expected by plan extractor
+        expects:
+          - "query.plan.json"
+        # Output attributes
+        produces:
+          - "query.plan.hash"
+          - "query.plan.total_cost"
+          - "query.plan.rows"
+          - "query.plan.has_seq_scan"
+          - "query.plan.has_index_scan"
+          - "query.plan.efficiency"
+        # Backward compatibility mappings
+        compatibility:
+          "plan_json": "query.plan.json"
+          "db.query.plan.hash": "query.plan.hash"
+
+    # Exporter-specific mappings
+    exporter_mappings:
+      newrelic:
+        # Attributes required by New Relic
+        required:
+          - "db.statement"
+          - "db.system"
+          - "db.name"
+        # New Relic specific attribute names
+        mappings:
+          "query.mean_duration_ms": "duration.ms"
+          "query.execution_count": "db.operation.count"
+          "db.statement": "db.query"
+
+    # Validation rules
+    validation_rules:
+      # Required attributes that must be present
+      required_attributes:
+        - "query_id"
+        - "db.name"
+        - "db.system"
+        - "query.mean_duration_ms"
+        
+      # Attribute type validations
+      attribute_types:
+        "query.mean_duration_ms": "float"
+        "query.execution_count": "int"
+        "query.rows_affected": "int"
+        "error.count": "int"
+        "db.health.score": "int"
+        "query.plan.efficiency": "float"
+        "query.plan.has_seq_scan": "bool"
+        "collection.timestamp": "float"
+        
+      # Value range validations
+      value_ranges:
+        "db.health.score":
+          min: 0
+          max: 100
+        "query.mean_duration_ms":
+          min: 0
+        "error.count":
+          min: 0
+
+    # Transformation rules for the attribute mapper processor
+    transformation_rules:
+      - description: "Map PostgreSQL attributes to standard names"
+        conditions:
+          - 'attributes["db.system"] == "postgresql"'
+        mappings:
+          - from: "postgresql.query.mean_time"
+            to: "query.mean_duration_ms"
+          - from: "postgresql.query.calls"
+            to: "query.execution_count"
+            
+      - description: "Map MySQL attributes to standard names"
+        conditions:
+          - 'attributes["db.system"] == "mysql"'
+        mappings:
+          - from: "mysql.query.mean_time"
+            to: "query.mean_duration_ms"
+          - from: "mysql.query.calls"
+            to: "query.execution_count"
+            
+      - description: "Ensure backward compatibility for processors"
+        conditions:
+          - 'true'  # Always apply
+        mappings:
+          - from: "query.mean_duration_ms"
+            to: "avg_duration_ms"
+            copy: true  # Keep both attributes
+          - from: "query.mean_duration_ms"
+            to: "mean_time_ms"
+            copy: true
+          - from: "db.name"
+            to: "database_name"
+            copy: true
+          - from: "query.plan.json"
+            to: "plan_json"
+            copy: true

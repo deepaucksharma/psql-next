@@ -19,10 +19,9 @@ receivers:
   # Production receivers
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sqlqueryreceiver v0.96.0
   
-  # Experimental receivers (require local modules)
-  - gomod: github.com/newrelic/database-intelligence-mvp/receivers/postgresqlquery v0.0.0
-    path: ./receivers/postgresqlquery
-    # Note: This receiver includes ASH sampling and plan analysis capabilities
+  # Note: Custom postgresqlquery receiver removed - use standard receivers instead
+  # - postgresql receiver for database metrics  
+  # - sqlquery receiver for query performance data
 
 # Processors
 processors:
@@ -68,7 +67,6 @@ connectors:
 # Build configuration
 replaces:
   # Replace with local modules during development
-  - github.com/newrelic/database-intelligence-mvp/receivers/postgresqlquery: ./receivers/postgresqlquery
   - github.com/newrelic/database-intelligence-mvp/processors/adaptivesampler: ./processors/adaptivesampler
   - github.com/newrelic/database-intelligence-mvp/processors/circuitbreaker: ./processors/circuitbreaker
   - github.com/newrelic/database-intelligence-mvp/processors/planattributeextractor: ./processors/planattributeextractor

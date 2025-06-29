@@ -1,0 +1,36 @@
+# Minimal Configuration Example
+# This shows the simplest possible setup for PostgreSQL monitoring
+
+receivers:
+  # Just PostgreSQL metrics
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases: [postgres]
+    collection_interval: 60s
+
+processors:
+  # Minimal processors
+  batch:
+    timeout: 10s
+
+  resource:
+    attributes:
+      - key: service.name
+        value: my-database-monitor
+        action: insert
+
+exporters:
+  # Send to New Relic
+  otlp:
+    endpoint: https://otlp.nr-data.net:4317
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+
+service:
+  pipelines:
+    metrics:
+      receivers: [postgresql]
+      processors: [batch, resource]
+      exporters: [otlp]

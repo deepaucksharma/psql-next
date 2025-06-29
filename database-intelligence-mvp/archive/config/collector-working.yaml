@@ -1,0 +1,65 @@
+# Working configuration for OpenTelemetry Collector with PostgreSQL
+receivers:
+  # PostgreSQL metrics receiver
+  postgresql:
+    endpoint: postgres:5432
+    username: newrelic_monitor
+    password: monitor123
+    databases:
+      - testdb
+    tls:
+      insecure: true
+    collection_interval: 10s
+
+processors:
+  # Memory limiter
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Batch processor
+  batch:
+    timeout: 10s
+
+  # Resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence
+        action: insert
+      - key: deployment.environment
+        value: test
+        action: insert
+
+exporters:
+  # Debug exporter
+  debug:
+    verbosity: detailed
+
+  # Prometheus exporter
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+
+  # New Relic exporter
+  otlp:
+    endpoint: "https://otlp.nr-data.net:4317"
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  
+  pipelines:
+    metrics:
+      receivers: [postgresql]
+      processors: [memory_limiter, batch, resource]
+      exporters: [debug, prometheus, otlp]
+  
+  telemetry:
+    logs:
+      level: info

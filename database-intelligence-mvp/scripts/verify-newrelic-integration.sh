@@ -44,7 +44,7 @@ execute_nrql_query() {
     
     local response=$(curl -s -X POST "$NERDGRAPH_URL" \
         -H "Content-Type: application/json" \
-        -H "API-Key: $NEW_RELIC_LICENSE_KEY" \
+        -H "API-Key: ${NEW_RELIC_USER_KEY:-$NEW_RELIC_LICENSE_KEY}" \
         -d @- <<EOF
 {
     "query": "{ actor { account(id: $NEW_RELIC_ACCOUNT_ID) { nrql(query: \"$query\") { results } } } }"

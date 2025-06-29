@@ -1,16 +1,16 @@
-# Database Intelligence MVP - Local Development Setup
-# Addresses single instance limitation with active-passive failover
+# Database Intelligence MVP - OTEL-First Local Development Setup
+# Uses standard OpenTelemetry components with custom processors for specific gaps
 
 version: '3.8'
 
 services:
-  # Primary collector instance
-  db-intelligence-primary:
+  # OpenTelemetry Collector - OTEL-First Architecture
+  db-intelligence-collector:
     image: otel/opentelemetry-collector-contrib:latest
-    container_name: db-intel-primary
-    hostname: db-intel-primary
+    container_name: db-intel-collector
+    hostname: db-intel-collector
     
-    # Resource limits
+    # Resource limits optimized for OTEL-first approach
     deploy:
       resources:
         limits:
@@ -20,27 +20,43 @@ services:
           memory: 512M
           cpus: '0.5'
     
-    # Configuration
+    # Configuration using OTEL-first config
     volumes:
-      - ../../config/collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ../../config/collector-otel-first.yaml:/etc/otelcol-contrib/config.yaml:ro
       - collector-storage:/var/lib/otel/storage
-      - /var/log:/var/log:ro  # For log file access
+      - collector-logs:/var/log
     
-    # Environment variables
+    # Environment variables for OTEL-first setup
     environment:
-      - OTEL_CONFIG_FILE=/etc/otelcol-contrib/config.yaml
-      - PG_REPLICA_DSN=${PG_REPLICA_DSN}
-      - MYSQL_READONLY_DSN=${MYSQL_READONLY_DSN}
+      # Database connection settings (standard format)
+      - POSTGRES_HOST=${POSTGRES_HOST:-postgres-db}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_USER=${POSTGRES_USER:-monitoring}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-monitoring123}
+      - POSTGRES_DB=${POSTGRES_DB:-testdb}
+      - POSTGRES_DSN=${POSTGRES_DSN:-postgres://monitoring:monitoring123@postgres-db:5432/testdb?sslmode=disable}
+      
+      - MYSQL_HOST=${MYSQL_HOST:-mysql-db}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-monitoring}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-monitoring123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-testdb}
+      
+      # OpenTelemetry export settings
       - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
-      - OTLP_ENDPOINT=${OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
-      - DEPLOYMENT_ENV=docker-compose
-      - INSTANCE_ROLE=primary
-      - COLLECTION_INTERVAL_SECONDS=60
-      - QUERY_TIMEOUT_MS=3000
-      - SAMPLING_PERCENTAGE=25
-      - LOG_LEVEL=info
+      - OTLP_ENDPOINT=${OTLP_ENDPOINT:-https://otlp.nr-data.net:4318}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      
+      # Collection settings
+      - COLLECTION_INTERVAL=${COLLECTION_INTERVAL:-30s}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      
+      # Custom processor toggles
+      - ADAPTIVE_SAMPLING_ENABLED=${ADAPTIVE_SAMPLING_ENABLED:-true}
+      - CIRCUIT_BREAKER_ENABLED=${CIRCUIT_BREAKER_ENABLED:-true}
+      - VERIFICATION_ENABLED=${VERIFICATION_ENABLED:-false}
     
-    # Health check
+    # Health check using standard OTEL extension
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:13133/"]
       interval: 30s
@@ -48,99 +64,33 @@ services:
       retries: 3
       start_period: 30s
     
-    # Ports
+    # Ports for OTEL-first monitoring
     ports:
-      - "13133:13133"  # Health check
-      - "8888:8888"    # Metrics
-      - "55679:55679"  # zpages
+      - "13133:13133"  # Health check endpoint
+      - "8888:8888"    # Internal collector metrics
+      - "8889:8889"    # Prometheus metrics endpoint
+      - "55679:55679"  # zPages debugging
+    
+    # Wait for databases to be ready (optional)
+    depends_on:
+      - postgres-db
+      - mysql-db
     
     # Restart policy
     restart: unless-stopped
     
-    # Logging
+    # Structured logging
     logging:
       driver: "json-file"
       options:
         max-size: "100m"
         max-file: "3"
 
-  # Secondary collector (standby)
-  db-intelligence-secondary:
-    image: otel/opentelemetry-collector-contrib:latest
-    container_name: db-intel-secondary
-    hostname: db-intel-secondary
-    
-    # Same config as primary but different ports
-    volumes:
-      - ../../config/collector-newrelic-optimized.yaml:/etc/otel/config.yaml:ro
-      - collector-storage-secondary:/var/lib/otel/storage
-      - /var/log:/var/log:ro
-    
-    environment:
-      - OTEL_CONFIG_FILE=/etc/otel/config.yaml
-      - PG_REPLICA_DSN=${PG_REPLICA_DSN}
-      - MYSQL_READONLY_DSN=${MYSQL_READONLY_DSN}
-      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
-      - OTLP_ENDPOINT=${OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
-      - DEPLOYMENT_ENV=docker-compose
-      - INSTANCE_ROLE=secondary
-    
-    # Different ports to avoid conflicts
-    ports:
-      - "13134:13133"  # Health check
-      - "8889:8888"    # Metrics
-      - "55680:55679"  # zpages
-    
-    # Start in standby mode (initially stopped)
-    profiles: ["standby"]
-    
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:13133/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    
-    restart: unless-stopped
-    
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
-
-  # Simple health monitor for failover
-  failover-monitor:
-    image: alpine:latest
-    container_name: db-intel-monitor
-    
-    volumes:
-      - ./scripts:/scripts:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    
-    environment:
-      - PRIMARY_URL=http://db-intel-primary:13133
-      - SECONDARY_URL=http://db-intel-secondary:13133
-      - CHECK_INTERVAL=30
-    
-    command: |
-      sh -c '
-        apk add --no-cache curl docker-cli
-        while true; do
-          if ! curl -f $$PRIMARY_URL/ >/dev/null 2>&1; then
-            echo "Primary unhealthy, starting secondary..."
-            # Would trigger secondary start in real implementation
-          fi
-          sleep $$CHECK_INTERVAL
-        done
-      '
-    
-    restart: unless-stopped
-
-  # PostgreSQL test database (for development)
-  postgres-test:
+  # PostgreSQL database optimized for OTEL monitoring
+  postgres-db:
     image: postgres:15
-    container_name: db-intel-postgres-test
+    container_name: db-intel-postgres
+    hostname: postgres-db
     
     environment:
       - POSTGRES_DB=testdb
@@ -150,26 +100,40 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d:ro
+      - postgres-logs:/var/log/postgresql
     
     ports:
       - "5432:5432"
     
-    # Enable pg_stat_statements
+    # PostgreSQL configuration optimized for monitoring
     command: |
       postgres
       -c shared_preload_libraries=pg_stat_statements
       -c pg_stat_statements.max=10000
       -c pg_stat_statements.track=all
-      -c log_statement=all
+      -c track_activity_query_size=2048
+      -c track_io_timing=on
+      -c track_functions=all
+      -c log_min_duration_statement=1000
+      -c log_line_prefix='%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
       -c log_destination=stderr
       -c logging_collector=off
     
-    profiles: ["test"]
+    # Health check for dependency management
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    
+    restart: unless-stopped
 
-  # MySQL test database (for development)  
-  mysql-test:
+  # MySQL database optimized for OTEL monitoring
+  mysql-db:
     image: mysql:8.0
-    container_name: db-intel-mysql-test
+    container_name: db-intel-mysql
+    hostname: mysql-db
     
     environment:
       - MYSQL_ROOT_PASSWORD=rootpass
@@ -180,23 +144,92 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       - ./my.cnf:/etc/mysql/conf.d/custom.cnf:ro
+      - mysql-logs:/var/log/mysql
     
     ports:
       - "3306:3306"
     
-    profiles: ["test"]
+    # MySQL configuration for performance monitoring
+    command: |
+      mysqld
+      --performance-schema=ON
+      --performance-schema-consumer-events-statements-current=ON
+      --performance-schema-consumer-events-statements-history=ON
+      --performance-schema-consumer-events-statements-history-long=ON
+      --slow-query-log=1
+      --slow-query-log-file=/var/log/mysql/slow.log
+      --long-query-time=1
+      --log-queries-not-using-indexes=1
+    
+    # Health check for dependency management
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "testuser", "-ptestpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    
+    restart: unless-stopped
+
+  # Simple load generator for testing (optional)
+  load-generator:
+    image: postgres:15
+    container_name: db-intel-load-generator
+    
+    command: |
+      bash -c '
+        echo "Waiting for databases to be ready..."
+        sleep 30
+        
+        echo "Starting load generation..."
+        while true; do
+          # PostgreSQL queries
+          psql -h postgres-db -U testuser -d testdb -c "SELECT COUNT(*) FROM pg_stat_activity;" || true
+          psql -h postgres-db -U testuser -d testdb -c "SELECT query, calls, mean_exec_time FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 5;" || true
+          
+          # Simple workload simulation
+          for i in {1..10}; do
+            psql -h postgres-db -U testuser -d testdb -c "SELECT $$i, random(), now();" || true
+          done
+          
+          # Wait between load cycles
+          sleep 60
+        done
+      '
+    
+    environment:
+      - PGPASSWORD=testpass
+    
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      mysql-db:
+        condition: service_healthy
+    
+    profiles: ["load-test"]  # Optional service for load testing
+    restart: unless-stopped
 
 volumes:
+  # Collector storage for OTEL-first approach
   collector-storage:
     driver: local
-  collector-storage-secondary:
+  collector-logs:
     driver: local
+  
+  # Database storage
   postgres-data:
     driver: local
+  postgres-logs:
+    driver: local
   mysql-data:
+    driver: local
+  mysql-logs:
     driver: local
 
 networks:
   default:
-    name: db-intelligence
+    name: db-intelligence-otel
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

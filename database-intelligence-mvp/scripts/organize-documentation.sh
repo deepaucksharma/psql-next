@@ -10,6 +10,12 @@ mkdir -p database-intelligence-mvp/docs/reference/{metric-mapping,strategy,migra
 
 # Copy metric mapping files
 echo "Copying metric mapping documentation..."
+if [ -f enhanced-metric-mapping.md ]; then
+    cp enhanced-metric-mapping.md database-intelligence-mvp/docs/reference/metric-mapping/
+fi
+if [ -f ohi-metric-mapping-implementation.md ]; then
+    cp ohi-metric-mapping-implementation.md database-intelligence-mvp/docs/reference/metric-mapping/
+fi
 
 
 # Copy strategy files

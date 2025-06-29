@@ -1,0 +1,210 @@
+# Example Configuration for Database Intelligence Verification Processor
+# This configuration demonstrates all features of the enhanced verification processor
+
+receivers:
+  postgresqlquery:
+    endpoint: ${DB_HOST}:${DB_PORT}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    database: ${DB_NAME}
+    collection_interval: 30s
+    queries:
+      - name: slow_queries
+        sql: |
+          SELECT query_id, query, total_time as duration_ms, calls as execution_count,
+                 mean_time as avg_duration_ms, stddev_time, min_time, max_time,
+                 rows, 100.0 * shared_blks_hit / nullif(shared_blks_hit + shared_blks_read, 0) AS hit_ratio
+          FROM pg_stat_statements 
+          WHERE total_time > 1000 
+          ORDER BY total_time DESC 
+          LIMIT 100
+
+processors:
+  # Circuit breaker for safety
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 3
+    open_state_timeout: 30s
+    max_concurrent_requests: 100
+    enable_adaptive_timeout: true
+    health_check_interval: 10s
+    memory_threshold_mb: 512
+    cpu_threshold_percent: 80.0
+
+  # Enhanced verification processor with all features
+  verification:
+    # Basic verification settings
+    enable_periodic_verification: true
+    verification_interval: 5m
+    data_freshness_threshold: 10m
+    min_entity_correlation_rate: 0.8
+    min_normalization_rate: 0.9
+    require_entity_synthesis: true
+    export_feedback_as_logs: true
+    
+    # Continuous health monitoring
+    enable_continuous_health_checks: true
+    health_check_interval: 30s
+    health_thresholds:
+      memory_percent: 85.0
+      cpu_percent: 80.0
+      disk_percent: 90.0
+      network_latency: 5s
+    
+    # Data quality validation rules
+    quality_rules:
+      required_fields:
+        - database_name
+        - query_id
+        - duration_ms
+        - execution_count
+      enable_schema_validation: true
+      cardinality_limits:
+        query_id: 10000
+        database_name: 100
+        table_name: 1000
+        user_name: 500
+      data_type_validation:
+        duration_ms: "double"
+        execution_count: "int"
+        database_name: "string"
+        hit_ratio: "double"
+    
+    # PII detection and sanitization
+    pii_detection:
+      enabled: true
+      auto_sanitize: false  # Set to true for automatic sanitization
+      sensitivity_level: "medium"  # low, medium, high
+      custom_patterns:
+        - '\b\d{16}\b'  # 16-digit numbers (potential credit cards)
+        - '\b\d{9}\b'   # 9-digit numbers (potential SSNs)
+      exclude_fields:
+        - query_hash
+        - plan_hash
+        - database_name
+        - table_name
+    
+    # Auto-tuning engine
+    enable_auto_tuning: true
+    auto_tuning_interval: 10m
+    auto_tuning_config:
+      enable_auto_apply: false  # Conservative: only suggest, don't auto-apply
+      min_confidence_level: 0.8
+      max_parameter_change: 0.2
+      history_retention_hours: 24
+    
+    # Self-healing capabilities
+    enable_self_healing: true
+    self_healing_interval: 1m
+    self_healing_config:
+      max_retries: 3
+      backoff_multiplier: 2.0
+      enabled_issue_types:
+        - consumer_error
+        - high_memory
+        - database_connectivity
+      alert_on_failure: true
+    
+    # Custom verification queries
+    verification_queries:
+      - name: integration_errors
+        query: "SELECT count(*) FROM NrIntegrationError WHERE newRelicFeature = 'Metrics' SINCE 5 minutes ago"
+        interval: 5m
+        threshold: 10
+        comparison: "lt"
+      
+      - name: data_freshness
+        query: "SELECT count(*) FROM Log WHERE collector.name = 'database-intelligence' SINCE 5 minutes ago"
+        interval: 5m
+        threshold: 1
+        comparison: "gt"
+      
+      - name: quality_score
+        query: "SELECT average(quality_score) FROM Log WHERE collector.name = 'database-intelligence' SINCE 10 minutes ago"
+        interval: 10m
+        threshold: 0.8
+        comparison: "gt"
+      
+      - name: error_rate
+        query: "SELECT percentage(count(*), WHERE error = true) FROM Log WHERE collector.name = 'database-intelligence' SINCE 5 minutes ago"
+        interval: 5m
+        threshold: 5.0
+        comparison: "lt"
+
+  # Resource processor for entity synthesis
+  resource:
+    attributes:
+      - key: entity.type
+        value: "database"
+        action: insert
+      - key: entity.guid
+        from_attribute: database_name
+        action: insert
+      - key: service.name
+        value: "database-intelligence"
+        action: insert
+
+  # Transform processor for query normalization
+  transform:
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["db.query.normalized"], replace_pattern(body, "\\d+", "?"))
+          - set(attributes["db.query.fingerprint"], Md5(attributes["db.query.normalized"]))
+
+  # Batch processor
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    send_batch_max_size: 1500
+
+exporters:
+  # New Relic OTLP exporter
+  otlp:
+    endpoint: https://otlp.nr-data.net:4317
+    headers:
+      api-key: ${NEW_RELIC_API_KEY}
+    tls:
+      insecure: false
+
+  # Debug exporter for development
+  debug:
+    verbosity: detailed
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+
+extensions:
+  health_check:
+    endpoint: "0.0.0.0:13133"
+  pprof:
+    endpoint: "0.0.0.0:1777"
+  zpages:
+    endpoint: "0.0.0.0:55679"
+
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    logs:
+      receivers: [postgresqlquery]
+      processors: 
+        - circuitbreaker      # Safety first
+        - verification        # Enhanced verification with all features
+        - resource           # Entity synthesis
+        - transform          # Query normalization
+        - batch              # Batching for efficiency
+      exporters: [otlp, debug]
+    
+    metrics:
+      receivers: [postgresqlquery]
+      processors: [batch]
+      exporters: [prometheus]
+
+# Environment variables (set these in your deployment):
+# NEW_RELIC_API_KEY=your_newrelic_api_key
+# DB_HOST=your_database_host
+# DB_PORT=5432
+# DB_USER=readonly_user
+# DB_PASSWORD=secure_password
+# DB_NAME=your_database_name

@@ -304,7 +304,7 @@ validate_collector() {
     log "Validating collector configuration..."
     
     local project_root="$(get_project_root)"
-    local config_file="$project_root/config/collector-improved.yaml"
+    local config_file="$project_root/config/collector.yaml"
     
     # Check config file exists
     if [[ -f "$config_file" ]]; then

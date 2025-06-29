@@ -1,0 +1,153 @@
+# Development Configuration for Database Intelligence
+# This configuration includes debug output and faster collection intervals
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  
+  # Enable profiling for development
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  memory_ballast:
+    size_mib: 64  # Smaller for dev
+
+receivers:
+  # Standard OTEL receivers with faster intervals for testing
+  postgresql:
+    endpoint: ${env:PG_HOST:-localhost}:${env:PG_PORT:-5432}
+    username: ${env:PG_USER:-postgres}
+    password: ${env:PG_PASSWORD:-postgres}
+    databases:
+      - ${env:PG_DATABASE:-postgres}
+    tls:
+      insecure: true
+    collection_interval: 10s  # Faster for dev
+
+  mysql:
+    endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-root}
+    database: ${env:MYSQL_DATABASE:-mysql}
+    collection_interval: 10s  # Faster for dev
+
+  # SQL query receiver for testing custom queries
+  sqlquery/postgresql:
+    driver: postgres
+    dsn: "postgres://${env:PG_USER:-postgres}:${env:PG_PASSWORD:-postgres}@${env:PG_HOST:-localhost}:${env:PG_PORT:-5432}/${env:PG_DATABASE:-postgres}?sslmode=disable"
+    collection_interval: 30s  # Faster for dev
+    queries:
+      - sql: |
+          SELECT 
+            queryid::text as query_id,
+            LEFT(query, 100) as query_text,
+            round(mean_exec_time::numeric, 2) as avg_duration_ms,
+            calls as execution_count
+          FROM pg_stat_statements
+          WHERE mean_exec_time > 10  # Lower threshold for dev
+          ORDER BY mean_exec_time DESC
+          LIMIT 20  # More results for testing
+
+processors:
+  # Standard processors with dev-friendly settings
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256  # Lower for dev
+    spike_limit_mib: 64
+
+  batch:
+    timeout: 5s  # Faster batching for dev
+    send_batch_size: 100
+
+  # Add extra attributes for debugging
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence-dev
+        action: insert
+      - key: deployment.environment
+        value: development
+        action: insert
+      - key: dev.machine
+        value: ${env:HOSTNAME}
+        action: insert
+
+  # Transform processor for PII sanitization
+  transform/sanitize_pii:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - replace_all_patterns(attributes["query_text"], "'[^']*'", "'[REDACTED]'")
+          - replace_all_patterns(attributes["query_text"], "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "[EMAIL]")
+
+  # Lower sampling rate for more data in dev
+  probabilistic_sampler:
+    sampling_percentage: 50.0  # Higher for dev
+
+  # Optional custom processors for testing
+  database_intelligence/adaptive_sampler:
+    enabled: ${env:ENABLE_ADAPTIVE_SAMPLER:-true}  # Enabled in dev
+    high_cost_threshold_ms: 100  # Lower threshold for testing
+    min_sampling_rate: 0.5
+    max_sampling_rate: 1.0
+
+exporters:
+  # Debug exporter for console output
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # File exporter for local inspection
+  file:
+    path: ./metrics.json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+
+  # Still send to OTLP but optional
+  otlp/newrelic:
+    endpoint: ${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY:-dummy-key-for-dev}
+    compression: gzip
+    sending_queue:
+      enabled: false  # Disable queue in dev for immediate feedback
+
+  # Prometheus for local metrics
+  prometheus:
+    endpoint: 0.0.0.0:8888
+
+service:
+  extensions: [health_check, pprof, memory_ballast]
+  
+  pipelines:
+    # Database metrics pipeline
+    metrics/databases:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug, prometheus, file]  # Multiple exporters for dev
+    
+    # Query intelligence pipeline
+    logs/database_intelligence:
+      receivers: [sqlquery/postgresql]
+      processors: 
+        - memory_limiter
+        - transform/sanitize_pii
+        - resource
+        - database_intelligence/adaptive_sampler
+        - probabilistic_sampler
+        - batch
+      exporters: [debug, file]  # Focus on local debugging
+  
+  telemetry:
+    logs:
+      level: debug  # Verbose logging
+      encoding: json
+      output_paths: ["stdout", "./collector.log"]
+      error_output_paths: ["stderr", "./collector-errors.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8889  # Different port to avoid conflicts
