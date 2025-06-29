@@ -44,7 +44,23 @@ func (p *planAttributeExtractor) Capabilities() consumer.Capabilities {
 
 // Start starts the processor
 func (p *planAttributeExtractor) Start(ctx context.Context, host component.Host) error {
-	p.logger.Info("Starting plan attribute extractor processor")
+	p.logger.Info("Starting plan attribute extractor processor",
+		zap.Bool("safe_mode", p.config.SafeMode),
+		zap.Bool("unsafe_plan_collection", p.config.UnsafePlanCollection))
+	
+	if !p.config.SafeMode {
+		p.logger.Warn("Plan attribute extractor is not in safe mode - this may impact database performance")
+	}
+	
+	if p.config.UnsafePlanCollection {
+		p.logger.Error("UNSAFE: Direct plan collection is enabled - this can severely impact production databases")
+	}
+	
+	// Warn about pg_querylens dependency
+	p.logger.Warn("Plan attribute extraction requires pre-collected plan data",
+		zap.String("recommendation", "Use pg_stat_statements or similar for safe plan collection"),
+		zap.String("unsafe_alternative", "pg_querylens extension (requires C compilation and PostgreSQL restart)"))
+	
 	return nil
 }
 
@@ -92,7 +108,10 @@ func (p *planAttributeExtractor) processLogRecord(ctx context.Context, record pl
 	// Check if this record contains plan data
 	planData, planType := p.detectPlanType(record)
 	if planData == "" {
-		// No plan data found, nothing to extract
+		// No plan data found, log debug message if enabled
+		if p.config.EnableDebugLogging {
+			p.logger.Debug("No plan data found in record - this is normal if using pg_stat_statements or similar basic collectors")
+		}
 		return nil
 	}
 	

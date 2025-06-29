@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide helps you diagnose and resolve common issues with the Database Intelligence OTEL Collector.
+This guide helps you diagnose and resolve common issues with the Database Intelligence OTEL Collector for both PostgreSQL and MySQL databases.
 
 ## Table of Contents
 - [Common Issues](#common-issues)
@@ -10,6 +10,29 @@ This guide helps you diagnose and resolve common issues with the Database Intell
 - [Database Connectivity](#database-connectivity)
 - [Metrics Not Appearing](#metrics-not-appearing)
 - [Error Messages](#error-messages)
+
+## Quick Diagnostics
+
+### Check Collector Status
+```bash
+# Health check
+curl http://localhost:13134/
+
+# Metrics for both databases
+curl http://localhost:8888/metrics | grep -E "postgresql_|mysql_"
+
+# Check logs
+task logs:collector
+```
+
+### Verify Database Connectivity
+```bash
+# Test PostgreSQL
+PGPASSWORD=postgres psql -h localhost -U postgres -d testdb -c "SELECT 1"
+
+# Test MySQL
+mysql -h localhost -u root -pmysql testdb -e "SELECT 1"
+```
 
 ## Common Issues
 
@@ -348,6 +371,36 @@ service:
 ./dist/otelcol-db-intelligence --config=config/collector.yaml --log-level=debug 2>&1 | grep postgresql
 ```
 
+### MySQL Metrics Missing
+
+**Issue:** No MySQL metrics in Prometheus endpoint
+
+**Checklist:**
+1. Is Performance Schema enabled?
+```sql
+SHOW VARIABLES LIKE 'performance_schema';
+-- Should show ON
+
+-- If OFF, enable in my.cnf:
+-- performance_schema=ON
+```
+
+2. Check receiver configuration:
+```yaml
+receivers:
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: mysql
+    database: testdb  # Optional, but recommended
+```
+
+3. Verify permissions:
+```sql
+SHOW GRANTS FOR 'root'@'%';
+-- Should have PROCESS and REPLICATION CLIENT
+```
+
 ### Query Metrics Missing
 
 **Issue:** SQLQuery receiver not producing metrics
@@ -356,7 +409,11 @@ service:
 
 1. **Test query manually:**
 ```bash
+# PostgreSQL
 PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DATABASE -c "YOUR_QUERY_HERE"
+
+# MySQL
+mysql -h $MYSQL_HOST -u $MYSQL_USER -p$MYSQL_PASSWORD -e "YOUR_QUERY_HERE"
 ```
 
 2. **Check query timeout:**
@@ -366,6 +423,24 @@ receivers:
     queries:
       - sql: "..."
         timeout: 30s  # Increase if needed
+  
+  sqlquery/mysql:
+    queries:
+      - sql: "..."
+        timeout: 30s  # Increase if needed
+```
+
+3. **Fix column name issues:**
+```yaml
+# MySQL column names are case-sensitive
+sqlquery/mysql:
+  queries:
+    - sql: |
+        SELECT 
+          TABLE_SCHEMA,
+          TABLE_NAME,
+          TABLE_ROWS  # Use uppercase
+        FROM information_schema.TABLES
 ```
 
 ## Error Messages

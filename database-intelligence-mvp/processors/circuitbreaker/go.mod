@@ -1,16 +1,21 @@
 module github.com/database-intelligence-mvp/processors/circuitbreaker
 
-go 1.21
+go 1.23.0
+
+toolchain go1.24.3
 
 require (
-	go.opentelemetry.io/collector/component v0.96.0
-	go.opentelemetry.io/collector/consumer v0.96.0
-	go.opentelemetry.io/collector/pdata v1.3.0
-	go.opentelemetry.io/collector/processor v0.96.0
-	go.uber.org/zap v1.26.0
+	github.com/go-redis/redis/v8 v8.11.5
+	go.opentelemetry.io/collector/component v1.33.0
+	go.opentelemetry.io/collector/consumer v1.33.0
+	go.opentelemetry.io/collector/pdata v1.34.0
+	go.opentelemetry.io/collector/processor v1.33.0
+	go.uber.org/zap v1.27.0
 )
 
 require (
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect

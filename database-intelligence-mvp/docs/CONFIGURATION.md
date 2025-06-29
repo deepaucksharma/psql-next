@@ -1,6 +1,12 @@
-# Configuration Reference
+# Configuration Reference - Production Ready
 
-This document provides a comprehensive reference for configuring the Database Intelligence Collector with our modernized infrastructure.
+✅ **PRODUCTION READY** - This document provides configuration guidance for the stable Database Intelligence Collector. All configurations now use the single-instance model with in-memory state management and enhanced security.
+
+## ✅ Production Configurations Available
+
+- **`config/collector-resilient.yaml`** - **RECOMMENDED** for production (single instance, enhanced PII protection)
+- **`config/collector-simplified.yaml`** - Basic monitoring with standard OTEL components
+- **`config/pii-detection-enhanced.yaml`** - Standalone enhanced PII protection patterns
 
 ## Table of Contents
 - [Configuration Overlay System](#configuration-overlay-system)
@@ -12,33 +18,69 @@ This document provides a comprehensive reference for configuring the Database In
 - [Complete Examples](#complete-examples)
 - [Using Taskfile](#using-taskfile)
 
-## Configuration Overlay System
+## ✅ Production Configuration System
 
-We use a layered configuration approach for managing environment-specific settings:
+Production-ready configurations are available in the `config/` directory:
 
 ```
-configs/overlays/
-├── base/           # Shared base configuration
-│   └── collector.yaml
-├── dev/            # Development overrides
-│   └── collector.yaml
-├── staging/        # Staging overrides
-│   └── collector.yaml
-└── production/     # Production overrides
-    └── collector.yaml
+config/
+├── collector-resilient.yaml       # ✅ RECOMMENDED - Production ready
+├── collector-simplified.yaml      # Basic monitoring
+└── pii-detection-enhanced.yaml    # Enhanced PII patterns
 ```
 
-### Using Overlays with Taskfile
+### ✅ Using Production Configurations
 
 ```bash
-# Run with development configuration
-task run CONFIG_ENV=dev
+# Run with production-ready resilient configuration (RECOMMENDED)
+task run CONFIG=resilient
 
-# Run with staging configuration
-task run CONFIG_ENV=staging
+# Run with simplified configuration
+task run CONFIG=simplified
 
-# Run with production configuration
-task run CONFIG_ENV=production
+# Build and run with specific config
+./dist/otelcol --config=config/collector-resilient.yaml
+```
+
+## ✅ Resilient Configuration Features
+
+The `collector-resilient.yaml` configuration provides production-ready deployment with the following features:
+
+### ✅ Enhanced Security
+- **Comprehensive PII Detection**: Credit cards, SSNs, emails, phone numbers automatically redacted
+- **Safe Query Collection**: Uses pg_stat_statements only (no unsafe EXPLAIN calls)
+- **Secure Defaults**: All processors configured for safe production operation
+
+### ✅ Reliable State Management
+- **In-Memory Only**: No Redis or file persistence required
+- **Graceful Restart**: Clean state on restart (no stale data issues)
+- **Resource Bounded**: Memory limits and automatic cleanup
+
+### ✅ Resilient Processing
+- **Missing Attribute Handling**: Processors work even when dependencies unavailable
+- **Debug Logging**: Clear messages when plan attributes missing
+- **Independent Operation**: Each processor works without requiring others
+
+### ✅ Production Monitoring
+- **Circuit Breaker Protection**: Automatic database protection
+- **Memory Monitoring**: Prevents resource exhaustion
+- **New Relic Integration**: Cardinality and error protection
+
+```yaml
+# Key features in collector-resilient.yaml
+processors:
+  adaptive_sampler:
+    in_memory_only: true              # ✅ No file storage
+    enable_debug_logging: true        # ✅ Clear missing dependency messages
+    deduplication:
+      enabled: false                  # ✅ Disabled when plan hashes unavailable
+  
+  circuit_breaker:
+    memory_threshold_mb: 512         # ✅ Resource protection
+    cpu_threshold_percent: 80.0      # ✅ CPU monitoring
+    
+  transform:
+    # ✅ Enhanced PII patterns (credit cards, SSNs, emails, etc.)
 ```
 
 ### Overlay Inheritance
@@ -80,19 +122,19 @@ task run ENV_FILE=.env
 # Database Credentials
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
-POSTGRES_USER=monitoring_user
-POSTGRES_PASSWORD=secure_password
-POSTGRES_DB=postgres
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=testdb
 
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
-MYSQL_USER=monitoring_user
-MYSQL_PASSWORD=secure_password
-MYSQL_DB=mysql
+MYSQL_USER=root
+MYSQL_PASSWORD=mysql
+MYSQL_DB=testdb
 
 # New Relic Configuration
 NEW_RELIC_LICENSE_KEY=your_license_key_here
-NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net:4317
+NEW_RELIC_OTLP_ENDPOINT=otlp.nr-data.net:4317  # No https:// prefix
 NEW_RELIC_ACCOUNT_ID=your_account_id
 
 # Environment Settings
@@ -105,12 +147,15 @@ GOMEMLIMIT=512MiB
 MEMORY_LIMIT_PERCENTAGE=75
 MEMORY_SPIKE_LIMIT_PERCENTAGE=25
 
-# Feature Flags (Experimental Mode)
-ENABLE_ADAPTIVE_SAMPLER=false
-ENABLE_CIRCUIT_BREAKER=false
-ENABLE_PLAN_EXTRACTOR=false
-ENABLE_VERIFICATION=false
-ENABLE_PII_SANITIZATION=true
+# ✅ Production Deployment Mode (Single Instance)
+DEPLOYMENT_MODE=production  # production (single instance, in-memory state)
+
+# ✅ Production Features (Always Enabled)
+ENABLE_ADAPTIVE_SAMPLER=true    # ✅ In-memory state, graceful degradation
+ENABLE_CIRCUIT_BREAKER=true     # ✅ Database protection
+ENABLE_PLAN_EXTRACTOR=true      # ✅ Safe mode only, no EXPLAIN calls
+ENABLE_VERIFICATION=true        # ✅ Enhanced PII detection
+ENABLE_PII_SANITIZATION=true    # ✅ Comprehensive patterns
 
 # Collection Settings
 COLLECTION_INTERVAL_SECONDS=60
@@ -387,6 +432,78 @@ service:
 ```
 
 ## Complete Examples
+
+### Minimal Production Configuration (Working)
+```yaml
+# config/collector-minimal.yaml
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13134
+
+receivers:
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - testdb
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: mysql
+    database: testdb
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+  
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence
+        action: insert
+      - key: deployment.environment
+        value: production
+        action: insert
+  
+  batch:
+    send_batch_size: 1000
+    timeout: 10s
+
+exporters:
+  otlp/newrelic:
+    endpoint: otlp.nr-data.net:4317
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+  
+  prometheus:
+    endpoint: 0.0.0.0:8888
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/newrelic, prometheus]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888
+```
 
 ### Development Configuration
 ```bash

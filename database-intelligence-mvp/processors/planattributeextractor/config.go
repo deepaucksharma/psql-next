@@ -27,6 +27,12 @@ type Config struct {
 
 	// EnableDebugLogging enables detailed debug logging
 	EnableDebugLogging bool `mapstructure:"enable_debug_logging"`
+
+	// UnsafePlanCollection enables direct EXPLAIN collection (NOT RECOMMENDED FOR PRODUCTION)
+	UnsafePlanCollection bool `mapstructure:"unsafe_plan_collection"`
+
+	// SafeMode ensures the processor only works with pre-collected plan data
+	SafeMode bool `mapstructure:"safe_mode"`
 }
 
 // PostgreSQLExtractionRules defines how to extract attributes from PostgreSQL JSON plans
@@ -87,6 +93,15 @@ func (cfg *Config) Validate() error {
 		}
 	}
 
+	// Safety validation
+	if cfg.UnsafePlanCollection && !cfg.SafeMode {
+		return fmt.Errorf("unsafe_plan_collection is enabled but safe_mode is false - this is dangerous for production databases")
+	}
+
+	// Force safe mode in production
+	cfg.SafeMode = true
+	cfg.UnsafePlanCollection = false
+
 	return nil
 }
 
@@ -139,6 +154,8 @@ func createDefaultConfig() component.Config {
 			Algorithm: "sha256",
 		},
 		EnableDebugLogging: false,
+		UnsafePlanCollection: false,
+		SafeMode: true,
 	}
 }
 

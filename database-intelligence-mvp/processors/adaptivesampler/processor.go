@@ -200,10 +200,16 @@ func (p *adaptiveSampler) shouldSample(record plog.LogRecord) bool {
 	return shouldSample
 }
 
-// isDuplicate checks if a record is a duplicate based on hash
+// isDuplicate checks if a record is a duplicate based on hash with graceful degradation
 func (p *adaptiveSampler) isDuplicate(record plog.LogRecord) bool {
 	hashAttr, exists := record.Attributes().Get(p.config.Deduplication.HashAttribute)
 	if !exists {
+		// Log debug message if hash attribute is missing
+		if p.config.EnableDebugLogging {
+			p.logger.Debug("Hash attribute missing from record, deduplication disabled for this record",
+				zap.String("hash_attribute", p.config.Deduplication.HashAttribute),
+				zap.String("suggestion", "Check if planattributeextractor is enabled and hash generation is configured"))
+		}
 		return false // No hash means not a duplicate
 	}
 
@@ -266,15 +272,40 @@ func (p *adaptiveSampler) ruleMatches(rule SamplingRule, record plog.LogRecord) 
 	return true
 }
 
-// conditionMatches evaluates a single condition
+// conditionMatches evaluates a single condition with graceful handling of missing attributes
 func (p *adaptiveSampler) conditionMatches(condition SamplingCondition, record plog.LogRecord) bool {
 	attr, exists := record.Attributes().Get(condition.Attribute)
 	if !exists {
-		return condition.Operator == "exists" && condition.Value.(bool) == false
+		// Handle missing attributes gracefully
+		if condition.Operator == "exists" {
+			expectedExists, ok := condition.Value.(bool)
+			if !ok {
+				if p.config.EnableDebugLogging {
+					p.logger.Debug("Invalid exists condition value", zap.String("attribute", condition.Attribute))
+				}
+				return false
+			}
+			return !expectedExists // If attribute doesn't exist and we expect it not to exist
+		}
+		
+		// For missing attributes with other operators, log a warning and fail gracefully
+		if p.config.EnableDebugLogging {
+			p.logger.Debug("Attribute missing from record, condition fails",
+				zap.String("attribute", condition.Attribute),
+				zap.String("operator", condition.Operator),
+				zap.String("suggestion", "Check if planattributeextractor is enabled and working"))
+		}
+		return false
 	}
 
 	if condition.Operator == "exists" {
-		expectedExists := condition.Value.(bool)
+		expectedExists, ok := condition.Value.(bool)
+		if !ok {
+			if p.config.EnableDebugLogging {
+				p.logger.Debug("Invalid exists condition value", zap.String("attribute", condition.Attribute))
+			}
+			return false
+		}
 		return expectedExists == true
 	}
 

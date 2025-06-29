@@ -1,0 +1,98 @@
+# Enhanced PII Detection Configuration
+# This configuration provides comprehensive PII sanitization beyond basic regex
+
+# Enhanced transform processor with comprehensive PII detection
+transform:
+  error_mode: ignore  # Continue processing even if some patterns fail
+  metric_statements:
+    - context: datapoint
+      statements:
+        # Credit card numbers (various formats)
+        - replace_pattern(attributes["query_text"], "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3[0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\\b", "****-****-****-XXXX") where attributes["query_text"] != nil
+        
+        # Social Security Numbers (US format)
+        - replace_pattern(attributes["query_text"], "\\b(?:\\d{3}[-.]?\\d{2}[-.]?\\d{4})\\b", "XXX-XX-XXXX") where attributes["query_text"] != nil
+        
+        # Email addresses
+        - replace_pattern(attributes["query_text"], "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "email@REDACTED.com") where attributes["query_text"] != nil
+        
+        # Phone numbers (US/International)
+        - replace_pattern(attributes["query_text"], "\\b(?:\\+?1[-.]?)?\\(?([0-9]{3})\\)?[-.]?([0-9]{3})[-.]?([0-9]{4})\\b", "+1-XXX-XXX-XXXX") where attributes["query_text"] != nil
+        
+        # IP addresses (IPv4)
+        - replace_pattern(attributes["query_text"], "\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b", "XXX.XXX.XXX.XXX") where attributes["query_text"] != nil
+        
+        # MAC addresses
+        - replace_pattern(attributes["query_text"], "\\b[0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}\\b", "XX:XX:XX:XX:XX:XX") where attributes["query_text"] != nil
+        
+        # URLs with sensitive info
+        - replace_pattern(attributes["query_text"], "https?://[\\w\\.-]+(?:/[\\w\\.-]*)*(?:\\?[\\w=&%-]*)?", "https://REDACTED_URL") where attributes["query_text"] != nil
+        
+        # Generic numeric sequences that might be IDs (6+ digits)
+        - replace_pattern(attributes["query_text"], "\\b\\d{6,}\\b", "XXXXXX") where attributes["query_text"] != nil
+        
+        # Names in common patterns (First Last, Last, First)
+        - replace_pattern(attributes["query_text"], "'([A-Z][a-z]+ [A-Z][a-z]+)'", "'FIRST LAST'") where attributes["query_text"] != nil
+        - replace_pattern(attributes["query_text"], "'([A-Z][a-z]+, [A-Z][a-z]+)'", "'LAST, FIRST'") where attributes["query_text"] != nil
+        
+        # Addresses (simplified pattern)
+        - replace_pattern(attributes["query_text"], "'(\\d+\\s+[A-Za-z\\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd).*?)'", "'123 REDACTED STREET'") where attributes["query_text"] != nil
+        
+        # SQL literals that might contain sensitive data
+        - replace_pattern(attributes["query_text"], "'[^']{20,}'", "'LONG_STRING_REDACTED'") where attributes["query_text"] != nil
+        
+        # Database/table names that might be sensitive
+        - replace_pattern(attributes["query_text"], "\\b(users?|customers?|patients?|employees?|accounts?)\\.", "sensitive_table.") where attributes["query_text"] != nil
+        
+        # Sanitize common PII column references
+        - replace_pattern(attributes["query_text"], "\\b(ssn|social_security|credit_card|cc_number|phone|email|address|first_name|last_name|full_name)\\s*=\\s*'[^']+'", "$1 = 'REDACTED'") where attributes["query_text"] != nil
+
+  # Additional attribute sanitization
+  log_statements:
+    - context: log
+      statements:
+        # Sanitize any log fields that might contain PII
+        - replace_pattern(body, "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3[0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\\b", "****-****-****-XXXX") where body != nil
+        - replace_pattern(body, "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "email@REDACTED.com") where body != nil
+        - replace_pattern(body, "\\b(?:\\d{3}[-.]?\\d{2}[-.]?\\d{4})\\b", "XXX-XX-XXXX") where body != nil
+
+# Alternative verification processor configuration with PII awareness
+verification:
+  enable_periodic_verification: true
+  verification_interval: 300s  # 5 minutes
+  data_freshness_threshold: 600s  # 10 minutes
+  
+  # PII detection settings
+  pii_detection:
+    enabled: true
+    detection_patterns:
+      - name: "credit_card"
+        pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3[0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\\b"
+        severity: "critical"
+      - name: "ssn"
+        pattern: "\\b(?:\\d{3}[-.]?\\d{2}[-.]?\\d{4})\\b"
+        severity: "critical"
+      - name: "email"
+        pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+        severity: "medium"
+      - name: "phone"
+        pattern: "\\b(?:\\+?1[-.]?)?\\(?([0-9]{3})\\)?[-.]?([0-9]{3})[-.]?([0-9]{4})\\b"
+        severity: "medium"
+    
+    # Actions to take when PII is detected
+    on_detection:
+      action: "sanitize_and_alert"  # Options: "sanitize", "drop", "sanitize_and_alert"
+      alert_threshold: 5  # Alert if more than 5 PII instances per minute
+  
+  # Quality checks
+  quality_checks:
+    enable_query_normalization_check: true
+    enable_entity_correlation_check: true
+    enable_cardinality_check: true
+    
+    # Cardinality limits to prevent New Relic errors
+    max_unique_queries_per_minute: 1000
+    max_unique_databases_per_minute: 100
+    max_attributes_per_metric: 50
+  
+  export_feedback_as_logs: true

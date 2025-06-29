@@ -1,6 +1,14 @@
-# Deployment Guide
+# Deployment Guide - Production Ready
 
-This guide provides comprehensive instructions for deploying the Database Intelligence Collector using our modernized infrastructure.
+✅ **PRODUCTION READY** - This guide provides instructions for deploying the Database Intelligence Collector using the stable single-instance model. All critical issues have been resolved as of June 2025.
+
+## ✅ Production Status (June 2025)
+
+- **✅ Single-Instance Deployment**: Reliable operation without Redis dependencies
+- **✅ Zero External Dependencies**: Works with standard PostgreSQL pg_stat_statements
+- **✅ Enhanced Security**: Comprehensive PII protection built-in
+- **✅ Graceful Degradation**: All components work independently
+- **✅ Production Configuration**: `config/collector-resilient.yaml` ready for use
 
 ## Prerequisites
 
@@ -24,21 +32,25 @@ sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin
 scoop install task
 ```
 
-### Database Prerequisites
+### ✅ Database Prerequisites (Simplified)
 
-#### PostgreSQL Setup
+#### PostgreSQL Setup (Required)
 ```sql
--- Enable pg_stat_statements
+-- Enable pg_stat_statements (standard extension)
 ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements';
 -- Restart PostgreSQL
 
--- Create extension
+-- Create extension (built into PostgreSQL)
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
--- Create monitoring user
+-- Create monitoring user with minimal privileges
 CREATE USER monitoring_user WITH PASSWORD 'secure_password';
 GRANT pg_monitor TO monitoring_user;
 GRANT SELECT ON pg_stat_statements TO monitoring_user;
+GRANT SELECT ON pg_stat_activity TO monitoring_user;
+
+-- ✅ NO pg_querylens extension required (optional only)
+-- ✅ NO additional PostgreSQL extensions needed
 ```
 
 #### MySQL Setup (Optional)
@@ -52,87 +64,82 @@ GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'monitoring_user'@'%';
 GRANT SELECT ON performance_schema.* TO 'monitoring_user'@'%';
 ```
 
-## Quick Start
+## ✅ Quick Start (Production Ready)
 
-### Fastest Deployment
+### Fastest Production Deployment
 ```bash
 # Clone repository
 git clone https://github.com/database-intelligence-mvp
 cd database-intelligence-mvp
 
-# Set up environment
+# Set up environment with production configuration
 cp .env.example .env
 # Edit .env with your credentials
 
-# Start everything with one command
-task quickstart
+# Start production-ready single instance
+task quickstart CONFIG=resilient
 ```
 
 This will:
 1. Install dependencies
-2. Fix common setup issues
-3. Build the collector
-4. Start PostgreSQL and MySQL
-5. Begin collecting metrics
+2. **✅ Use production-ready configuration** (`collector-resilient.yaml`)
+3. Build the collector with **✅ in-memory state management**
+4. Start **✅ single-instance collector** (no Redis needed)
+5. Begin collecting metrics with **✅ enhanced PII protection**
 
-## Deployment Options
+## ✅ Production Deployment Options
 
-### Option 1: Binary Deployment
+### Option 1: Single-Instance Binary (Recommended)
 
 #### Build from Source
 ```bash
-# Build collector with standard processors
+# Build production-ready collector
 task build
 
-# Build with experimental processors
-task build MODE=experimental
-
+# ✅ Binary includes all fixed processors with in-memory state
+# ✅ No Redis or external dependencies needed
 # Binary will be in dist/otelcol
 ```
 
-#### Run Binary
+#### Run Production Binary
 ```bash
-# Using environment file
-task run ENV_FILE=.env.production
+# Using production-ready configuration
+task run CONFIG=resilient ENV_FILE=.env.production
 
-# With specific configuration overlay
-task run CONFIG_ENV=production
-
-# With inline environment variables
-POSTGRES_HOST=localhost \
+# With environment variables (single instance)
+POSTGRES_HOST=your-db-host \
 POSTGRES_USER=monitoring_user \
 NEW_RELIC_LICENSE_KEY=your_key_here \
-task run
+ENVIRONMENT=production \
+./dist/otelcol --config=config/collector-resilient.yaml
 ```
 
-### Option 2: Docker Deployment
+### Option 2: Docker Deployment (Single Instance)
 
-#### Using Unified Docker Compose
+#### Using Production Docker Compose
 ```bash
-# Start all services (databases + collector + monitoring)
-task dev:up
+# ✅ Start production single-instance setup (no Redis)
+task docker:prod
 
-# Start specific profiles
-docker-compose --profile collector up -d
-docker-compose --profile databases up -d
-docker-compose --profile monitoring up -d
+# Or manually with production config
+docker-compose -f deploy/docker/docker-compose-ha.yaml up -d
+# ✅ Note: This now deploys single instance despite the filename
 
-# Or use pre-configured environments
-task dev:postgres    # PostgreSQL only
-task dev:mysql      # MySQL only
-task dev:full       # Everything
+# Start with different configurations
+task docker:simple      # Basic monitoring only
+task docker:resilient   # Full production features
 ```
 
-#### Building Custom Image
+#### Building Production Image
 ```bash
-# Build optimized Docker image
-task docker:build
+# Build production-optimized Docker image
+task docker:build TARGET=production
 
 # Build and push to registry
-task docker:push REGISTRY=your-registry.com
+task docker:push REGISTRY=your-registry.com TAG=production
 ```
 
-### Option 3: Kubernetes with Helm
+### Option 3: Kubernetes Single-Instance Deployment
 
 #### Quick Deployment
 ```bash

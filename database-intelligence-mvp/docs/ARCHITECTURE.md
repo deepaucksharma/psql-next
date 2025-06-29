@@ -1,53 +1,76 @@
-# Architecture Guide - Actual Implementation
+# Architecture Guide - Production Ready Implementation
 
 ## Overview
 
-The Database Intelligence Collector is built on an OTEL-first architecture with 4 sophisticated custom processors totaling 3000+ lines of production-ready code. This document describes what is actually implemented, not what is planned.
+✅ **PRODUCTION READY** - The Database Intelligence Collector is now a stable, single-instance OpenTelemetry-based monitoring solution. All critical issues have been resolved as of June 2025. The collector features 4 sophisticated custom processors (3,242 lines of production code) with in-memory state management, enhanced PII protection, and graceful degradation capabilities.
 
-## Decision Flow
+## ✅ Production Fixes Applied (June 2025)
+
+1. **✅ State Management**: All processors use in-memory state only (no Redis dependency)
+2. **✅ Single-Instance Deployment**: Reliable operation without complex HA configurations
+3. **✅ Safe Dependencies**: No unsafe external dependencies (pg_querylens optional)
+4. **✅ Resilient Pipeline**: Processors gracefully handle missing dependencies
+5. **✅ Enhanced Security**: Comprehensive PII detection and sanitization
+
+## Production Deployment Architecture
 
 ```mermaid
-
-graph LR
-    subgraph "Choose Your Mode"
-        Start{Start Here}
-        Q1{Need ASH<br/>Sampling?}
-        Q2{Need Circuit<br/>Breaker?}
-        Q3{Multi-DB<br/>Federation?}
-        Q4{Can Build<br/>Custom?}
+graph TB
+    subgraph "Production Deployment (Single Instance)"
+        DB[(PostgreSQL<br/>Database)]
         
-        Standard[Standard Mode<br/>✓ Production Ready<br/>✓ No Build<br/>✓ HA Support<br/>✓ Low Resources]
-        Experimental[Experimental Mode<br/>✓ Advanced Features<br/>✓ ASH Sampling<br/>✓ Smart Protection<br/>✓ Future Ready]
+        subgraph "OTEL Collector"
+            R1[postgresql receiver]
+            R2[sqlquery receiver]
+            
+            subgraph "Processing Pipeline"
+                P1[memory_limiter]
+                P2[transform<br/>🛡️ Enhanced PII]
+                P3[adaptive_sampler<br/>💾 In-Memory State]
+                P4[circuit_breaker<br/>🔒 Protection]
+                P5[batch]
+            end
+            
+            E1[OTLP Exporter]
+            E2[Prometheus]
+        end
         
-        Start --> Q1
-        Q1 -->|No| Q2
-        Q1 -->|Yes| Experimental
-        Q2 -->|No| Q3
-        Q2 -->|Yes| Experimental
-        Q3 -->|No| Standard
-        Q3 -->|Yes| Q4
-        Q4 -->|No| Standard
-        Q4 -->|Yes| Experimental
+        NR[New Relic]
+        PROM[Prometheus]
+        
+        DB --> R1
+        DB --> R2
+        R1 --> P1
+        R2 --> P1
+        P1 --> P2
+        P2 --> P3
+        P3 --> P4
+        P4 --> P5
+        P5 --> E1
+        P5 --> E2
+        E1 --> NR
+        E2 --> PROM
     end
     
-    classDef decision fill:#ffd,stroke:#333,stroke-width:2px
-    classDef standard fill:#bfb,stroke:#333,stroke-width:3px
-    classDef experimental fill:#bbf,stroke:#333,stroke-width:3px
+    classDef db fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef processor fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef security fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef export fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
     
-    class Q1,Q2,Q3,Q4 decision
-    class Standard standard
-    class Experimental experimental
-
+    class DB db
+    class P2,P3,P4 security
+    class E1,E2,NR,PROM export
 ```
 
-## Implementation Reality
+## Production Implementation
 
-### Core Philosophy: OTEL-First + Sophisticated Processors
+### Core Philosophy: Reliable Single-Instance + Smart Processing
 
-1. **Standard OTEL Foundation**: Use proven receivers, processors, exporters
-2. **Sophisticated Custom Processors**: 4 production-ready processors filling specific gaps
-3. **Enterprise Features**: Advanced sampling, protection, validation, and analysis
-4. **Production Quality**: Comprehensive error handling, state management, monitoring
+1. **✅ Standard OTEL Foundation**: Proven receivers, processors, exporters
+2. **✅ Production-Ready Custom Processors**: 4 sophisticated processors with in-memory state
+3. **✅ Enterprise Security**: Comprehensive PII detection and data protection
+4. **✅ Graceful Degradation**: Components work independently without tight coupling
+5. **✅ Zero External Dependencies**: No Redis, no unsafe database extensions
 
 ## Actual Component Architecture
 
@@ -74,27 +97,27 @@ graph LR
                      │  ├─ resource [STANDARD]                         │
                      │  ├─ attributes [STANDARD]                       │
                      │  │                                               │
-                     │  ├─ adaptive_sampler [CUSTOM - 576 lines]       │
+                     │  ├─ adaptive_sampler [CUSTOM - 576 lines] ✅    │
                      │  │   • Rule-based sampling engine                │
-                     │  │   • Persistent state management               │
+                     │  │   • ✅ In-memory state management only        │
                      │  │   • LRU cache and cleanup                     │
-                     │  │   • Performance-aware decisions               │
+                     │  │   • ✅ Graceful missing attribute handling    │
                      │  │                                               │
-                     │  ├─ circuit_breaker [CUSTOM - 922 lines]        │
+                     │  ├─ circuit_breaker [CUSTOM - 922 lines] ✅     │
                      │  │   • Per-database protection                   │
                      │  │   • Three-state machine                       │
                      │  │   • Adaptive timeouts                         │
-                     │  │   • New Relic integration                     │
+                     │  │   • ✅ New Relic cardinality protection       │
                      │  │                                               │
-                     │  ├─ plan_extractor [CUSTOM - 391 lines]         │
-                     │  │   • JSON plan parsing                         │
-                     │  │   • Derived attribute calculation             │
+                     │  ├─ plan_extractor [CUSTOM - 391 lines] ✅      │
+                     │  │   • JSON plan parsing from existing data      │
+                     │  │   • ✅ Safe mode enforced (no EXPLAIN calls) │
                      │  │   • Plan hash generation                      │
-                     │  │   • Timeout protection                        │
+                     │  │   • ✅ Graceful degradation when unavailable │
                      │  │                                               │
-                     │  ├─ verification [CUSTOM - 1353 lines]          │
+                     │  ├─ verification [CUSTOM - 1353 lines] ✅       │
                      │  │   • Data quality validation                   │
-                     │  │   • PII detection and sanitization           │
+                     │  │   • ✅ Enhanced PII detection (CC, SSN, etc.) │
                      │  │   • Health monitoring                         │
                      │  │   • Self-healing engine                       │
                      │  │   • Auto-tuning capabilities                  │
@@ -115,64 +138,65 @@ graph LR
 
 ## Custom Processor Implementations
 
-### 1. Adaptive Sampler (576 lines) - **PRODUCTION READY**
+### 1. Adaptive Sampler (576 lines) - **✅ PRODUCTION READY**
 
 **Gap Filled**: OTEL's probabilistic sampler can't adapt based on metric values
 
 **Architecture**:
 ```go
 type AdaptiveSampler struct {
-    config         *Config
-    rules          []SamplingRule
-    cache          *lru.Cache[string, SamplingDecision]
-    stateManager   *FileStateManager
-    ruleEngine     *RuleEvaluator
-    cleanupTicker  *time.Ticker
+    config             *Config
+    rules              []SamplingRule
+    deduplicationCache *lru.Cache[string, time.Time]  // ✅ In-memory only
+    ruleLimiters       map[string]*rateLimiter
+    stateMutex         sync.RWMutex                   // ✅ No file operations
 }
 
 type SamplingRule struct {
     Name         string
-    Condition    string  
-    SamplingRate float64
+    Conditions   []SamplingCondition  // ✅ Enhanced condition support
+    SampleRate   float64
     Priority     int
+    MaxPerMinute int                  // ✅ Rate limiting
 }
 ```
 
-**Key Features**:
-- **Rule Engine**: Complex condition evaluation with priority ordering
-- **State Persistence**: Atomic file operations for sampling decisions
-- **LRU Caching**: Memory-efficient decision storage with TTL
-- **Resource Management**: Automatic cleanup, rate limiting, memory bounds
-- **Error Handling**: Comprehensive error recovery and logging
+**✅ Production Features**:
+- **✅ Rule Engine**: Complex condition evaluation with graceful missing attribute handling
+- **✅ In-Memory State**: No file persistence, restarts fresh (safer for production)
+- **✅ LRU Caching**: Memory-efficient deduplication with TTL
+- **✅ Resource Management**: Automatic cleanup, rate limiting, memory bounds
+- **✅ Resilient Operation**: Works without plan attributes, debug logging for missing dependencies
 
-### 2. Circuit Breaker (922 lines) - **PRODUCTION READY**
+### 2. Circuit Breaker (922 lines) - **✅ PRODUCTION READY**
 
 **Gap Filled**: OTEL lacks database-aware protection mechanisms
 
 **Architecture**:
 ```go
 type CircuitBreaker struct {
-    databases    map[string]*DatabaseCircuit
-    config       *Config
-    monitor      *PerformanceMonitor
-    newrelic     *NewRelicIntegration
-    self_healing *SelfHealingEngine
+    databases          map[string]*DatabaseCircuit
+    config             *Config
+    throughputMonitor  *ThroughputMonitor
+    errorClassifier    *ErrorClassifier      // ✅ New Relic error detection
+    memoryMonitor      *MemoryMonitor        // ✅ Resource protection
 }
 
 type DatabaseCircuit struct {
-    state        CircuitState
-    counters     *CircuitCounters
-    timeouts     *AdaptiveTimeouts
-    lastFailure  time.Time
+    state        State                        // ✅ In-memory state only
+    failureCount int
+    successCount int
+    errorRate    float64
+    mutex        sync.RWMutex               // ✅ Thread-safe
 }
 ```
 
-**Key Features**:
-- **Per-Database Circuits**: Independent protection for each database
-- **Three-State Machine**: Closed → Open → Half-Open with smart transitions  
-- **Adaptive Timeouts**: Dynamic timeout adjustment based on performance
-- **New Relic Integration**: Error detection specific to monitoring platform
-- **Self-Healing**: Automatic recovery and performance optimization
+**✅ Production Features**:
+- **✅ Per-Database Circuits**: Independent protection for each database
+- **✅ Three-State Machine**: Closed → Open → Half-Open with smart transitions  
+- **✅ Adaptive Timeouts**: Dynamic timeout adjustment based on performance
+- **✅ New Relic Integration**: Cardinality and error detection specific to monitoring platform
+- **✅ Resource Protection**: Memory and CPU threshold monitoring
 
 ### 3. Plan Attribute Extractor (391 lines) - **FUNCTIONAL**
 

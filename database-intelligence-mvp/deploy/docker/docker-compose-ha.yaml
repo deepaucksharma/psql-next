@@ -11,7 +11,7 @@ services:
       postgres-primary:
         condition: service_healthy
     volumes:
-      - ../../config/collector-simplified.yaml:/etc/otel-collector-config.yaml
+      - ../../config/collector-resilient.yaml:/etc/otel-collector-config.yaml
       - /var/log/collector:/var/log
       - collector-state:/var/lib/otel  # Local state storage
     environment:
