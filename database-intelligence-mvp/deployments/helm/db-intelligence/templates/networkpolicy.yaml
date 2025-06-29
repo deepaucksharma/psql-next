@@ -1,0 +1,105 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "database-intelligence.fullname" . }}
+  labels:
+    {{- include "database-intelligence.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "database-intelligence.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- if .Values.networkPolicy.ingress }}
+  ingress:
+    {{- range .Values.networkPolicy.ingress }}
+    - {{- if .from }}
+      from:
+        {{- range .from }}
+        - {{- if .podSelector }}
+          podSelector:
+            {{- toYaml .podSelector | nindent 12 }}
+          {{- end }}
+          {{- if .namespaceSelector }}
+          namespaceSelector:
+            {{- toYaml .namespaceSelector | nindent 12 }}
+          {{- end }}
+          {{- if .ipBlock }}
+          ipBlock:
+            {{- toYaml .ipBlock | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- if .ports }}
+      ports:
+        {{- range .ports }}
+        - protocol: {{ .protocol | default "TCP" }}
+          port: {{ .port }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.networkPolicy.egress }}
+  egress:
+    {{- range .Values.networkPolicy.egress }}
+    - {{- if .to }}
+      to:
+        {{- range .to }}
+        - {{- if .podSelector }}
+          podSelector:
+            {{- toYaml .podSelector | nindent 12 }}
+          {{- end }}
+          {{- if .namespaceSelector }}
+          namespaceSelector:
+            {{- toYaml .namespaceSelector | nindent 12 }}
+          {{- end }}
+          {{- if .ipBlock }}
+          ipBlock:
+            {{- toYaml .ipBlock | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- if .ports }}
+      ports:
+        {{- range .ports }}
+        - protocol: {{ .protocol | default "TCP" }}
+          port: {{ .port }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- else }}
+  # Default egress rules if not specified
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+    # Allow connections to databases
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32  # Block AWS metadata service
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 5432  # PostgreSQL
+        - protocol: TCP
+          port: 3306  # MySQL
+    # Allow connections to New Relic
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443   # HTTPS
+  {{- end }}
+{{- end }}

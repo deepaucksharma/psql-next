@@ -1,0 +1,326 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "database-intelligence.fullname" . }}-config
+  labels:
+    {{- include "database-intelligence.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:{{ .Values.service.health.port }}
+      
+      memory_ballast:
+        size_mib: {{ div .Values.resources.requests.memory 1048576 }}
+
+    receivers:
+      {{- if .Values.config.receivers.postgresql.enabled }}
+      postgresql:
+        endpoint: ${env:POSTGRES_HOST}
+        username: ${env:POSTGRES_USER}
+        password: ${env:POSTGRES_PASSWORD}
+        databases:
+          {{- if .Values.config.receivers.postgresql.databases }}
+          {{- toYaml .Values.config.receivers.postgresql.databases | nindent 10 }}
+          {{- else }}
+          - ${env:POSTGRES_DATABASE}
+          {{- end }}
+        collection_interval: {{ .Values.config.receivers.postgresql.collectionInterval }}
+        tls:
+          {{- toYaml .Values.config.receivers.postgresql.tls | nindent 10 }}
+        resource_attributes:
+          db.system: postgresql
+      {{- end }}
+      
+      {{- if .Values.config.receivers.mysql.enabled }}
+      mysql:
+        endpoint: ${env:MYSQL_HOST}
+        username: ${env:MYSQL_USER}
+        password: ${env:MYSQL_PASSWORD}
+        {{- if .Values.config.receivers.mysql.database }}
+        database: {{ .Values.config.receivers.mysql.database }}
+        {{- else }}
+        database: ${env:MYSQL_DATABASE}
+        {{- end }}
+        collection_interval: {{ .Values.config.receivers.mysql.collectionInterval }}
+        tls:
+          {{- toYaml .Values.config.receivers.mysql.tls | nindent 10 }}
+        resource_attributes:
+          db.system: mysql
+      {{- end }}
+      
+      {{- if .Values.config.receivers.sqlquery.enabled }}
+      sqlquery/postgresql:
+        driver: {{ .Values.config.receivers.sqlquery.driver }}
+        datasource: "host=${env:POSTGRES_HOST} port=5432 user=${env:POSTGRES_USER} password=${env:POSTGRES_PASSWORD} sslmode=disable"
+        collection_interval: {{ .Values.config.receivers.sqlquery.collectionInterval }}
+        timeout: 30s
+        queries:
+          {{- if .Values.config.receivers.sqlquery.queries.ashSampling.enabled }}
+          - sql: |
+              -- Active Session History sampling (simplified for safety)
+              SELECT 
+                now() as sample_time,
+                pid,
+                usename,
+                application_name,
+                client_addr,
+                backend_start,
+                state,
+                query_start,
+                state_change,
+                wait_event_type,
+                wait_event,
+                LEFT(query, 100) as query_text
+              FROM pg_stat_activity
+              WHERE state != 'idle'
+                AND pid != pg_backend_pid()
+            logs:
+              - body: query_text
+                attributes:
+                  sample_time: sample_time
+                  session_id: pid
+                  username: usename
+                  application: application_name
+                  wait_event_type: wait_event_type
+                  wait_event: wait_event
+                  state: state
+          {{- end }}
+          {{- if .Values.config.receivers.sqlquery.queries.pgStatStatements.enabled }}
+          - sql: |
+              SELECT
+                queryid::text as query_id,
+                LEFT(query, 100) as query_text,
+                calls,
+                total_exec_time as total_time,
+                mean_exec_time as mean_time,
+                stddev_exec_time as stddev_time,
+                rows
+              FROM pg_stat_statements
+              WHERE mean_exec_time > 10
+              ORDER BY mean_exec_time DESC
+              LIMIT 100
+            metrics:
+              - metric_name: database.query.execution_time
+                value_column: mean_time
+                data_point_type: gauge
+                attributes:
+                  query_id: query_id
+                  query_text: query_text
+              - metric_name: database.query.calls
+                value_column: calls
+                data_point_type: sum
+                attributes:
+                  query_id: query_id
+          {{- end }}
+      {{- end }}
+
+    processors:
+      memory_limiter:
+        check_interval: {{ .Values.config.processors.memoryLimiter.checkInterval }}
+        limit_percentage: {{ .Values.config.processors.memoryLimiter.limitPercentage }}
+        spike_limit_percentage: {{ .Values.config.processors.memoryLimiter.spikePercentage }}
+
+      batch:
+        timeout: {{ .Values.config.processors.batch.timeout }}
+        send_batch_size: {{ .Values.config.processors.batch.sendBatchSize }}
+        send_batch_max_size: {{ mul .Values.config.processors.batch.sendBatchSize 2 }}
+
+      resource:
+        attributes:
+          {{- range .Values.config.processors.resource.attributes }}
+          - key: {{ .key }}
+            {{- if .value }}
+            value: {{ tpl (.value | toString) $ }}
+            {{- end }}
+            {{- if .fromAttribute }}
+            from_attribute: {{ .fromAttribute }}
+            {{- end }}
+            action: {{ .action }}
+          {{- end }}
+
+      {{- if .Values.config.processors.transform.enabled }}
+      transform:
+        error_mode: {{ .Values.config.processors.transform.errorMode }}
+        {{- if .Values.config.processors.transform.logStatements }}
+        log_statements:
+          {{- toYaml .Values.config.processors.transform.logStatements | nindent 10 }}
+        {{- end }}
+        {{- if .Values.config.processors.transform.metricStatements }}
+        metric_statements:
+          {{- toYaml .Values.config.processors.transform.metricStatements | nindent 10 }}
+        {{- end }}
+      {{- end }}
+
+      {{- if eq .Values.config.mode "experimental" }}
+      {{- if .Values.config.processors.experimental.adaptiveSampler.enabled }}
+      adaptive_sampler:
+        rules:
+          {{- toYaml .Values.config.processors.experimental.adaptiveSampler.rules | nindent 10 }}
+        default_sampling_rate: {{ .Values.config.processors.experimental.adaptiveSampler.defaultSamplingRate }}
+        state_file: {{ .Values.config.processors.experimental.adaptiveSampler.stateFile }}
+      {{- end }}
+
+      {{- if .Values.config.processors.experimental.circuitBreaker.enabled }}
+      circuit_breaker:
+        failure_threshold: {{ .Values.config.processors.experimental.circuitBreaker.failureThreshold }}
+        timeout: {{ .Values.config.processors.experimental.circuitBreaker.timeout }}
+        half_open_requests: {{ .Values.config.processors.experimental.circuitBreaker.halfOpenRequests }}
+        {{- if .Values.config.processors.experimental.circuitBreaker.databases }}
+        databases:
+          {{- toYaml .Values.config.processors.experimental.circuitBreaker.databases | nindent 10 }}
+        {{- end }}
+      {{- end }}
+
+      {{- if .Values.config.processors.experimental.planExtractor.enabled }}
+      plan_extractor:
+        enabled: true
+        timeout: {{ .Values.config.processors.experimental.planExtractor.timeout }}
+        max_plan_size: {{ .Values.config.processors.experimental.planExtractor.maxPlanSize }}
+        cache_size: {{ .Values.config.processors.experimental.planExtractor.cacheSize }}
+      {{- end }}
+
+      {{- if .Values.config.processors.experimental.verification.enabled }}
+      verification:
+        quality_checks:
+          {{- toYaml .Values.config.processors.experimental.verification.qualityChecks | nindent 10 }}
+        {{- if .Values.config.processors.experimental.verification.piiDetection.enabled }}
+        pii_detection:
+          enabled: true
+          patterns:
+            {{- toYaml .Values.config.processors.experimental.verification.piiDetection.patterns | nindent 12 }}
+        {{- end }}
+        {{- if .Values.config.processors.experimental.verification.autoTuning.enabled }}
+        auto_tuning:
+          enabled: true
+          interval: {{ .Values.config.processors.experimental.verification.autoTuning.interval }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+
+    exporters:
+      {{- if .Values.config.exporters.otlp.enabled }}
+      otlp:
+        endpoint: ${env:OTLP_ENDPOINT}
+        compression: {{ .Values.config.exporters.otlp.compression }}
+        timeout: {{ .Values.config.exporters.otlp.timeout }}
+        headers:
+          api-key: ${env:NEW_RELIC_LICENSE_KEY}
+        retry_on_failure:
+          enabled: {{ .Values.config.exporters.otlp.retry.enabled }}
+          initial_interval: {{ .Values.config.exporters.otlp.retry.initialInterval }}
+          max_interval: {{ .Values.config.exporters.otlp.retry.maxInterval }}
+          max_elapsed_time: {{ .Values.config.exporters.otlp.retry.maxElapsedTime }}
+        sending_queue:
+          enabled: true
+          num_consumers: 2
+          queue_size: 1000
+      {{- end }}
+
+      {{- if .Values.config.exporters.prometheus.enabled }}
+      prometheus:
+        endpoint: {{ .Values.config.exporters.prometheus.endpoint | quote }}
+        namespace: {{ .Values.config.exporters.prometheus.namespace }}
+        const_labels:
+          environment: {{ .Values.environment }}
+          service: database-intelligence
+      {{- end }}
+
+      {{- if .Values.config.exporters.debug.enabled }}
+      debug:
+        verbosity: {{ .Values.config.exporters.debug.verbosity }}
+        sampling_initial: {{ .Values.config.exporters.debug.samplingInitial }}
+        sampling_thereafter: {{ .Values.config.exporters.debug.samplingThereafter }}
+      {{- end }}
+
+    service:
+      extensions: [health_check, memory_ballast]
+      
+      pipelines:
+        {{- if or .Values.config.receivers.postgresql.enabled .Values.config.receivers.mysql.enabled }}
+        metrics/databases:
+          receivers:
+            {{- if .Values.config.receivers.postgresql.enabled }}
+            - postgresql
+            {{- end }}
+            {{- if .Values.config.receivers.mysql.enabled }}
+            - mysql
+            {{- end }}
+          processors:
+            - memory_limiter
+            {{- if eq .Values.config.mode "experimental" }}
+            {{- if .Values.config.processors.experimental.circuitBreaker.enabled }}
+            - circuit_breaker
+            {{- end }}
+            {{- end }}
+            - resource
+            - batch
+          exporters:
+            {{- if .Values.config.exporters.otlp.enabled }}
+            - otlp
+            {{- end }}
+            {{- if .Values.config.exporters.prometheus.enabled }}
+            - prometheus
+            {{- end }}
+            {{- if .Values.config.exporters.debug.enabled }}
+            - debug
+            {{- end }}
+        {{- end }}
+
+        {{- if .Values.config.receivers.sqlquery.enabled }}
+        logs/queries:
+          receivers:
+            - sqlquery/postgresql
+          processors:
+            - memory_limiter
+            {{- if .Values.config.processors.transform.enabled }}
+            - transform
+            {{- end }}
+            {{- if eq .Values.config.mode "experimental" }}
+            {{- if .Values.config.processors.experimental.adaptiveSampler.enabled }}
+            - adaptive_sampler
+            {{- end }}
+            {{- if .Values.config.processors.experimental.planExtractor.enabled }}
+            - plan_extractor
+            {{- end }}
+            {{- if .Values.config.processors.experimental.verification.enabled }}
+            - verification
+            {{- end }}
+            {{- end }}
+            - resource
+            - batch
+          exporters:
+            {{- if .Values.config.exporters.otlp.enabled }}
+            - otlp
+            {{- end }}
+            {{- if .Values.config.exporters.debug.enabled }}
+            - debug
+            {{- end }}
+        
+        metrics/queries:
+          receivers:
+            - sqlquery/postgresql
+          processors:
+            - memory_limiter
+            - resource
+            - batch
+          exporters:
+            {{- if .Values.config.exporters.otlp.enabled }}
+            - otlp
+            {{- end }}
+            {{- if .Values.config.exporters.prometheus.enabled }}
+            - prometheus
+            {{- end }}
+            {{- if .Values.config.exporters.debug.enabled }}
+            - debug
+            {{- end }}
+        {{- end }}
+
+      telemetry:
+        logs:
+          level: {{ .Values.config.logLevel | default "info" }}
+          encoding: json
+          output_paths: [stdout]
+        metrics:
+          level: detailed
+          address: 0.0.0.0:{{ .Values.service.metrics.port }}

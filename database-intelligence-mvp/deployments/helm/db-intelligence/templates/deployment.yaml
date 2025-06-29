@@ -1,0 +1,147 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "database-intelligence.fullname" . }}
+  labels:
+    {{- include "database-intelligence.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "database-intelligence.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "database-intelligence.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "database-intelligence.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: {{ .Chart.Name }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+          - --config=/etc/otel/config.yaml
+          {{- if .Values.config.mode }}
+          - --feature-gates={{ .Values.config.mode }}Mode=true
+          {{- end }}
+        env:
+        - name: ENVIRONMENT
+          value: {{ .Values.environment }}
+        {{- if .Values.config.receivers.postgresql.enabled }}
+        - name: POSTGRES_HOST
+          value: {{ .Values.config.receivers.postgresql.endpoint | quote }}
+        - name: POSTGRES_USER
+          value: {{ .Values.config.receivers.postgresql.username | quote }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.config.receivers.postgresql.passwordSecret.name }}
+              key: {{ .Values.config.receivers.postgresql.passwordSecret.key }}
+        {{- if .Values.config.receivers.postgresql.databases }}
+        - name: POSTGRES_DATABASE
+          value: {{ .Values.config.receivers.postgresql.databases | join "," | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.config.receivers.mysql.enabled }}
+        - name: MYSQL_HOST
+          value: {{ .Values.config.receivers.mysql.endpoint | quote }}
+        - name: MYSQL_USER
+          value: {{ .Values.config.receivers.mysql.username | quote }}
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.config.receivers.mysql.passwordSecret.name }}
+              key: {{ .Values.config.receivers.mysql.passwordSecret.key }}
+        {{- if .Values.config.receivers.mysql.database }}
+        - name: MYSQL_DATABASE
+          value: {{ .Values.config.receivers.mysql.database | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.config.exporters.otlp.enabled }}
+        - name: OTLP_ENDPOINT
+          value: {{ .Values.config.exporters.otlp.endpoint | quote }}
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.config.exporters.otlp.headersSecret.name }}
+              key: {{ .Values.config.exporters.otlp.headersSecret.key }}
+        {{- end }}
+        {{- with .Values.extraEnvVars }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.extraEnvFrom }}
+        envFrom:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        ports:
+        - name: health
+          containerPort: {{ .Values.service.health.port }}
+          protocol: TCP
+        - name: metrics
+          containerPort: {{ .Values.service.metrics.port }}
+          protocol: TCP
+        {{- if .Values.config.exporters.prometheus.enabled }}
+        - name: prometheus
+          containerPort: {{ .Values.service.prometheus.port }}
+          protocol: TCP
+        {{- end }}
+        {{- if .Values.config.receivers.otlp }}
+        - name: otlp-grpc
+          containerPort: {{ .Values.service.otlp.grpc.port }}
+          protocol: TCP
+        - name: otlp-http
+          containerPort: {{ .Values.service.otlp.http.port }}
+          protocol: TCP
+        {{- end }}
+        livenessProbe:
+          {{- toYaml .Values.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml .Values.readinessProbe | nindent 10 }}
+        resources:
+          {{- toYaml .Values.resources | nindent 12 }}
+        volumeMounts:
+          {{- toYaml .Values.volumeMounts | nindent 10 }}
+      volumes:
+        {{- range .Values.volumes }}
+        - name: {{ .name }}
+          {{- if .configMap }}
+          configMap:
+            {{- tpl (toYaml .configMap) $ | nindent 12 }}
+          {{- else if .persistentVolumeClaim }}
+          persistentVolumeClaim:
+            {{- tpl (toYaml .persistentVolumeClaim) $ | nindent 12 }}
+          {{- else if .emptyDir }}
+          emptyDir:
+            {{- toYaml .emptyDir | nindent 12 }}
+          {{- else if .secret }}
+          secret:
+            {{- tpl (toYaml .secret) $ | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

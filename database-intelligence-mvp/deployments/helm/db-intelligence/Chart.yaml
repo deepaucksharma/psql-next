@@ -1,0 +1,83 @@
+apiVersion: v2
+name: database-intelligence
+description: OpenTelemetry-based database monitoring collector with custom processors for intelligent sampling, circuit breaking, and plan analysis
+type: application
+
+# Chart version - increment for each release
+version: 1.0.0
+
+# Application version - matches collector version
+appVersion: "0.1.0"
+
+keywords:
+  - opentelemetry
+  - otel
+  - database
+  - monitoring
+  - postgresql
+  - mysql
+  - observability
+  - new-relic
+
+home: https://github.com/database-intelligence-mvp
+sources:
+  - https://github.com/database-intelligence-mvp
+
+maintainers:
+  - name: Database Intelligence Team
+    email: db-intelligence@example.com
+
+# Dependencies for optional components
+dependencies:
+  # PostgreSQL for testing/development
+  - name: postgresql
+    version: "~12.0.0"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+    tags:
+      - databases
+      - dev
+    
+  # MySQL for testing/development  
+  - name: mysql
+    version: "~9.0.0"
+    repository: https://charts.bitnami.com/bitnami
+    condition: mysql.enabled
+    tags:
+      - databases
+      - dev
+      
+  # Prometheus for metrics storage
+  - name: prometheus
+    version: "~19.0.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.enabled
+    tags:
+      - monitoring
+      
+  # Grafana for dashboards
+  - name: grafana
+    version: "~6.50.0"
+    repository: https://grafana.github.io/helm-charts
+    condition: grafana.enabled
+    tags:
+      - monitoring
+
+annotations:
+  # Artifacthub annotations
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial release with core collector functionality
+    - kind: added
+      description: Custom processors for adaptive sampling and circuit breaking
+    - kind: added
+      description: PostgreSQL and MySQL monitoring support
+    - kind: added
+      description: New Relic OTLP export capability
+  artifacthub.io/containsSecurityUpdates: "false"
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "false"
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/recommendations: |
+    - url: https://artifacthub.io/packages/helm/prometheus-community/prometheus
+    - url: https://artifacthub.io/packages/helm/grafana/grafana

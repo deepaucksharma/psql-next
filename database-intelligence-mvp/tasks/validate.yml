@@ -1,0 +1,242 @@
+version: '3'
+
+tasks:
+  all:
+    desc: Run all validations
+    cmds:
+      - task: validate:modules
+      - task: validate:config
+      - task: validate:code
+      - task: validate:security
+      - task: validate:deps
+      - echo "✅ All validations passed!"
+
+  modules:
+    desc: Validate module paths are consistent
+    vars:
+      EXPECTED: github.com/database-intelligence-mvp
+    cmds:
+      - echo "🔍 Checking module path consistency..."
+      - |
+        # Check go.mod
+        MODULE=$(grep "^module" go.mod | awk '{print $2}')
+        if [ "$MODULE" != "{{.EXPECTED}}" ]; then
+          echo "❌ go.mod has incorrect module: $MODULE"
+          echo "   Expected: {{.EXPECTED}}"
+          exit 1
+        fi
+      - |
+        # Check for old module references
+        if grep -r "github.com/newrelic/database-intelligence-mvp" . \
+           --include="*.go" --include="*.yaml" --include="*.yml" 2>/dev/null; then
+          echo "❌ Found old module references"
+          exit 1
+        fi
+      - |
+        # Check OCB config
+        if grep -v "{{.EXPECTED}}" ocb-config.yaml | grep "github.com" | grep -v "opentelemetry"; then
+          echo "⚠️  OCB config may have incorrect module paths"
+        fi
+      - echo "✅ Module paths are consistent"
+
+  config:
+    desc: Validate all configuration files
+    deps: ['build:binary']
+    cmds:
+      - echo "🔍 Validating configurations..."
+      - |
+        for config in config/*.yaml; do
+          echo "  Checking: $config"
+          {{.DIST_DIR}}/{{.BINARY_NAME}} validate --config=$config || exit 1
+        done
+      - echo "✅ All configurations valid"
+
+  code:
+    desc: Run static code analysis
+    cmds:
+      - echo "🔍 Running code analysis..."
+      - |
+        # Run go vet
+        echo "  Running go vet..."
+        go vet ./... || exit 1
+      - |
+        # Run golangci-lint
+        if command -v golangci-lint &> /dev/null; then
+          echo "  Running golangci-lint..."
+          golangci-lint run --timeout=5m ./...
+        else
+          echo "⚠️  golangci-lint not installed, skipping"
+        fi
+      - |
+        # Check formatting
+        echo "  Checking formatting..."
+        UNFORMATTED=$(gofmt -l .)
+        if [ -n "$UNFORMATTED" ]; then
+          echo "❌ Unformatted files:"
+          echo "$UNFORMATTED"
+          exit 1
+        fi
+      - echo "✅ Code analysis passed"
+
+  security:
+    desc: Run security checks
+    cmds:
+      - echo "🔍 Running security checks..."
+      - |
+        # Check for hardcoded credentials
+        echo "  Checking for hardcoded credentials..."
+        if grep -r "password\s*[:=]\s*[\"'][^\"'$]" . \
+           --include="*.go" --include="*.yaml" \
+           --exclude-dir=scripts \
+           --exclude-dir=tests 2>/dev/null; then
+          echo "⚠️  Possible hardcoded credentials found"
+        fi
+      - |
+        # Check for sensitive data in logs
+        echo "  Checking for sensitive data logging..."
+        if grep -r "(?i)(password|secret|key|token)" . \
+           --include="*.go" | grep -i "log\|print" | grep -v "REDACTED"; then
+          echo "⚠️  Possible sensitive data in logs"
+        fi
+      - |
+        # Run gosec if available
+        if command -v gosec &> /dev/null; then
+          echo "  Running gosec..."
+          gosec -quiet ./...
+        else
+          echo "⚠️  gosec not installed, skipping security scan"
+        fi
+      - echo "✅ Security checks completed"
+
+  deps:
+    desc: Validate dependencies
+    cmds:
+      - echo "🔍 Checking dependencies..."
+      - |
+        # Check go.mod is tidy
+        echo "  Checking go.mod..."
+        go mod tidy
+        if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
+          echo "❌ go.mod is not tidy"
+          exit 1
+        fi
+      - |
+        # Check for vulnerabilities
+        echo "  Checking for vulnerabilities..."
+        if command -v nancy &> /dev/null; then
+          go list -json -deps ./... | nancy sleuth
+        else
+          go list -m all | while read -r module version; do
+            if go list -m -json "$module@$version" | grep -q "Deprecated"; then
+              echo "⚠️  Deprecated: $module"
+            fi
+          done
+        fi
+      - echo "✅ Dependencies validated"
+
+  env:
+    desc: Validate environment setup
+    cmds:
+      - echo "🔍 Checking environment..."
+      - |
+        # Check required tools
+        REQUIRED_TOOLS="go docker"
+        for tool in $REQUIRED_TOOLS; do
+          if ! command -v $tool &> /dev/null; then
+            echo "❌ Required tool not found: $tool"
+            exit 1
+          fi
+        done
+      - |
+        # Check Go version
+        GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
+        MIN_VERSION="1.21"
+        if [ "$(printf '%s\n' "$MIN_VERSION" "$GO_VERSION" | sort -V | head -n1)" != "$MIN_VERSION" ]; then
+          echo "❌ Go version $GO_VERSION is below minimum $MIN_VERSION"
+          exit 1
+        fi
+      - |
+        # Check environment variables
+        if [ ! -f .env ]; then
+          echo "⚠️  No .env file found"
+        else
+          source .env
+          if [ -z "$NEW_RELIC_LICENSE_KEY" ] || [ "$NEW_RELIC_LICENSE_KEY" = "your_license_key_here" ]; then
+            echo "⚠️  NEW_RELIC_LICENSE_KEY not configured"
+          fi
+        fi
+      - echo "✅ Environment validated"
+
+  processors:
+    desc: Validate custom processors
+    cmds:
+      - echo "🔍 Validating custom processors..."
+      - |
+        # Check processor registration
+        PROCESSORS="adaptivesampler circuitbreaker planattributeextractor verification"
+        for proc in $PROCESSORS; do
+          echo "  Checking $proc..."
+          if [ ! -d "processors/$proc" ]; then
+            echo "❌ Processor directory not found: processors/$proc"
+            exit 1
+          fi
+          if ! grep -q "func New.*Factory" processors/$proc/*.go; then
+            echo "❌ Factory function not found for $proc"
+            exit 1
+          fi
+        done
+      - |
+        # Check processor tests
+        for proc in $PROCESSORS; do
+          if [ ! -f "processors/$proc/*_test.go" ]; then
+            echo "⚠️  No tests found for processor: $proc"
+          fi
+        done
+      - echo "✅ Processors validated"
+
+  docker:
+    desc: Validate Docker setup
+    cmds:
+      - echo "🔍 Validating Docker setup..."
+      - |
+        # Check Docker daemon
+        if ! docker info &> /dev/null; then
+          echo "❌ Docker daemon not running"
+          exit 1
+        fi
+      - |
+        # Check docker-compose
+        if ! docker compose version &> /dev/null; then
+          echo "❌ Docker Compose not available"
+          exit 1
+        fi
+      - |
+        # Validate docker-compose.yaml
+        docker compose config > /dev/null || exit 1
+      - |
+        # Check Dockerfile
+        if [ -f Dockerfile ]; then
+          docker build --no-cache --check . || exit 1
+        else
+          echo "⚠️  No Dockerfile found"
+        fi
+      - echo "✅ Docker setup validated"
+
+  integration:
+    desc: Validate integration test setup
+    deps: ['dev:up']
+    cmds:
+      - echo "🔍 Validating integration test setup..."
+      - |
+        # Check database connections
+        echo "  Testing PostgreSQL connection..."
+        docker compose exec -T postgres pg_isready -U postgres || exit 1
+      - |
+        echo "  Testing MySQL connection..."
+        docker compose exec -T mysql mysqladmin ping -h localhost -u root -pmysql || exit 1
+      - |
+        # Check monitoring user access
+        echo "  Testing monitoring user access..."
+        docker compose exec -T postgres psql -U monitoring_user -d testdb -c "SELECT 1" || exit 1
+        docker compose exec -T mysql mysql -u monitoring_user -pmonitoring testdb -e "SELECT 1" || exit 1
+      - echo "✅ Integration test setup validated"

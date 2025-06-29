@@ -1,0 +1,271 @@
+version: '3'
+
+tasks:
+  up:
+    desc: Start development environment
+    cmds:
+      - echo "🚀 Starting development environment..."
+      - docker compose --profile dev up -d
+      - task: dev:wait
+      - task: dev:info
+
+  down:
+    desc: Stop development environment
+    cmds:
+      - echo "🛑 Stopping development environment..."
+      - docker compose --profile dev down
+      - echo "✅ Development environment stopped"
+
+  restart:
+    desc: Restart development environment
+    cmds:
+      - task: dev:down
+      - task: dev:up
+
+  reset:
+    desc: Reset development environment (including data)
+    cmds:
+      - echo "🔄 Resetting development environment..."
+      - docker compose --profile dev down -v
+      - docker compose --profile all down -v
+      - echo "✅ All data volumes removed"
+      - task: dev:up
+
+  wait:
+    desc: Wait for services to be healthy
+    cmds:
+      - |
+        echo "⏳ Waiting for services to be healthy..."
+        TIMEOUT=60
+        ELAPSED=0
+        while [ $ELAPSED -lt $TIMEOUT ]; do
+          if docker compose ps | grep -E "(postgres|mysql).*healthy" &>/dev/null; then
+            echo ""
+            echo "✅ Services are healthy"
+            exit 0
+          fi
+          echo -n "."
+          sleep 2
+          ELAPSED=$((ELAPSED + 2))
+        done
+        echo ""
+        echo "⚠️  Timeout waiting for services"
+        docker compose ps
+        exit 1
+
+  info:
+    desc: Show development environment information
+    cmds:
+      - |
+        echo "📊 Development Environment Status:"
+        echo "================================="
+        docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+        echo ""
+        echo "🔗 Access URLs:"
+        echo "  PostgreSQL:    localhost:5432"
+        echo "  MySQL:         localhost:3306"
+        echo "  PgAdmin:       http://localhost:5050"
+        echo "  Adminer:       http://localhost:8080"
+        echo ""
+        echo "📝 Database Credentials:"
+        echo "  PostgreSQL:    postgres/postgres"
+        echo "  MySQL:         root/mysql"
+        echo "  Monitoring:    monitoring_user/monitoring"
+
+  logs:
+    desc: Show service logs
+    vars:
+      SERVICE: '{{.SERVICE | default ""}}'
+      FOLLOW: '{{.FOLLOW | default "true"}}'
+    cmds:
+      - |
+        if [ -n "{{.SERVICE}}" ]; then
+          docker compose logs {{if eq .FOLLOW "true"}}-f{{end}} {{.SERVICE}}
+        else
+          docker compose logs {{if eq .FOLLOW "true"}}-f{{end}}
+        fi
+
+  shell:
+    desc: Open shell in a service container
+    vars:
+      SERVICE: '{{.SERVICE | default "collector"}}'
+    cmds:
+      - |
+        case {{.SERVICE}} in
+          postgres)
+            echo "🐘 Connecting to PostgreSQL..."
+            docker compose exec postgres psql -U postgres testdb
+            ;;
+          mysql)
+            echo "🐬 Connecting to MySQL..."
+            docker compose exec mysql mysql -u root -pmysql testdb
+            ;;
+          collector)
+            echo "📦 Opening shell in collector..."
+            docker compose exec collector /bin/sh
+            ;;
+          *)
+            echo "🐚 Opening shell in {{.SERVICE}}..."
+            docker compose exec {{.SERVICE}} /bin/sh
+            ;;
+        esac
+
+  db:query:
+    desc: Run SQL query
+    vars:
+      DB: '{{.DB | default "postgres"}}'
+      QUERY: '{{.QUERY}}'
+    cmds:
+      - |
+        if [ -z "{{.QUERY}}" ]; then
+          echo "❌ QUERY is required"
+          exit 1
+        fi
+      - |
+        case {{.DB}} in
+          postgres)
+            docker compose exec -T postgres psql -U postgres testdb -c "{{.QUERY}}"
+            ;;
+          mysql)
+            docker compose exec -T mysql mysql -u root -pmysql testdb -e "{{.QUERY}}"
+            ;;
+          *)
+            echo "❌ Unknown database: {{.DB}}"
+            exit 1
+            ;;
+        esac
+
+  db:stats:
+    desc: Show database statistics
+    cmds:
+      - echo "📊 Database Statistics:"
+      - echo ""
+      - echo "PostgreSQL:"
+      - |
+        docker compose exec -T postgres psql -U postgres testdb -c "
+          SELECT 'Tables' as type, COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'sample_app'
+          UNION ALL
+          SELECT 'Users', COUNT(*) FROM sample_app.users
+          UNION ALL
+          SELECT 'Products', COUNT(*) FROM sample_app.products
+          UNION ALL
+          SELECT 'Orders', COUNT(*) FROM sample_app.orders;
+        "
+      - echo ""
+      - echo "MySQL:"
+      - |
+        docker compose exec -T mysql mysql -u root -pmysql testdb -e "
+          SELECT 'Tables' as type, COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'testdb'
+          UNION ALL
+          SELECT 'Users', COUNT(*) FROM users
+          UNION ALL
+          SELECT 'Products', COUNT(*) FROM products
+          UNION ALL
+          SELECT 'Orders', COUNT(*) FROM orders;
+        "
+
+  db:load:
+    desc: Generate additional test data
+    vars:
+      USERS: '{{.USERS | default "100"}}'
+      PRODUCTS: '{{.PRODUCTS | default "50"}}'
+      ORDERS: '{{.ORDERS | default "500"}}'
+    cmds:
+      - echo "🔄 Generating test data..."
+      - |
+        # PostgreSQL
+        docker compose exec -T postgres psql -U postgres testdb -c "
+          SELECT sample_app.generate_test_data({{.USERS}}, {{.PRODUCTS}}, {{.ORDERS}});
+        "
+      - |
+        # MySQL
+        docker compose exec -T mysql mysql -u root -pmysql testdb -e "
+          CALL generate_test_data({{.USERS}}, {{.PRODUCTS}}, {{.ORDERS}});
+        "
+      - echo "✅ Test data generated"
+
+  collector:run:
+    desc: Run collector with development config
+    deps: ['build:binary']
+    cmds:
+      - echo "🚀 Running collector..."
+      - |
+        POSTGRES_HOST=localhost \
+        POSTGRES_PORT=5432 \
+        POSTGRES_USER=monitoring_user \
+        POSTGRES_PASSWORD=monitoring \
+        MYSQL_HOST=localhost \
+        MYSQL_PORT=3306 \
+        MYSQL_USER=monitoring_user \
+        MYSQL_PASSWORD=monitoring \
+        NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-dummy} \
+        {{.DIST_DIR}}/{{.BINARY_NAME}} \
+          --config=config/collector-dev.yaml \
+          --log-level=debug
+
+  collector:validate:
+    desc: Validate collector can connect to databases
+    deps: ['build:binary', 'dev:wait']
+    cmds:
+      - echo "🔍 Validating collector connections..."
+      - |
+        POSTGRES_HOST=localhost \
+        POSTGRES_PORT=5432 \
+        POSTGRES_USER=monitoring_user \
+        POSTGRES_PASSWORD=monitoring \
+        {{.DIST_DIR}}/{{.BINARY_NAME}} \
+          validate \
+          --config=config/collector-dev.yaml
+
+  monitoring:up:
+    desc: Start monitoring stack
+    cmds:
+      - echo "📊 Starting monitoring stack..."
+      - docker compose --profile monitoring up -d
+      - |
+        echo "⏳ Waiting for monitoring services..."
+        sleep 10
+      - |
+        echo "✅ Monitoring stack ready:"
+        echo "  Prometheus: http://localhost:9090"
+        echo "  Grafana:    http://localhost:3000 (admin/admin)"
+
+  tools:up:
+    desc: Start development tools
+    cmds:
+      - echo "🛠️  Starting development tools..."
+      - docker compose --profile tools up -d
+      - |
+        echo "✅ Development tools ready:"
+        echo "  PgAdmin: http://localhost:5050 (admin@example.com/admin)"
+        echo "  Adminer: http://localhost:8080"
+
+  watch:
+    desc: Watch for code changes and rebuild
+    cmds:
+      - |
+        echo "👀 Watching for changes..."
+        while true; do
+          inotifywait -qre modify \
+            --exclude '(\.git|dist|vendor|coverage)' \
+            ./**/*.go ./**/*.yaml 2>/dev/null || \
+          fswatch -o \
+            --exclude '.git' \
+            --exclude 'dist' \
+            --exclude 'vendor' \
+            ./**/*.go ./**/*.yaml 2>/dev/null | while read; do
+            clear
+            echo "🔄 Changes detected, rebuilding..."
+            task build:quick
+          done
+        done
+
+  clean:
+    desc: Clean development artifacts
+    cmds:
+      - echo "🧹 Cleaning development artifacts..."
+      - rm -rf dist/
+      - rm -rf coverage.*
+      - rm -rf *.prof
+      - docker compose down -v
+      - echo "✅ Clean complete"
