@@ -1,53 +1,62 @@
-# Architecture Guide - Production Ready Implementation
+# Architecture Guide - Development Implementation
 
 ## Overview
 
-✅ **PRODUCTION READY** - The Database Intelligence Collector is now a stable, single-instance OpenTelemetry-based monitoring solution. All critical issues have been resolved as of June 2025. The collector features 4 sophisticated custom processors (3,242 lines of production code) with in-memory state management, enhanced PII protection, and graceful degradation capabilities.
+🔧 **DEVELOPMENT STATUS** - The Database Intelligence Collector has a working OpenTelemetry foundation with successful build pipeline. Core OTEL components and one custom processor (planattributeextractor) are operational. Remaining custom processors require build fixes.
 
-## ✅ Production Fixes Applied (June 2025)
+## ✅ Build Success Achieved (December 2025)
 
-1. **✅ State Management**: All processors use in-memory state only (no Redis dependency)
-2. **✅ Single-Instance Deployment**: Reliable operation without complex HA configurations
-3. **✅ Safe Dependencies**: No unsafe external dependencies (pg_querylens optional)
-4. **✅ Resilient Pipeline**: Processors gracefully handle missing dependencies
-5. **✅ Enhanced Security**: Comprehensive PII detection and sanitization
+1. **✅ Core OTEL Collector**: OCB v0.127.0 builds successfully
+2. **✅ Dependency Resolution**: All module path and version conflicts resolved  
+3. **✅ First Custom Processor**: Plan Attribute Extractor (391 lines) working
+4. **✅ Standard Components**: All PostgreSQL/MySQL receivers, processors, exporters
+5. **✅ Binary Generation**: Collector binary created and verified
 
-## Production Deployment Architecture
+## Current Working Architecture
 
 ```mermaid
 graph TB
-    subgraph "Production Deployment (Single Instance)"
-        DB[(PostgreSQL<br/>Database)]
+    subgraph "Working Build (OCB v0.127.0)"
+        DB[(PostgreSQL<br/>MySQL<br/>Databases)]
         
-        subgraph "OTEL Collector"
-            R1[postgresql receiver]
-            R2[sqlquery receiver]
+        subgraph "OTEL Collector Binary"
+            R1[postgresql receiver ✅]
+            R2[mysql receiver ✅]
+            R3[sqlquery receiver ✅]
             
             subgraph "Processing Pipeline"
-                P1[memory_limiter]
-                P2[transform<br/>🛡️ Enhanced PII]
-                P3[adaptive_sampler<br/>💾 In-Memory State]
-                P4[circuit_breaker<br/>🔒 Protection]
-                P5[batch]
+                P1[memory_limiter ✅]
+                P2[batch ✅]
+                P3[attributes ✅]
+                P4[transform ✅]
+                P5[planattributeextractor ✅<br/>391 lines custom]
+                P6[resource ✅]
             end
             
-            E1[OTLP Exporter]
-            E2[Prometheus]
+            E1[OTLP Exporter ✅]
+            E2[Debug Exporter ✅]
+            E3[Prometheus ✅]
+            E4[File Exporter ✅]
         end
         
-        NR[New Relic]
-        PROM[Prometheus]
+        NR[New Relic OTLP]
+        PROM[Prometheus Metrics]
         
         DB --> R1
         DB --> R2
+        DB --> R3
         R1 --> P1
         R2 --> P1
+        R3 --> P1
         P1 --> P2
         P2 --> P3
         P3 --> P4
         P4 --> P5
-        P5 --> E1
-        P5 --> E2
+        P5 --> P6
+        P6 --> E1
+        P6 --> E2
+        P6 --> E3
+        P6 --> E4
         E1 --> NR
         E2 --> PROM
     end

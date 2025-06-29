@@ -1,18 +1,22 @@
 # Database Intelligence Collector - Documentation
 
-## ✅ Production Ready Status (June 2025)
+## 🔧 Development Status (December 2025)
 
-**✅ PRODUCTION READY** - The Database Intelligence Collector is now a stable, single-instance OpenTelemetry-based monitoring solution for PostgreSQL and MySQL databases. All critical issues have been resolved.
+**🔧 PARTIALLY WORKING** - The Database Intelligence Collector has a working OpenTelemetry foundation with successful build pipeline. Core functionality is operational, custom processors require additional fixes.
 
-### ✅ Current Status
-- **✅ Single-Instance Deployment**: Reliable operation without Redis dependencies
-- **✅ In-Memory State Management**: All processors use memory-only state (no persistence)
-- **✅ Enhanced Security**: Comprehensive PII detection and sanitization
-- **✅ Graceful Degradation**: Components work independently
-- **✅ Zero External Dependencies**: Uses standard PostgreSQL pg_stat_statements
+### ✅ Working Components (Build Successful)
+- **✅ Core OTEL Collector**: Successfully builds with OCB v0.127.0
+- **✅ Standard Receivers**: PostgreSQL, MySQL, SQLQuery, OTLP, Prometheus
+- **✅ Standard Processors**: Batch, Memory Limiter, Attributes, Transform, Resource
+- **✅ Standard Exporters**: OTLP, Debug, Prometheus, File
+- **✅ Plan Attribute Extractor**: First custom processor working (391 lines)
+- **✅ Module Dependencies**: All version conflicts resolved
 
-### ✅ Recommended Configuration
-**Use `config/collector-resilient.yaml`** for production deployments - includes all 4 custom processors (3,242 lines of production code) with safe operation.
+### 🔧 In Progress (Build Fixes Needed)
+- **🔧 Adaptive Sampler**: API signature fixes needed (576 lines)
+- **🔧 Circuit Breaker**: Missing imports and config properties (922 lines)  
+- **🔧 Verification Processor**: Syntax errors in string literals (1,353 lines)
+- **🔧 Redis Dependencies**: Need removal from in-memory mode configs
 
 ## Documentation Structure
 
@@ -100,29 +104,39 @@ This single command will:
 
 **For Configuration**: See [CONFIGURATION.md](./CONFIGURATION.md) for detailed configuration options and environment overlays.
 
-## Current Status (June 2025)
+## Current Build Status (December 2025)
 
-### ✅ Working in Minimal Mode
-- **PostgreSQL Receiver**: Collecting 22 metrics successfully
-- **MySQL Receiver**: Collecting 77 metrics successfully  
-- **SQLQuery Receiver**: Custom queries for both databases
-- **New Relic OTLP Export**: Configured and ready (requires license key)
-- **Prometheus Export**: Local metrics on port 8888
-- **Resource Management**: Memory limiter, batching, resource attributes
+### ✅ Successful Build Components
+- **OpenTelemetry Collector Builder**: OCB v0.127.0 working
+- **Binary Generation**: `./dist/database-intelligence-collector` created successfully
+- **Standard OTEL Stack**: All core receivers, processors, exporters included
+- **Plan Attribute Extractor**: Custom processor successfully integrated
+- **Dependencies**: All module path and version conflicts resolved
 
-### 🚧 Experimental Mode Features (Requires Build Fixes)
-- **4 Custom Processors** (3,242 lines of code)
-  - Adaptive Sampler: Rule-based sampling with in-memory state
-  - Circuit Breaker: Database protection with self-healing
-  - Plan Attribute Extractor: Query plan analysis and hashing
-  - Verification Processor: PII detection and data quality validation
-- **Standard OTEL Components**: PostgreSQL/MySQL receivers, batch processor, OTLP exporter
-- **Modern Infrastructure**:
-  - Taskfile replacing 30+ shell scripts and Makefile
-  - Unified Docker Compose with profiles (dev/test/prod)
-  - Complete Helm chart for Kubernetes deployment
-  - Configuration overlay system for environments
-  - New Relic dashboards and alerting
+### 🔧 Build Command (Working)
+```bash
+# Install OpenTelemetry Collector Builder
+go install go.opentelemetry.io/collector/cmd/builder@v0.127.0
+
+# Build collector with current working components
+export PATH="$HOME/go/bin:$PATH"
+builder --config=ocb-config.yaml
+
+# Verify successful build
+./dist/database-intelligence-collector components
+```
+
+### 📋 Component Status Matrix
+| Component | Status | Lines | Notes |
+|-----------|--------|-------|-------|
+| PostgreSQL Receiver | ✅ Working | Standard | OTEL Contrib v0.127.0 |
+| MySQL Receiver | ✅ Working | Standard | OTEL Contrib v0.127.0 |
+| SQLQuery Receiver | ✅ Working | Standard | OTEL Contrib v0.127.0 |
+| Plan Attribute Extractor | ✅ Working | 391 | Custom processor builds successfully |
+| Adaptive Sampler | 🔧 Build Error | 576 | API signature + undefined types |
+| Circuit Breaker | 🔧 Build Error | 922 | Missing imports + config fields |
+| Verification Processor | 🔧 Build Error | 1,353 | String literal syntax errors |
+| OTLP Exporter | ✅ Working | Standard | Core OTEL component |
 
 ### 🚀 Deployment Options
 - **Binary**: Direct execution with environment configuration

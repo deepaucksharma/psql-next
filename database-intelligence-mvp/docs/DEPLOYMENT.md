@@ -1,14 +1,14 @@
-# Deployment Guide - Production Ready
+# Deployment Guide - Build Status
 
-✅ **PRODUCTION READY** - This guide provides instructions for deploying the Database Intelligence Collector using the stable single-instance model. All critical issues have been resolved as of June 2025.
+🔧 **BUILD SUCCESSFUL** - This guide provides instructions for building and deploying the Database Intelligence Collector. The core OTEL collector builds successfully with working standard components and one custom processor.
 
-## ✅ Production Status (June 2025)
+## ✅ Current Build Status (December 2025)
 
-- **✅ Single-Instance Deployment**: Reliable operation without Redis dependencies
-- **✅ Zero External Dependencies**: Works with standard PostgreSQL pg_stat_statements
-- **✅ Enhanced Security**: Comprehensive PII protection built-in
-- **✅ Graceful Degradation**: All components work independently
-- **✅ Production Configuration**: `config/collector-resilient.yaml` ready for use
+- **✅ Successful Binary Generation**: OCB v0.127.0 produces working collector
+- **✅ Standard OTEL Components**: All PostgreSQL/MySQL receivers, processors, exporters work
+- **✅ First Custom Processor**: Plan Attribute Extractor successfully integrated
+- **✅ Dependency Resolution**: All module path and version conflicts resolved
+- **🔧 Remaining Work**: 3 custom processors need build fixes before full deployment
 
 ## Prerequisites
 

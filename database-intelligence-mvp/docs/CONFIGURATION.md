@@ -1,12 +1,13 @@
-# Configuration Reference - Production Ready
+# Configuration Reference - Build Status
 
-✅ **PRODUCTION READY** - This document provides configuration guidance for the stable Database Intelligence Collector. All configurations now use the single-instance model with in-memory state management and enhanced security.
+🔧 **BUILD SUCCESSFUL** - This document provides configuration guidance for the Database Intelligence Collector. Core OTEL components work, with working build pipeline and first custom processor.
 
-## ✅ Production Configurations Available
+## ✅ Working Build Configuration
 
-- **`config/collector-resilient.yaml`** - **RECOMMENDED** for production (single instance, enhanced PII protection)
-- **`config/collector-simplified.yaml`** - Basic monitoring with standard OTEL components
-- **`config/pii-detection-enhanced.yaml`** - Standalone enhanced PII protection patterns
+- **`ocb-config.yaml`** - **WORKING** OpenTelemetry Collector Builder configuration
+- Standard OTEL receivers, processors, exporters functional
+- Plan Attribute Extractor custom processor integrated
+- Remaining custom processors disabled pending build fixes
 
 ## Table of Contents
 - [Configuration Overlay System](#configuration-overlay-system)
@@ -18,28 +19,46 @@
 - [Complete Examples](#complete-examples)
 - [Using Taskfile](#using-taskfile)
 
-## ✅ Production Configuration System
+## ✅ Working Build Configuration
 
-Production-ready configurations are available in the `config/` directory:
+The current working OpenTelemetry Collector Builder configuration:
 
-```
-config/
-├── collector-resilient.yaml       # ✅ RECOMMENDED - Production ready
-├── collector-simplified.yaml      # Basic monitoring
-└── pii-detection-enhanced.yaml    # Enhanced PII patterns
-```
-
-### ✅ Using Production Configurations
-
+### Build Command (Working)
 ```bash
-# Run with production-ready resilient configuration (RECOMMENDED)
-task run CONFIG=resilient
+# Install OpenTelemetry Collector Builder
+go install go.opentelemetry.io/collector/cmd/builder@v0.127.0
 
-# Run with simplified configuration
-task run CONFIG=simplified
+# Build collector (generates ./dist/database-intelligence-collector)
+export PATH="$HOME/go/bin:$PATH"
+builder --config=ocb-config.yaml
+```
 
-# Build and run with specific config
-./dist/otelcol --config=config/collector-resilient.yaml
+### OCB Configuration Summary
+```yaml
+# ocb-config.yaml (current working version)
+dist:
+  name: database-intelligence-collector
+  otelcol_version: "0.127.0"
+
+receivers:
+  - go.opentelemetry.io/collector/receiver/otlpreceiver v0.127.0
+  - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/postgresqlreceiver v0.127.0
+  - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/mysqlreceiver v0.127.0
+  - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sqlqueryreceiver v0.127.0
+
+processors:
+  # Standard processors (working)
+  - go.opentelemetry.io/collector/processor/batchprocessor v0.127.0
+  - go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.127.0
+  - github.com/open-telemetry/opentelemetry-collector-contrib/processor/attributesprocessor v0.127.0
+  
+  # Custom processors (1 working, 3 disabled)
+  - github.com/database-intelligence-mvp/processors/planattributeextractor v0.1.0  # ✅ Working
+
+exporters:
+  - go.opentelemetry.io/collector/exporter/otlpexporter v0.127.0
+  - go.opentelemetry.io/collector/exporter/debugexporter v0.127.0
+  - github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter v0.127.0
 ```
 
 ## ✅ Resilient Configuration Features
