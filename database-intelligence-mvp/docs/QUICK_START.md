@@ -1,13 +1,13 @@
 # Quick Start Guide
 
-Get the Database Intelligence Collector running in minutes using our new Taskfile automation system.
+Get the Database Intelligence Collector running in minutes. This guide focuses on the minimal, production-ready configuration that works out of the box.
 
 ## Prerequisites
 
 - Docker and Docker Compose
-- Go 1.21+ (for custom builds)
 - Task (build automation tool)
-- New Relic account with license key
+- (Optional) Go 1.21+ for building from source
+- (Optional) New Relic account with license key for cloud export
 
 ## Install Task
 

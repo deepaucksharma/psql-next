@@ -25,7 +25,7 @@ func NewFactory() processor.Factory {
 // createLogsProcessor creates a new plan attribute extractor processor for logs
 func createLogsProcessor(
 	ctx context.Context,
-	set component.TelemetrySettings,
+	set processor.Settings,
 	cfg component.Config,
 	nextConsumer consumer.Logs,
 ) (processor.Logs, error) {
