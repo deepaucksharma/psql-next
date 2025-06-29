@@ -1,0 +1,6 @@
+2025-06-28 16:39:46 UTC [SUCCESS] Collector container is running
+2025-06-28 16:39:46 UTC [WARNING] Container marked as unhealthy - this may be due to missing curl in container
+2025-06-28 16:39:46 UTC [ERROR] Metrics endpoint not responding
+2025-06-28 16:39:47 UTC [ERROR] No data received in New Relic in last 5 minutes
+2025-06-28 16:39:48 UTC [SUCCESS] No integration errors detected
+2025-06-28 16:54:35 UTC [ERROR] Collector container not running - run: docker-compose up -d db-intelligence-primary
