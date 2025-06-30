@@ -9,15 +9,12 @@ import (
 	"go.opentelemetry.io/collector/otelcol"
 	
 	// Import custom processors
-	"github.com/database-intelligence-mvp/processors/adaptivesampler"
-	"github.com/database-intelligence-mvp/processors/circuitbreaker"
 	"github.com/database-intelligence-mvp/processors/planattributeextractor"
-	"github.com/database-intelligence-mvp/processors/verification"
 )
 
 func main() {
 	// Create factories map
-	factories, err := components()
+	factories, err := Components()
 	if err != nil {
 		log.Fatalf("failed to build components: %v", err)
 	}
@@ -69,10 +66,8 @@ func Components() (otelcol.Factories, error) {
 	}
 
 	// Add our custom processors for gaps
-	factories.Processors[adaptivesampler.TypeStr] = adaptivesampler.NewFactory()
-	factories.Processors[circuitbreaker.TypeStr] = circuitbreaker.NewFactory()
+	// Only including processors that are actually built in ocb-config.yaml
 	factories.Processors[planattributeextractor.TypeStr] = planattributeextractor.NewFactory()
-	factories.Processors[verification.TypeStr] = verification.NewFactory()
 
 	return factories, nil
 }

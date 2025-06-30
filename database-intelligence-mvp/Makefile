@@ -129,12 +129,14 @@ k8s-prod: ## Deploy production Kubernetes setup
 
 verify: ## Run verification checks
 	@echo "✅ Running verification..."
-	@./quickstart-enhanced.sh verify
+	@./scripts/verify-metrics.sh
 	@echo "✅ Verification complete"
 
-quickstart: ## Run enhanced quickstart
-	@echo "🚀 Running enhanced quickstart..."
-	@./quickstart-enhanced.sh all
+quickstart: ## Run quickstart setup
+	@echo "🚀 Running quickstart..."
+	@./scripts/init-env.sh
+	@make build
+	@make docker-simple
 	@echo "✅ Quickstart complete"
 
 ## Configuration targets
