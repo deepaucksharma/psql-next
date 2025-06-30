@@ -1,0 +1,289 @@
+# E2E Test Configuration
+# Defines all metrics and queries required for dashboard validation
+
+test_configuration:
+  name: "Database Intelligence Dashboard E2E Validation"
+  version: "1.0.0"
+  timeout: "30m"
+  lookback_period: "1 hour"
+
+# PostgreSQL metrics required for dashboard
+postgresql_metrics:
+  - metric_name: "postgresql.backends"
+    description: "Active backend connections"
+    required: true
+    widgets:
+      - "Active Connections"
+    validation_query: |
+      SELECT count(*), latest(postgresql.backends) 
+      FROM Metric 
+      WHERE metricName = 'postgresql.backends' 
+      SINCE 1 hour ago
+
+  - metric_name: "postgresql.commits"
+    description: "Number of transactions committed"
+    required: true
+    widgets:
+      - "PostgreSQL Commits vs Rollbacks"
+    validation_query: |
+      SELECT sum(postgresql.commits) 
+      FROM Metric 
+      WHERE metricName = 'postgresql.commits' 
+      SINCE 1 hour ago
+
+  - metric_name: "postgresql.rollbacks"
+    description: "Number of transactions rolled back"
+    required: false
+    widgets:
+      - "PostgreSQL Commits vs Rollbacks"
+
+  - metric_name: "postgresql.database.disk_usage"
+    description: "Database disk usage in bytes"
+    required: true
+    widgets:
+      - "Database Disk Usage"
+    expected_dimensions:
+      - "database_name"
+
+  - metric_name: "postgresql.blocks_read"
+    description: "Number of disk blocks read"
+    required: true
+    widgets:
+      - "PostgreSQL Table I/O"
+    expected_dimensions:
+      - "source"
+
+  - metric_name: "postgresql.bgwriter.buffers.allocated"
+    description: "Buffers allocated by background writer"
+    required: false
+    widgets:
+      - "PostgreSQL Background Writer"
+
+  - metric_name: "postgresql.bgwriter.buffers.writes"
+    description: "Buffers written by background writer"
+    required: false
+    widgets:
+      - "PostgreSQL Background Writer"
+    expected_dimensions:
+      - "source"
+
+# MySQL metrics required for dashboard
+mysql_metrics:
+  - metric_name: "mysql.threads"
+    description: "Number of threads connected"
+    required: true
+    widgets:
+      - "Active Connections"
+    expected_dimensions:
+      - "kind"
+    validation_query: |
+      SELECT latest(mysql.threads) 
+      FROM Metric 
+      WHERE metricName = 'mysql.threads' 
+      SINCE 1 hour ago
+
+  - metric_name: "mysql.uptime"
+    description: "Server uptime in seconds"
+    required: true
+    widgets:
+      - "Database Operations Overview"
+
+  - metric_name: "mysql.buffer_pool.data"
+    description: "Bytes in InnoDB buffer pool"
+    required: true
+    widgets:
+      - "InnoDB Buffer Pool Usage"
+    expected_dimensions:
+      - "status"
+
+  - metric_name: "mysql.buffer_pool.limit"
+    description: "InnoDB buffer pool size limit"
+    required: true
+    widgets:
+      - "InnoDB Buffer Pool Usage"
+
+  - metric_name: "mysql.handlers"
+    description: "Handler operations"
+    required: true
+    widgets:
+      - "MySQL Handler Operations"
+    expected_dimensions:
+      - "kind"
+
+  - metric_name: "mysql.operations"
+    description: "InnoDB operations"
+    required: true
+    widgets:
+      - "Database Operations Overview"
+    expected_dimensions:
+      - "operation"
+
+  - metric_name: "mysql.tmp_resources"
+    description: "Temporary resources created"
+    required: false
+    widgets:
+      - "MySQL Temporary Resources"
+    expected_dimensions:
+      - "kind"
+
+# Query log attributes required for dashboard
+query_log_attributes:
+  - attribute: "query_id"
+    description: "Unique query identifier"
+    required: true
+    widgets:
+      - "Slowest Queries"
+      - "Query Log Analysis"
+
+  - attribute: "query_text"
+    description: "SQL query text"
+    required: true
+    widgets:
+      - "Slowest Queries"
+      - "Query Log Analysis"
+
+  - attribute: "avg_duration_ms"
+    description: "Average query execution time"
+    required: true
+    widgets:
+      - "Query Execution Time"
+      - "Average Query Duration"
+
+  - attribute: "execution_count"
+    description: "Number of query executions"
+    required: true
+    widgets:
+      - "Slowest Queries"
+      - "Query Log Analysis"
+
+  - attribute: "total_duration_ms"
+    description: "Total time spent on query"
+    required: true
+    widgets:
+      - "Slowest Queries"
+      - "Query Log Analysis"
+
+  - attribute: "database_name"
+    description: "Database name"
+    required: true
+    widgets:
+      - "Databases Overview"
+      - "Query Execution Trends"
+
+  - attribute: "collector.name"
+    description: "Collector identifier"
+    required: true
+    value: "otelcol"
+
+# Dashboard widget validation queries
+dashboard_widgets:
+  - name: "Database Count"
+    query: |
+      SELECT uniqueCount(dimensions.database_name) 
+      FROM Metric 
+      WHERE metricName LIKE 'postgresql.%' OR metricName LIKE 'mysql.%' 
+      SINCE 1 hour ago
+    min_expected_results: 1
+
+  - name: "Active Connections Combined"
+    query: |
+      SELECT latest(postgresql.backends), latest(mysql.threads) 
+      FROM Metric 
+      WHERE metricName IN ('postgresql.backends', 'mysql.threads') 
+      SINCE 1 hour ago
+    min_expected_results: 1
+
+  - name: "Transaction Rates"
+    query: |
+      SELECT rate(sum(postgresql.commits), 1 minute), rate(sum(postgresql.rollbacks), 1 minute) 
+      FROM Metric 
+      WHERE metricName IN ('postgresql.commits', 'postgresql.rollbacks') 
+      TIMESERIES SINCE 1 hour ago
+    min_expected_results: 1
+
+  - name: "Query Performance"
+    query: |
+      FROM Log 
+      SELECT count(*), average(numeric(avg_duration_ms)) 
+      WHERE query_id IS NOT NULL AND collector.name = 'otelcol' 
+      SINCE 1 hour ago
+    min_expected_results: 0
+
+  - name: "Buffer Pool Usage"
+    query: |
+      SELECT latest(mysql.buffer_pool.data), latest(mysql.buffer_pool.limit) 
+      FROM Metric 
+      WHERE metricName LIKE 'mysql.buffer_pool.%' 
+      SINCE 1 hour ago
+    min_expected_results: 0
+
+# NRDB validation queries
+nrdb_validations:
+  - name: "Metric Data Freshness"
+    description: "Check if metrics are recent"
+    query: |
+      SELECT latest(timestamp) 
+      FROM Metric 
+      WHERE metricName LIKE 'postgresql.%' OR metricName LIKE 'mysql.%' 
+      SINCE 5 minutes ago
+    validation:
+      type: "freshness"
+      max_age_seconds: 300
+
+  - name: "Query Log Freshness"
+    description: "Check if query logs are recent"
+    query: |
+      FROM Log 
+      SELECT latest(timestamp) 
+      WHERE query_id IS NOT NULL AND collector.name = 'otelcol' 
+      SINCE 5 minutes ago
+    validation:
+      type: "freshness"
+      max_age_seconds: 300
+
+  - name: "Metric Cardinality"
+    description: "Check metric cardinality is reasonable"
+    query: |
+      SELECT uniqueCount(metricName) 
+      FROM Metric 
+      WHERE metricName LIKE 'postgresql.%' OR metricName LIKE 'mysql.%' 
+      SINCE 1 hour ago
+    validation:
+      type: "range"
+      min: 5
+      max: 100
+
+  - name: "Database Coverage"
+    description: "Check all configured databases are reporting"
+    query: |
+      SELECT uniqueCount(dimensions.database_name) 
+      FROM Metric 
+      WHERE metricName LIKE 'postgresql.%' OR metricName LIKE 'mysql.%' 
+      FACET dimensions.database_name 
+      SINCE 1 hour ago
+    validation:
+      type: "count"
+      min: 1
+
+# Test scenarios
+test_scenarios:
+  - name: "Basic Metric Collection"
+    description: "Verify basic metrics are being collected"
+    steps:
+      - validate_postgresql_metrics
+      - validate_mysql_metrics
+      - check_data_freshness
+
+  - name: "Query Performance Collection"
+    description: "Verify query logs are being collected"
+    steps:
+      - validate_query_logs
+      - check_query_attributes
+      - verify_sanitization
+
+  - name: "Dashboard Readiness"
+    description: "Verify all dashboard widgets have data"
+    steps:
+      - validate_all_widgets
+      - check_widget_queries
+      - generate_readiness_report

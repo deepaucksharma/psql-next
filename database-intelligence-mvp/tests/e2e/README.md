@@ -10,6 +10,7 @@ The e2e tests focus on validating:
 3. **Export**: Data successfully arrives in NRDB
 4. **Data Quality**: Metrics have correct attributes and values
 5. **Completeness**: All expected metrics are present
+6. **Dashboard Readiness**: All metrics required for the dashboard are available
 
 ## Prerequisites
 
@@ -17,6 +18,7 @@ The e2e tests focus on validating:
    ```bash
    export NEW_RELIC_LICENSE_KEY=your_license_key
    export NEW_RELIC_ACCOUNT_ID=your_account_id
+   export NEW_RELIC_USER_KEY=your_user_key  # Required for dashboard validation
    ```
 
 2. **Databases** (optional - will be started automatically if not available)
@@ -25,6 +27,12 @@ The e2e tests focus on validating:
    export POSTGRES_PORT=5432
    export MYSQL_HOST=localhost
    export MYSQL_PORT=3306
+   ```
+
+3. **Node.js** (for dashboard metrics validation)
+   ```bash
+   # Install Node.js if not available
+   # The test will install required npm packages automatically
    ```
 
 ## Running Tests
@@ -62,20 +70,27 @@ go test -v -timeout=30m ./tests/e2e/...
 
 ```
 e2e/
-├── README.md                    # This file
-├── run-e2e-tests.sh            # Main test runner
-├── nrdb_validation_test.go     # Core NRDB validation tests
-├── e2e_main_test.go           # Test suite setup
-├── e2e_metrics_flow_test.go   # Detailed metrics flow tests
-├── docker-compose-test.yaml    # Test database setup
+├── README.md                           # This file
+├── run-e2e-tests.sh                   # Main test runner (enhanced)
+├── dashboard-metrics-validation.js     # Dashboard metrics validator
+├── e2e-test-config.yaml               # Test configuration
+├── nrdb_validation_test.go            # Core NRDB validation tests
+├── e2e_main_test.go                   # Test suite setup
+├── e2e_metrics_flow_test.go          # Detailed metrics flow tests
+├── docker-compose-test.yaml           # Test database setup
 ├── config/
-│   └── e2e-test-collector.yaml # Collector configuration
+│   └── e2e-test-collector.yaml        # Collector configuration
 ├── sql/
-│   ├── postgres-init.sql      # PostgreSQL test data
-│   └── mysql-init.sql         # MySQL test data
+│   ├── postgres-init.sql             # PostgreSQL test data
+│   └── mysql-init.sql                # MySQL test data
 ├── validators/
-│   └── nrdb_validator.go      # NRDB query helpers
-└── reports/                   # Test results and logs
+│   ├── nrdb_validator.go             # NRDB query helpers
+│   └── metric_validator.go           # Metric validation logic
+└── reports/                          # Test results and logs
+    ├── summary-{TEST_RUN_ID}.txt     # Test summary
+    ├── collector-{TEST_RUN_ID}.log   # Collector logs
+    ├── metrics-{TEST_RUN_ID}.json    # Exported metrics
+    └── dashboard-validation-{TEST_RUN_ID}.json # Dashboard validation report
 ```
 
 ## Test Scenarios
@@ -106,6 +121,13 @@ e2e/
 - Validates metric attributes
 - Checks data freshness
 
+### 6. Dashboard Metrics Validation
+- Validates all PostgreSQL metrics required for dashboard
+- Validates all MySQL metrics required for dashboard
+- Checks query log attributes
+- Verifies dashboard widget queries return data
+- Generates dashboard readiness report
+
 ## NRQL Queries Used
 
 ### Metric Count
@@ -113,6 +135,26 @@ e2e/
 SELECT count(*) FROM Metric 
 WHERE metricName LIKE 'postgresql.%' 
 SINCE 10 minutes ago
+```
+
+### Dashboard Metrics Validation
+```sql
+-- PostgreSQL metrics
+SELECT count(*), uniques(metricName) FROM Metric 
+WHERE metricName IN ('postgresql.backends', 'postgresql.commits', 
+                     'postgresql.database.disk_usage', 'postgresql.blocks_read')
+SINCE 1 hour ago
+
+-- MySQL metrics  
+SELECT count(*), uniques(metricName) FROM Metric
+WHERE metricName IN ('mysql.threads', 'mysql.uptime', 
+                     'mysql.buffer_pool.data', 'mysql.buffer_pool.limit')
+SINCE 1 hour ago
+
+-- Query logs
+FROM Log SELECT count(*) 
+WHERE query_id IS NOT NULL AND collector.name = 'otelcol'
+SINCE 1 hour ago
 ```
 
 ### Sampling Validation
@@ -143,12 +185,17 @@ SINCE 10 minutes ago
 cat tests/e2e/reports/collector-${TEST_RUN_ID}.log
 ```
 
-### 2. Check Exported Metrics
+### 2. Check Dashboard Validation Report
+```bash
+jq . tests/e2e/reports/dashboard-validation-${TEST_RUN_ID}.json | less
+```
+
+### 3. Check Exported Metrics
 ```bash
 jq . tests/e2e/reports/metrics-${TEST_RUN_ID}.json | less
 ```
 
-### 3. Query NRDB Directly
+### 4. Query NRDB Directly
 Use New Relic Query Builder to run:
 ```sql
 SELECT * FROM Metric 
@@ -157,7 +204,7 @@ SINCE 1 hour ago
 LIMIT 100
 ```
 
-### 4. Verify Connectivity
+### 5. Verify Connectivity
 ```bash
 # Test database connections
 psql -h localhost -U postgres -d testdb -c "SELECT 1"
@@ -166,6 +213,12 @@ mysql -h localhost -u root -pmysql -e "SELECT 1"
 # Test New Relic API
 curl -H "Api-Key: $NEW_RELIC_LICENSE_KEY" \
   https://api.newrelic.com/v2/applications.json
+```
+
+### 6. Check Missing Metrics
+```bash
+# Run dashboard metrics validation independently
+node tests/e2e/dashboard-metrics-validation.js
 ```
 
 ## Adding New Tests
