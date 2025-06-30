@@ -12,24 +12,28 @@ The Database Intelligence Collector is an OpenTelemetry-based monitoring solutio
 - **[Configuration Guide](./CONFIGURATION.md)** - Complete configuration reference
 
 ### 2. Architecture & Design
-- **[Architecture Overview](./architecture/OVERVIEW.md)** - System design and components
+- **[Architecture Overview](./ARCHITECTURE.md)** - System design and components
 - **[Technical Implementation](./architecture/IMPLEMENTATION.md)** - Deep dive into code structure
 - **[Custom Processors](./architecture/PROCESSORS.md)** - Details on our 4 custom processors
 
 ### 3. Operations
-- **[Operations Runbook](./RUNBOOK.md)** - Production procedures and troubleshooting
-- **[Deployment Guide](./DEPLOYMENT.md)** - Deployment options and procedures
+- **[Operations Runbook](./operations/RUNBOOK.md)** - Production procedures and troubleshooting
+- **[Deployment Guide](./operations/DEPLOYMENT.md)** - Deployment options and procedures
 - **[Monitoring Guide](./operations/MONITORING.md)** - Health checks and metrics
+- **[Dashboard Guide](./operations/DASHBOARD_GUIDE.md)** - Dashboard setup and configuration
+- **[Migration Guide](./operations/MIGRATION_GUIDE.md)** - Migration from other collectors
 
 ### 4. Development
 - **[Development Guide](./development/GUIDE.md)** - Contributing and local development
 - **[E2E Testing Guide](./E2E_TESTING_COMPLETE.md)** - Comprehensive end-to-end testing
 - **[API Reference](./development/API.md)** - Internal APIs and interfaces
+- **[Taskfile Usage](./development/TASKFILE_USAGE.md)** - Task automation and build scripts
 
 ### 5. Project Information
 - **[Project Status](./PROJECT_STATUS.md)** - Current implementation status and roadmap
 - **[Change Log](./CHANGELOG.md)** - Version history and updates
 - **[Known Issues](./KNOWN_ISSUES.md)** - Current limitations and workarounds
+- **[Troubleshooting Guide](./TROUBLESHOOTING.md)** - Common issues and solutions
 
 ## 🚀 Key Features
 
@@ -141,10 +145,26 @@ service:
 - **Slack**: #database-intelligence
 - **On-Call**: Follow procedures in [Operations Runbook](./operations/RUNBOOK.md)
 
+## 📁 Documentation Organization
+
+After recent cleanup (June 30, 2025), the documentation is now organized as follows:
+
+**Top-Level Files (9 core documents)**:
+- Core guides: README, QUICK_START, CONFIGURATION, TROUBLESHOOTING
+- Architecture: ARCHITECTURE
+- Testing: E2E_TESTING_COMPLETE  
+- Project info: PROJECT_STATUS, CHANGELOG, KNOWN_ISSUES
+
+**Subdirectories**:
+- `architecture/` - Technical implementation details
+- `operations/` - Deployment, monitoring, maintenance, dashboards
+- `development/` - Contributing, testing, APIs, build tools
+- `strategic-analysis/` - Executive summaries and roadmaps
+
 ## 🔄 Migration Notes
 
 For teams migrating from OHI or other collectors:
-1. Review [Migration Guide](./operations/MIGRATION.md)
+1. Review [Migration Guide](./operations/MIGRATION_GUIDE.md)
 2. Use provided configuration templates
 3. Test with minimal configuration first
 4. Enable processors incrementally
