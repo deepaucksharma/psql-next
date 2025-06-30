@@ -1,0 +1,33 @@
+Local E2E Test Summary
+======================
+Run ID: e2e_local_1751307767
+Date: Mon Jun 30 23:53:20 IST 2025
+Duration: 33 seconds
+
+Environment:
+- PostgreSQL: localhost:5432
+- MySQL: localhost:3306
+- Collector Binary: /Users/deepaksharma/syc/db-otel/database-intelligence-mvp/dist/database-intelligence-collector
+
+Test Results:
+- Collector Started: YES
+- Health Check: PASSED
+- Metrics Endpoint: PASSED
+- PostgreSQL Metrics: PASSED (48 metrics)
+- MySQL Metrics: PASSED (84 metrics)
+- File Export: PASSED
+
+Collector Status:
+- Process ID: 54298
+- Internal Metrics: 43
+
+Validation:
+[x] PostgreSQL metrics collected
+[x] MySQL metrics collected
+[x] Metrics exported to file
+[x] Collector internal metrics available
+
+Artifacts:
+- Collector Log: /Users/deepaksharma/syc/db-otel/database-intelligence-mvp/tests/e2e/reports/collector-e2e_local_1751307767.log
+- Exported Metrics: /Users/deepaksharma/syc/db-otel/database-intelligence-mvp/tests/e2e/reports/metrics-e2e_local_1751307767.json
+- This Summary: /Users/deepaksharma/syc/db-otel/database-intelligence-mvp/tests/e2e/reports/summary-e2e_local_1751307767.txt

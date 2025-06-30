@@ -1,3 +1,6 @@
+# Minimal E2E test configuration for basic go build
+# Only uses receivers and exporters, no processors (since they're not registered in main.go)
+
 receivers:
   postgresql:
     endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
@@ -31,87 +34,44 @@ receivers:
               - database
     collection_interval: 30s
 
-processors:
-  memory_limiter:
-    check_interval: 1s
-    limit_percentage: 75
-    spike_limit_percentage: 20
-
-  batch:
-    # Optimized for New Relic limits per best practices
-    timeout: 10s
-    send_batch_size: 1000
-    send_batch_max_size: 2000
-
-  resource:
-    # Critical for New Relic entity synthesis
-    attributes:
-      - key: service.name
-        value: database-intelligence-e2e
-        action: insert
-      - key: host.id
-        value: ${env:HOSTNAME}
-        action: insert
-      - key: deployment.environment
-        value: e2e-test
-        action: insert
-      - key: test.environment
-        value: e2e
-        action: insert
-      - key: test.run_id
-        value: ${env:TEST_RUN_ID}
-        action: insert
-
-  attributes:
-    # Cardinality management per best practices
-    actions:
-      - key: test.environment
-        value: e2e
-        action: insert
-      - key: test.run_id
-        value: ${env:TEST_RUN_ID}
-        action: insert
-      # Drop high-cardinality attributes
-      - key: query_text
-        action: delete
-      - key: user_id
-        action: delete
-      - key: session_id
-        action: delete
-
 exporters:
   # Debug exporter for console output
   debug:
     verbosity: detailed
-    sampling_initial: 10
+    sampling_initial: 5
     sampling_thereafter: 100
 
-  # File exporter for local validation
+  # File exporter for validation
   file:
     path: /tmp/e2e-metrics.json
-    format: json
+    rotation:
+      enabled: false
 
-  # Prometheus exporter for local metrics
+  # Prometheus exporter for metrics endpoint
   prometheus:
     endpoint: 0.0.0.0:8889
+    namespace: test
     const_labels:
       test_environment: e2e
+      test_run_id: ${env:TEST_RUN_ID}
+      # Add entity synthesis attributes as const_labels for test
+      service_name: database-intelligence-e2e
+      host_id: ${env:HOSTNAME}
+      deployment_environment: e2e-test
 
 service:
   pipelines:
+    # Direct pipelines without processors
     metrics/postgres:
       receivers: [postgresql]
-      processors: [memory_limiter, resource, attributes, batch]
       exporters: [debug, file, prometheus]
 
     metrics/mysql:
       receivers: [mysql]
-      processors: [memory_limiter, resource, attributes, batch]
       exporters: [debug, file, prometheus]
 
     metrics/custom:
       receivers: [sqlquery]
-      processors: [memory_limiter, resource, attributes, batch]
       exporters: [debug, file, prometheus]
 
   telemetry:
@@ -127,7 +87,10 @@ service:
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
+    path: /healthz
+
   pprof:
     endpoint: 0.0.0.0:1777
+
   zpages:
     endpoint: 0.0.0.0:55679

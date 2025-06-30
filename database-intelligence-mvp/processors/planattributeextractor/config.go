@@ -33,6 +33,9 @@ type Config struct {
 
 	// SafeMode ensures the processor only works with pre-collected plan data
 	SafeMode bool `mapstructure:"safe_mode"`
+
+	// QueryAnonymization configures query text anonymization
+	QueryAnonymization QueryAnonymizationConfig `mapstructure:"query_anonymization"`
 }
 
 // PostgreSQLExtractionRules defines how to extract attributes from PostgreSQL JSON plans
@@ -66,6 +69,21 @@ type HashGenerationConfig struct {
 
 	// Algorithm specifies the hash algorithm (sha256, sha1, md5)
 	Algorithm string `mapstructure:"algorithm"`
+}
+
+// QueryAnonymizationConfig configures query text anonymization
+type QueryAnonymizationConfig struct {
+	// Enabled determines if query anonymization is active
+	Enabled bool `mapstructure:"enabled"`
+
+	// AttributesToAnonymize lists the attribute names containing query text to anonymize
+	AttributesToAnonymize []string `mapstructure:"attributes_to_anonymize"`
+
+	// GenerateFingerprint creates a normalized query fingerprint for pattern detection
+	GenerateFingerprint bool `mapstructure:"generate_fingerprint"`
+
+	// FingerprintAttribute specifies where to store the query fingerprint
+	FingerprintAttribute string `mapstructure:"fingerprint_attribute"`
 }
 
 // Validate checks the processor configuration
@@ -156,6 +174,12 @@ func createDefaultConfig() component.Config {
 		EnableDebugLogging: false,
 		UnsafePlanCollection: false,
 		SafeMode: true,
+		QueryAnonymization: QueryAnonymizationConfig{
+			Enabled:               true,
+			AttributesToAnonymize: []string{"query_text", "db.statement", "db.query"},
+			GenerateFingerprint:   true,
+			FingerprintAttribute:  "db.query.fingerprint",
+		},
 	}
 }
 

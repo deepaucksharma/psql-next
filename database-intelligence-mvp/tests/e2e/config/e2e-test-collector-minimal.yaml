@@ -20,16 +20,6 @@ receivers:
     database: mysql
     collection_interval: 10s
 
-processors:
-  memory_limiter:
-    check_interval: 1s
-    limit_mib: 512
-    spike_limit_mib: 128
-
-  batch:
-    timeout: 10s
-    send_batch_size: 100
-
 exporters:
   debug:
     verbosity: detailed
@@ -44,6 +34,13 @@ exporters:
     endpoint: 0.0.0.0:8889
     resource_to_telemetry_conversion:
       enabled: true
+    const_labels:
+      # OTEL best practices - entity synthesis attributes
+      service_name: database-intelligence-e2e
+      host_id: ${env:HOSTNAME}
+      deployment_environment: e2e-test
+      test_environment: e2e
+      test_run_id: ${env:TEST_RUN_ID}
 
 service:
   extensions: [zpages]
@@ -51,7 +48,6 @@ service:
   pipelines:
     metrics:
       receivers: [postgresql, mysql]
-      processors: [memory_limiter, batch]
       exporters: [debug, file, prometheus]
 
   telemetry:

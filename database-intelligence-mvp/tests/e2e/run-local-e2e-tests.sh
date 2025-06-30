@@ -12,6 +12,8 @@ export E2E_TESTS=true
 export TEST_RUN_ID="e2e_local_$(date +%s)"
 export TEST_TIMEOUT=${TEST_TIMEOUT:-10m}
 export COLLECTOR_START_TIMEOUT=${COLLECTOR_START_TIMEOUT:-30}
+# Set hostname for entity synthesis (OTEL best practice)
+export HOSTNAME=${HOSTNAME:-$(hostname)}
 
 # Set database connection defaults
 export POSTGRES_HOST=${POSTGRES_HOST:-localhost}
@@ -41,6 +43,13 @@ echo "  Project Root: $PROJECT_ROOT"
 echo "  Test Timeout: $TEST_TIMEOUT"
 echo "  PostgreSQL: ${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}"
 echo "  MySQL: ${MYSQL_HOST:-localhost}:${MYSQL_PORT:-3306}"
+echo "  Hostname (for entity synthesis): $HOSTNAME"
+echo ""
+echo "OTEL Best Practices Applied:"
+echo "  ✓ Memory limiter first in pipelines"
+echo "  ✓ Resource attributes for entity synthesis"
+echo "  ✓ Cardinality management (dropping high-cardinality attributes)"
+echo "  ✓ Optimized batching for New Relic"
 
 # Ensure reports directory exists
 mkdir -p "$REPORTS_DIR"

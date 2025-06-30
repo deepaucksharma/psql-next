@@ -23,17 +23,19 @@ import (
 
 // planAttributeExtractor is the processor implementation
 type planAttributeExtractor struct {
-	config   *Config
-	logger   *zap.Logger
-	consumer consumer.Logs
+	config         *Config
+	logger         *zap.Logger
+	consumer       consumer.Logs
+	queryAnonymizer *queryAnonymizer
 }
 
 // newPlanAttributeExtractor creates a new plan attribute extractor processor
 func newPlanAttributeExtractor(cfg *Config, logger *zap.Logger, consumer consumer.Logs) *planAttributeExtractor {
 	return &planAttributeExtractor{
-		config:   cfg,
-		logger:   logger,
-		consumer: consumer,
+		config:          cfg,
+		logger:          logger,
+		consumer:        consumer,
+		queryAnonymizer: newQueryAnonymizer(),
 	}
 }
 
@@ -141,6 +143,11 @@ func (p *planAttributeExtractor) processLogRecord(ctx context.Context, record pl
 	
 	// Apply extracted attributes to the log record
 	p.applyAttributes(record, extractedAttrs)
+	
+	// Apply query anonymization if enabled
+	if p.config.QueryAnonymization.Enabled {
+		p.applyQueryAnonymization(record)
+	}
 	
 	// Generate plan hash for deduplication
 	if p.config.HashConfig.Output != "" {
@@ -407,4 +414,39 @@ func (p *planAttributeExtractor) truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// applyQueryAnonymization anonymizes query text in specified attributes
+func (p *planAttributeExtractor) applyQueryAnonymization(record plog.LogRecord) {
+	if !p.config.QueryAnonymization.Enabled || p.queryAnonymizer == nil {
+		return
+	}
+	
+	// Process each configured attribute
+	for _, attrName := range p.config.QueryAnonymization.AttributesToAnonymize {
+		if attr, exists := record.Attributes().Get(attrName); exists {
+			originalQuery := attr.AsString()
+			if originalQuery == "" {
+				continue
+			}
+			
+			// Anonymize the query
+			anonymizedQuery := p.queryAnonymizer.AnonymizeQuery(originalQuery)
+			record.Attributes().PutStr(attrName, anonymizedQuery)
+			
+			// Generate fingerprint if configured
+			if p.config.QueryAnonymization.GenerateFingerprint && p.config.QueryAnonymization.FingerprintAttribute != "" {
+				fingerprint := p.queryAnonymizer.GenerateFingerprint(originalQuery)
+				record.Attributes().PutStr(p.config.QueryAnonymization.FingerprintAttribute, fingerprint)
+			}
+			
+			if p.config.EnableDebugLogging {
+				p.logger.Debug("Anonymized query text",
+					zap.String("attribute", attrName),
+					zap.Int("original_length", len(originalQuery)),
+					zap.Int("anonymized_length", len(anonymizedQuery)),
+					zap.Bool("fingerprint_generated", p.config.QueryAnonymization.GenerateFingerprint))
+			}
+		}
+	}
 }
