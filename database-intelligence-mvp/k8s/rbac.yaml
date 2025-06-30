@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: database-intelligence-collector
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-collector
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: database-intelligence-collector
+  labels:
+    app: database-intelligence-collector
+rules:
+# For k8sattributes processor
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/spec
+  - nodes/stats
+  - nodes/proxy
+  - pods
+  - endpoints
+  - services
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources:
+  - replicasets
+  - deployments
+  - daemonsets
+  - statefulsets
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources:
+  - jobs
+  - cronjobs
+  verbs: ["get", "list", "watch"]
+# For resource detection
+- apiGroups: [""]
+  resources:
+  - namespaces
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: database-intelligence-collector
+  labels:
+    app: database-intelligence-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: database-intelligence-collector
+subjects:
+- kind: ServiceAccount
+  name: database-intelligence-collector
+  namespace: database-intelligence

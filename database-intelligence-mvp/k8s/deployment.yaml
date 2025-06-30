@@ -1,0 +1,228 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: database-intelligence-collector
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-collector
+    component: collector
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: database-intelligence-collector
+  template:
+    metadata:
+      labels:
+        app: database-intelligence-collector
+        component: collector
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8888"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: database-intelligence-collector
+      
+      # Pod security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        
+      # Node selection for database proximity
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - database-intelligence-collector
+              topologyKey: kubernetes.io/hostname
+              
+      containers:
+      - name: collector
+        image: database-intelligence-collector:latest
+        imagePullPolicy: Always
+        
+        # Container security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+            
+        ports:
+        - name: metrics
+          containerPort: 8888
+          protocol: TCP
+        - name: health
+          containerPort: 13133
+          protocol: TCP
+        - name: zpages
+          containerPort: 55679
+          protocol: TCP
+        - name: prometheus
+          containerPort: 9090
+          protocol: TCP
+          
+        env:
+        # PostgreSQL configuration
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: postgres-host
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: postgres-port
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: postgres-user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: postgres-password
+        - name: POSTGRES_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: postgres-database
+        - name: POSTGRES_TLS_INSECURE
+          value: "false"
+          
+        # MySQL configuration
+        - name: MYSQL_HOST
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: mysql-host
+        - name: MYSQL_PORT
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: mysql-port
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: mysql-user
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: mysql-password
+        - name: MYSQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: mysql-database
+        - name: MYSQL_TLS_INSECURE
+          value: "false"
+          
+        # New Relic configuration
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: new-relic-license-key
+        - name: NEW_RELIC_OTLP_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: new-relic-otlp-endpoint
+              
+        # Environment configuration
+        - name: ENVIRONMENT
+          value: "production"
+        - name: CLUSTER_NAME
+          value: "prod-cluster-1"
+        - name: COLLECTION_INTERVAL
+          value: "30s"
+        - name: LOG_LEVEL
+          value: "info"
+          
+        # Pod metadata
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: K8S_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: K8S_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+              
+        # Performance tuning
+        - name: GOGC
+          value: "80"
+        - name: GOMEMLIMIT
+          value: "750MiB"
+          
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "2000m"
+            
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /var/cache/otel
+          
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 13133
+          initialDelaySeconds: 15
+          periodSeconds: 30
+          timeoutSeconds: 5
+          
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 13133
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 13133
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 30
+          
+      volumes:
+      - name: config
+        configMap:
+          name: otel-collector-config
+      - name: tmp
+        emptyDir: {}
+      - name: cache
+        emptyDir:
+          sizeLimit: 1Gi

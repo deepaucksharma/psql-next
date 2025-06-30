@@ -1,0 +1,163 @@
+# Prometheus Alert Rules for Database Intelligence Collector
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: database-intelligence-alerts
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-collector
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: collector.health
+    interval: 30s
+    rules:
+    # Collector instance down
+    - alert: CollectorDown
+      expr: up{job="database-intelligence-collector"} == 0
+      for: 5m
+      labels:
+        severity: critical
+        component: collector
+      annotations:
+        summary: "Database Intelligence Collector instance is down"
+        description: "Collector {{ $labels.pod }} in namespace {{ $labels.namespace }} has been down for more than 5 minutes."
+        
+    # High memory usage
+    - alert: CollectorHighMemoryUsage
+      expr: |
+        (
+          otelcol_process_runtime_total_sys_memory_bytes{job="database-intelligence-collector"} 
+          / 
+          otelcol_process_runtime_total_alloc_memory_bytes{job="database-intelligence-collector"}
+        ) > 0.9
+      for: 10m
+      labels:
+        severity: warning
+        component: collector
+      annotations:
+        summary: "Collector memory usage is high"
+        description: "Collector {{ $labels.pod }} is using {{ $value | humanizePercentage }} of allocated memory."
+        
+    # Exporter failures
+    - alert: ExporterFailures
+      expr: |
+        rate(otelcol_exporter_send_failed_metric_points{job="database-intelligence-collector"}[5m]) > 0.1
+      for: 5m
+      labels:
+        severity: critical
+        component: exporter
+      annotations:
+        summary: "High rate of exporter failures"
+        description: "Exporter {{ $labels.exporter }} is failing to send {{ $value }} metrics per second."
+        
+  - name: database.connectivity
+    interval: 30s
+    rules:
+    # PostgreSQL connection failures
+    - alert: PostgreSQLConnectionFailure
+      expr: |
+        rate(otelcol_receiver_refused_metric_points{receiver="postgresql"}[5m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+        component: postgresql
+        database: postgres
+      annotations:
+        summary: "Failed to connect to PostgreSQL"
+        description: "PostgreSQL receiver on {{ $labels.pod }} is unable to collect metrics."
+        
+    # MySQL connection failures  
+    - alert: MySQLConnectionFailure
+      expr: |
+        rate(otelcol_receiver_refused_metric_points{receiver="mysql"}[5m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+        component: mysql
+        database: mysql
+      annotations:
+        summary: "Failed to connect to MySQL"
+        description: "MySQL receiver on {{ $labels.pod }} is unable to collect metrics."
+        
+  - name: database.performance
+    interval: 60s
+    rules:
+    # High query latency - PostgreSQL
+    - alert: PostgreSQLHighQueryLatency
+      expr: |
+        postgresql_stat_database_blk_read_time{} > 1000
+      for: 10m
+      labels:
+        severity: warning
+        component: postgresql
+        database: postgres
+      annotations:
+        summary: "High PostgreSQL query latency detected"
+        description: "PostgreSQL database {{ $labels.database }} has high block read time: {{ $value }}ms"
+        
+    # Connection saturation - PostgreSQL
+    - alert: PostgreSQLConnectionSaturation
+      expr: |
+        (postgresql_stat_database_numbackends{} / postgresql_stat_database_max_connections{}) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        component: postgresql
+        database: postgres
+      annotations:
+        summary: "PostgreSQL connection pool near saturation"
+        description: "PostgreSQL is using {{ $value | humanizePercentage }} of max connections."
+        
+    # Replication lag - MySQL
+    - alert: MySQLReplicationLag
+      expr: |
+        mysql_slave_lag_seconds{} > 30
+      for: 5m
+      labels:
+        severity: warning
+        component: mysql
+        database: mysql
+      annotations:
+        summary: "MySQL replication lag detected"
+        description: "MySQL replica {{ $labels.instance }} has {{ $value }}s replication lag."
+        
+    # Lock waits - MySQL
+    - alert: MySQLHighLockWaits
+      expr: |
+        rate(mysql_innodb_row_lock_waits{}[5m]) > 10
+      for: 5m
+      labels:
+        severity: warning
+        component: mysql
+        database: mysql
+      annotations:
+        summary: "High MySQL lock wait rate"
+        description: "MySQL instance {{ $labels.instance }} has {{ $value }} lock waits per second."
+        
+  - name: pipeline.performance
+    interval: 30s
+    rules:
+    # Batch processor queue length
+    - alert: BatchProcessorQueueFull
+      expr: |
+        otelcol_processor_batch_batch_send_size{} / otelcol_processor_batch_batch_size_trigger{} > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        component: processor
+      annotations:
+        summary: "Batch processor queue nearly full"
+        description: "Batch processor on {{ $labels.pod }} is at {{ $value | humanizePercentage }} capacity."
+        
+    # Memory limiter triggered
+    - alert: MemoryLimiterTriggered
+      expr: |
+        rate(otelcol_processor_refused_metric_points{processor="memory_limiter"}[5m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+        component: processor
+      annotations:
+        summary: "Memory limiter is dropping metrics"
+        description: "Memory limiter on {{ $labels.pod }} dropped {{ $value }} metrics per second."

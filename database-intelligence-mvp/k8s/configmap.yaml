@@ -1,0 +1,141 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: database-intelligence
+data:
+  collector.yaml: |
+    receivers:
+      # PostgreSQL metrics collection
+      postgresql:
+        endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+        username: ${env:POSTGRES_USER}
+        password: ${env:POSTGRES_PASSWORD}
+        databases:
+          - ${env:POSTGRES_DATABASE}
+        collection_interval: ${env:COLLECTION_INTERVAL}
+        tls:
+          insecure: ${env:POSTGRES_TLS_INSECURE}
+          
+      # MySQL metrics collection  
+      mysql:
+        endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+        username: ${env:MYSQL_USER}
+        password: ${env:MYSQL_PASSWORD}
+        database: ${env:MYSQL_DATABASE}
+        collection_interval: ${env:COLLECTION_INTERVAL}
+        tls:
+          insecure: ${env:MYSQL_TLS_INSECURE}
+
+      # Prometheus metrics for self-monitoring
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'otel-collector'
+              scrape_interval: 30s
+              static_configs:
+                - targets: ['localhost:8888']
+
+    processors:
+      # Memory protection
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 20
+        
+      # Add Kubernetes metadata
+      k8sattributes:
+        auth_type: "serviceAccount"
+        passthrough: false
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.node.name
+            - k8s.deployment.name
+        pod_association:
+          - sources:
+            - from: resource_attribute
+              name: k8s.pod.ip
+            - from: connection
+        
+      # Add resource attributes
+      resource:
+        attributes:
+          - key: service.name
+            value: database-intelligence
+            action: upsert
+          - key: environment
+            value: ${env:ENVIRONMENT}
+            action: upsert
+          - key: cluster.name
+            value: ${env:CLUSTER_NAME}
+            action: upsert
+            
+      # Transform for New Relic
+      transform:
+        error_mode: ignore
+        metric_statements:
+          - context: metric
+            statements:
+              - set(resource.attributes["k8s.cluster.name"], "${env:CLUSTER_NAME}")
+              - set(resource.attributes["telemetry.sdk.name"], "opentelemetry")
+              - set(resource.attributes["telemetry.sdk.language"], "go")
+        
+      # Batch for efficiency
+      batch:
+        send_batch_size: 1000
+        timeout: 10s
+
+    exporters:
+      # New Relic OTLP exporter
+      otlp/newrelic:
+        endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+        headers:
+          "api-key": ${env:NEW_RELIC_LICENSE_KEY}
+        compression: gzip
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+          
+      # Prometheus for local monitoring
+      prometheus:
+        endpoint: "0.0.0.0:9090"
+        namespace: db_intelligence
+        const_labels:
+          environment: ${env:ENVIRONMENT}
+          cluster: ${env:CLUSTER_NAME}
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: "/health"
+        check_collector_pipeline:
+          enabled: true
+          interval: 5s
+          exporter_failure_threshold: 5
+      
+      zpages:
+        endpoint: 0.0.0.0:55679
+
+    service:
+      extensions: [health_check, zpages]
+      
+      telemetry:
+        logs:
+          level: ${env:LOG_LEVEL}
+          encoding: json
+          
+      pipelines:
+        metrics:
+          receivers: [postgresql, mysql]
+          processors: [memory_limiter, k8sattributes, resource, transform, batch]
+          exporters: [otlp/newrelic, prometheus]
+          
+        metrics/internal:
+          receivers: [prometheus]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/newrelic]

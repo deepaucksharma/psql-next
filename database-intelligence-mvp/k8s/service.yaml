@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: database-intelligence-collector
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-collector
+    component: collector
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8888"
+spec:
+  type: ClusterIP
+  selector:
+    app: database-intelligence-collector
+  ports:
+  - name: metrics
+    port: 8888
+    targetPort: 8888
+    protocol: TCP
+  - name: health
+    port: 13133
+    targetPort: 13133
+    protocol: TCP
+  - name: zpages
+    port: 55679
+    targetPort: 55679
+    protocol: TCP
+  - name: prometheus
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+---
+# Headless service for stable DNS names
+apiVersion: v1
+kind: Service
+metadata:
+  name: database-intelligence-collector-headless
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-collector
+    component: collector
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: database-intelligence-collector
+  ports:
+  - name: metrics
+    port: 8888
+    targetPort: 8888
