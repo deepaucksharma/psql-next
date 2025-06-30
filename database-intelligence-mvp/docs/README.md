@@ -17,8 +17,8 @@ The Database Intelligence Collector is an OpenTelemetry-based monitoring solutio
 - **[Custom Processors](./architecture/PROCESSORS.md)** - Details on our 4 custom processors
 
 ### 3. Operations
-- **[Operations Runbook](./operations/RUNBOOK.md)** - Production procedures and troubleshooting
-- **[Deployment Guide](./operations/DEPLOYMENT.md)** - Deployment options and procedures
+- **[Operations Runbook](./RUNBOOK.md)** - Production procedures and troubleshooting
+- **[Deployment Guide](./DEPLOYMENT.md)** - Deployment options and procedures
 - **[Monitoring Guide](./operations/MONITORING.md)** - Health checks and metrics
 
 ### 4. Development
