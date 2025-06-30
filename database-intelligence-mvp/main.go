@@ -42,7 +42,7 @@ func main() {
 
 // components returns the set of components for the collector
 // This is a minimal set - mostly standard OTEL components
-func components() (otelcol.Factories, error) {
+func Components() (otelcol.Factories, error) {
 	var err error
 	factories := otelcol.Factories{}
 

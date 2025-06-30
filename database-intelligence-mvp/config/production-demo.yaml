@@ -1,0 +1,90 @@
+receivers:
+  # Database metrics collection
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - postgres
+    collection_interval: 30s
+    tls:
+      insecure: true
+      
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: mysql
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+processors:
+  # Memory protection
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+    
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence
+        action: upsert
+      - key: environment
+        value: production
+        action: upsert
+      - key: deployment.type
+        value: docker
+        action: upsert
+    
+  # Batch for efficiency
+  batch:
+    send_batch_size: 1000
+    timeout: 10s
+    send_batch_max_size: 2000
+
+exporters:
+  # Debug output
+  debug:
+    verbosity: normal
+    sampling_initial: 5
+    sampling_thereafter: 100
+    
+  # File output for verification
+  file:
+    path: ./metrics-production.json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+      localtime: true
+    
+  # Send to New Relic (when configured)
+  # otlp:
+  #   endpoint: ${OTLP_ENDPOINT}
+  #   headers:
+  #     "api-key": ${NEW_RELIC_LICENSE_KEY}
+
+extensions:
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [zpages]
+  
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+      output_paths: ["stdout", "./collector.log"]
+      error_output_paths: ["stderr"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug, file]

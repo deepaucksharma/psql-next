@@ -1,0 +1,39 @@
+receivers:
+  filelog:
+    include: [ ./sample-query.log ]
+    start_at: beginning
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout_type: gotime
+          layout: '2006-01-02T15:04:05Z'
+
+processors:
+  planattributeextractor:
+    safe_mode: true
+    timeout_ms: 3000
+    error_mode: ignore
+    enable_debug_logging: true
+    
+  batch:
+    send_batch_size: 100
+    timeout: 5s
+
+exporters:
+  debug:
+    verbosity: detailed
+    
+  file:
+    path: ./logs-with-plan.json
+
+service:
+  telemetry:
+    logs:
+      level: debug
+      
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [planattributeextractor, batch]
+      exporters: [debug, file]

@@ -12,6 +12,13 @@ vars:
 env:
   CGO_ENABLED: 0
 
+includes:
+  build: ./tasks/build.yml
+  test: ./tasks/test.yml
+  deploy: ./tasks/deploy.yml
+  dev: ./tasks/dev.yml
+  validate: ./tasks/validate.yml
+
 tasks:
   default:
     desc: List available tasks

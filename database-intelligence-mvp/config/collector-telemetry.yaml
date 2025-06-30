@@ -1,0 +1,388 @@
+# Enhanced OpenTelemetry Collector Configuration with Self-Telemetry
+# This configuration enables comprehensive monitoring of the collector itself
+
+service:
+  # Enable detailed telemetry for the collector
+  telemetry:
+    logs:
+      level: ${OTEL_LOG_LEVEL:info}
+      development: false
+      encoding: json
+      disable_caller: false
+      disable_stacktrace: true
+      output_paths: 
+        - stdout
+        - /var/log/otel/collector.log
+      error_output_paths:
+        - stderr
+        - /var/log/otel/collector-error.log
+      initial_fields:
+        service: "database-intelligence-collector"
+        version: "1.0.0"
+        environment: ${ENVIRONMENT:development}
+    
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      
+      # Emit internal metrics about the collector's operation
+      readers:
+        - periodic:
+            interval: 30s
+            timeout: 10s
+            exporter:
+              otlp:
+                endpoint: ${NEW_RELIC_OTLP_ENDPOINT}
+                headers:
+                  api-key: ${NEW_RELIC_LICENSE_KEY}
+                resource_attributes:
+                  service.name: "otel-collector-internal"
+                  service.namespace: "database-intelligence"
+                  deployment.environment: ${ENVIRONMENT}
+    
+    # Resource detection for collector metadata
+    resource:
+      # Detect resource attributes from the environment
+      detectors: [env, system, docker, gcp, aws]
+      timeout: 5s
+      override: false
+
+  # Extensions for additional functionality
+  extensions:
+    - health_check
+    - pprof
+    - zpages
+    - memory_ballast
+
+  pipelines:
+    # Pipeline for database metrics
+    metrics/databases:
+      receivers: [postgresql, mysql, sqlquery/metrics]
+      processors: 
+        - memory_limiter
+        - resource/add_processor_info
+        - adaptive_sampler
+        - batch
+      exporters: 
+        - otlp/newrelic
+        - prometheus/internal
+
+    # Pipeline for query intelligence
+    logs/intelligence:
+      receivers: [sqlquery/queries]
+      processors:
+        - memory_limiter
+        - resource/add_processor_info
+        - circuit_breaker
+        - planattributeextractor
+        - verification
+        - batch
+      exporters:
+        - otlp/newrelic
+        - debug
+
+    # Pipeline for collector's own metrics
+    metrics/internal:
+      receivers: [prometheus/internal, hostmetrics]
+      processors:
+        - memory_limiter
+        - resource/internal
+        - batch/internal
+      exporters:
+        - otlp/newrelic
+        - prometheus/federation
+
+# Extensions configuration
+extensions:
+  # Health check endpoint
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: 5s
+      exporter_failure_threshold: 5
+    
+  # Performance profiling
+  pprof:
+    endpoint: 0.0.0.0:1777
+    block_profile_fraction: 0
+    mutex_profile_fraction: 0
+    
+  # zPages for debugging
+  zpages:
+    endpoint: 0.0.0.0:55679
+    
+  # Memory ballast for GC optimization
+  memory_ballast:
+    size_mib: 256
+
+# Receivers configuration
+receivers:
+  # Standard database receivers
+  postgresql:
+    endpoint: ${POSTGRES_HOST}:${POSTGRES_PORT}
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    databases:
+      - ${POSTGRES_DB}
+    collection_interval: 10s
+    initial_delay: 1s
+    tls:
+      insecure: true
+    
+  mysql:
+    endpoint: ${MYSQL_HOST}:${MYSQL_PORT}
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+    database: ${MYSQL_DB}
+    collection_interval: 10s
+    initial_delay: 1s
+    
+  # SQL Query receivers for custom metrics
+  sqlquery/metrics:
+    driver: postgres
+    datasource: "host=${POSTGRES_HOST} port=${POSTGRES_PORT} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB} sslmode=disable"
+    queries:
+      - sql: |
+          SELECT 
+            current_database() as database_name,
+            count(*) as active_connections,
+            sum(case when state = 'active' then 1 else 0 end) as active_queries,
+            sum(case when wait_event_type is not null then 1 else 0 end) as waiting_queries
+          FROM pg_stat_activity
+          WHERE pid != pg_backend_pid()
+        metrics:
+          - metric_name: db.connections.active
+            value_column: active_connections
+          - metric_name: db.queries.active
+            value_column: active_queries
+          - metric_name: db.queries.waiting
+            value_column: waiting_queries
+    collection_interval: 30s
+    
+  # Query intelligence receiver
+  sqlquery/queries:
+    driver: postgres
+    datasource: "host=${POSTGRES_HOST} port=${POSTGRES_PORT} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB} sslmode=disable"
+    queries:
+      - sql: |
+          SELECT 
+            queryid,
+            query,
+            calls,
+            total_exec_time,
+            mean_exec_time,
+            stddev_exec_time,
+            min_exec_time,
+            max_exec_time,
+            rows,
+            shared_blks_hit,
+            shared_blks_read,
+            blk_read_time,
+            blk_write_time
+          FROM pg_stat_statements
+          WHERE mean_exec_time > 100
+          ORDER BY mean_exec_time DESC
+          LIMIT 100
+        logs:
+          - body_column: query
+            attributes:
+              queryid: queryid
+              calls: calls
+              total_time: total_exec_time
+              mean_time: mean_exec_time
+              max_time: max_exec_time
+              rows: rows
+    collection_interval: 60s
+    
+  # Prometheus receiver for internal metrics
+  prometheus/internal:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['0.0.0.0:8888']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '.*grpc_io.*'
+              action: drop
+              
+  # Host metrics for resource monitoring
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      load:
+      disk:
+      filesystem:
+      network:
+
+# Processors configuration
+processors:
+  # Memory limiter with monitoring
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+    
+  # Add processor information to all telemetry
+  resource/add_processor_info:
+    attributes:
+      - key: processor.name
+        value: database-intelligence-collector
+        action: upsert
+      - key: processor.version
+        value: "1.0.0"
+        action: upsert
+      - key: processor.id
+        value: ${HOSTNAME}
+        action: upsert
+      - key: environment
+        value: ${ENVIRONMENT:development}
+        action: upsert
+        
+  # Resource processor for internal metrics
+  resource/internal:
+    attributes:
+      - key: telemetry.source
+        value: collector-internal
+        action: upsert
+      - key: telemetry.sdk.name
+        value: opentelemetry
+        action: upsert
+      - key: telemetry.sdk.language
+        value: go
+        action: upsert
+        
+  # Adaptive sampler with telemetry
+  adaptive_sampler:
+    in_memory_only: true
+    slow_query_threshold_ms: ${SLOW_QUERY_THRESHOLD:1000}
+    max_records_per_second: ${MAX_RECORDS_PER_SECOND:1000}
+    
+    # Enable metrics
+    metrics:
+      enabled: true
+      interval: 30s
+      include_rule_metrics: true
+      include_cache_metrics: true
+      export_to_new_relic: true
+      
+    rules:
+      - name: critical_queries
+        priority: 100
+        sample_rate: 1.0
+        conditions:
+          - attribute: mean_time
+            operator: gt
+            value: ${CRITICAL_QUERY_MS:1000}
+            
+      - name: high_frequency
+        priority: 50
+        sample_rate: 0.01
+        max_per_minute: 10
+        conditions:
+          - attribute: calls
+            operator: gt
+            value: ${HIGH_FREQUENCY_THRESHOLD:1000}
+            
+  # Circuit breaker with monitoring
+  circuit_breaker:
+    failure_threshold: ${CB_FAILURE_THRESHOLD:5}
+    success_threshold: ${CB_SUCCESS_THRESHOLD:3}
+    open_state_timeout: ${CB_OPEN_TIMEOUT:30s}
+    enable_debug_logging: ${CB_DEBUG:false}
+    
+    # Resource thresholds
+    memory_threshold_mb: ${CB_MEMORY_THRESHOLD:512}
+    cpu_threshold_percent: ${CB_CPU_THRESHOLD:80}
+    
+  # Plan attribute extractor
+  planattributeextractor:
+    safe_mode: true
+    timeout: 100ms
+    error_mode: ignore
+    
+  # Verification processor
+  verification:
+    pii_detection:
+      enabled: true
+      patterns:
+        - credit_card
+        - ssn
+        - email
+        - phone
+    quality_checks:
+      enabled: true
+      cardinality_limit: 10000
+    auto_tuning:
+      enabled: false
+      
+  # Batch processors
+  batch:
+    send_batch_size: ${BATCH_SIZE:1000}
+    send_batch_max_size: ${BATCH_MAX_SIZE:2000}
+    timeout: ${BATCH_TIMEOUT:10s}
+    
+  batch/internal:
+    send_batch_size: 100
+    timeout: 5s
+
+# Exporters configuration
+exporters:
+  # Primary New Relic exporter
+  otlp/newrelic:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 300s
+      max_elapsed_time: 900s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+      
+  # Prometheus exporter for local metrics
+  prometheus/internal:
+    endpoint: 0.0.0.0:9090
+    namespace: otel_collector
+    const_labels:
+      environment: ${ENVIRONMENT}
+      
+  # Federation endpoint for Prometheus
+  prometheus/federation:
+    endpoint: 0.0.0.0:9091
+    namespace: database_intelligence
+    
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+# Health monitoring configuration
+health_monitoring:
+  # Liveness probe
+  liveness:
+    path: /health/live
+    interval: 10s
+    
+  # Readiness probe  
+  readiness:
+    path: /health/ready
+    interval: 5s
+    check_extensions: true
+    check_pipeline: true

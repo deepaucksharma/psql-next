@@ -58,18 +58,28 @@ tasks:
           ./tests/integration/...
 
   e2e:
-    desc: Run end-to-end tests
-    deps: ['dev:up', 'run']
+    desc: Run end-to-end tests against a real database and New Relic (local)
+    deps: [build] # This will build the binary first
     cmds:
-      - echo "[TEST] Running E2E tests..."
+      - task: e2e:run
+
+  e2e:ci:
+    desc: Run end-to-end tests in a CI environment (expects pre-built binary)
+    cmds:
+      - task: e2e:run
+
+  e2e:run:
+    desc: Internal task to execute e2e tests
+    internal: true
+    cmds:
       - |
-        # Wait for collector to be ready
-        timeout 30 bash -c 'until curl -sf http://localhost:13133/ > /dev/null; do sleep 1; done'
-      - |
-        go test -v \
-          -tags=e2e \
-          -timeout={{.TEST_TIMEOUT}} \
-          ./tests/e2e/...
+        # Ensure required environment variables are set
+        if [ -z "$NEW_RELIC_LICENSE_KEY" ] || [ -z "$NEW_RELIC_ACCOUNT_ID" ]; then
+          echo "[ERROR] NEW_RELIC_LICENSE_KEY and NEW_RELIC_ACCOUNT_ID must be set for E2E tests."
+          exit 1
+        fi
+        echo "[TEST] Running E2E tests..."
+        go test -v -tags=e2e -timeout=15m ./tests/e2e/...
 
   benchmark:
     desc: Run performance benchmarks

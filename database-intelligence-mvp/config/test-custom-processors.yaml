@@ -1,0 +1,43 @@
+receivers:
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - postgres
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+    
+  planattributeextractor:
+    safe_mode: true
+    timeout_ms: 3000
+    error_mode: ignore
+    
+  batch:
+    send_batch_size: 100
+    timeout: 5s
+
+exporters:
+  debug:
+    verbosity: detailed
+    
+  file:
+    path: ./metrics-with-plan.json
+
+service:
+  telemetry:
+    logs:
+      level: info
+      
+  pipelines:
+    metrics:
+      receivers: [postgresql]
+      processors: [memory_limiter, planattributeextractor, batch]
+      exporters: [debug, file]

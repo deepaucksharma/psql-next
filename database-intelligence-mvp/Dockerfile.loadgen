@@ -1,0 +1,218 @@
+FROM golang:1.21-alpine
+
+WORKDIR /app
+
+# Create load generator script
+RUN cat > main.go << 'EOF'
+package main
+
+import (
+    "database/sql"
+    "fmt"
+    "log"
+    "math/rand"
+    "os"
+    "time"
+    
+    _ "github.com/lib/pq"
+    _ "github.com/go-sql-driver/mysql"
+)
+
+type LoadGenerator struct {
+    pgDB    *sql.DB
+    mysqlDB *sql.DB
+}
+
+func main() {
+    lg := &LoadGenerator{}
+    
+    // Connect to PostgreSQL
+    pgDSN := os.Getenv("POSTGRES_DSN")
+    if pgDSN == "" {
+        pgDSN = "postgres://postgres:postgres@postgres:5432/production?sslmode=disable"
+    }
+    
+    pgDB, err := sql.Open("postgres", pgDSN)
+    if err != nil {
+        log.Fatal("Failed to connect to PostgreSQL:", err)
+    }
+    lg.pgDB = pgDB
+    defer pgDB.Close()
+    
+    // Connect to MySQL
+    mysqlDSN := os.Getenv("MYSQL_DSN")
+    if mysqlDSN == "" {
+        mysqlDSN = "root:mysql@tcp(mysql:3306)/production"
+    }
+    
+    mysqlDB, err := sql.Open("mysql", mysqlDSN)
+    if err != nil {
+        log.Fatal("Failed to connect to MySQL:", err)
+    }
+    lg.mysqlDB = mysqlDB
+    defer mysqlDB.Close()
+    
+    // Wait for databases to be ready
+    time.Sleep(10 * time.Second)
+    
+    log.Println("Starting load generator...")
+    
+    // Run load generation
+    ticker := time.NewTicker(5 * time.Second)
+    defer ticker.Stop()
+    
+    for range ticker.C {
+        go lg.runPostgreSQLQueries()
+        go lg.runMySQLQueries()
+    }
+}
+
+func (lg *LoadGenerator) runPostgreSQLQueries() {
+    queries := []struct {
+        name  string
+        query string
+    }{
+        {"simple_select", "SELECT * FROM users WHERE id = $1"},
+        {"count_orders", "SELECT COUNT(*) FROM orders WHERE status = $1"},
+        {"join_query", `
+            SELECT u.username, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent
+            FROM users u
+            LEFT JOIN orders o ON u.id = o.user_id
+            GROUP BY u.id, u.username
+            ORDER BY total_spent DESC
+            LIMIT 10
+        `},
+        {"complex_aggregation", `
+            SELECT 
+                p.category,
+                COUNT(DISTINCT oi.order_id) as orders,
+                SUM(oi.quantity) as total_quantity,
+                AVG(oi.unit_price) as avg_price
+            FROM order_items oi
+            JOIN products p ON oi.product_id = p.id
+            JOIN orders o ON oi.order_id = o.id
+            WHERE o.order_date > CURRENT_DATE - INTERVAL '30 days'
+            GROUP BY p.category
+            HAVING COUNT(DISTINCT oi.order_id) > 5
+        `},
+        {"slow_query", `
+            WITH RECURSIVE order_hierarchy AS (
+                SELECT id, user_id, order_date, total_amount, 1 as level
+                FROM orders
+                WHERE user_id = $1
+                UNION ALL
+                SELECT o.id, o.user_id, o.order_date, o.total_amount, oh.level + 1
+                FROM orders o
+                JOIN order_hierarchy oh ON o.user_id = oh.user_id
+                WHERE o.order_date > oh.order_date
+            )
+            SELECT * FROM order_hierarchy
+        `},
+    }
+    
+    for _, q := range queries {
+        start := time.Now()
+        
+        switch q.name {
+        case "simple_select":
+            var user struct{ id int; username string; email string }
+            err := lg.pgDB.QueryRow(q.query, rand.Intn(3)+1).Scan(&user.id, &user.username, &user.email)
+            if err != nil && err != sql.ErrNoRows {
+                log.Printf("PostgreSQL %s error: %v", q.name, err)
+            }
+        case "count_orders":
+            var count int
+            err := lg.pgDB.QueryRow(q.query, "pending").Scan(&count)
+            if err != nil {
+                log.Printf("PostgreSQL %s error: %v", q.name, err)
+            }
+        case "slow_query":
+            rows, err := lg.pgDB.Query(q.query, rand.Intn(3)+1)
+            if err != nil {
+                log.Printf("PostgreSQL %s error: %v", q.name, err)
+            } else {
+                rows.Close()
+            }
+        default:
+            rows, err := lg.pgDB.Query(q.query)
+            if err != nil {
+                log.Printf("PostgreSQL %s error: %v", q.name, err)
+            } else {
+                rows.Close()
+            }
+        }
+        
+        duration := time.Since(start)
+        log.Printf("PostgreSQL %s completed in %v", q.name, duration)
+    }
+}
+
+func (lg *LoadGenerator) runMySQLQueries() {
+    queries := []struct {
+        name  string
+        query string
+    }{
+        {"simple_select", "SELECT * FROM users WHERE id = ?"},
+        {"count_products", "SELECT COUNT(*) FROM products WHERE category = ?"},
+        {"top_products", `
+            SELECT p.name, p.category, COUNT(oi.id) as times_ordered, SUM(oi.quantity) as total_quantity
+            FROM products p
+            LEFT JOIN order_items oi ON p.id = oi.product_id
+            GROUP BY p.id, p.name, p.category
+            ORDER BY times_ordered DESC
+            LIMIT 10
+        `},
+        {"user_analytics", `
+            SELECT 
+                DATE(o.order_date) as order_day,
+                COUNT(DISTINCT o.user_id) as unique_users,
+                COUNT(o.id) as total_orders,
+                AVG(o.total_amount) as avg_order_value
+            FROM orders o
+            WHERE o.order_date >= DATE_SUB(CURRENT_DATE, INTERVAL 7 DAY)
+            GROUP BY DATE(o.order_date)
+            ORDER BY order_day DESC
+        `},
+    }
+    
+    for _, q := range queries {
+        start := time.Now()
+        
+        switch q.name {
+        case "simple_select":
+            var user struct{ id int; username string; email string }
+            err := lg.mysqlDB.QueryRow(q.query, rand.Intn(3)+1).Scan(&user.id, &user.username, &user.email)
+            if err != nil && err != sql.ErrNoRows {
+                log.Printf("MySQL %s error: %v", q.name, err)
+            }
+        case "count_products":
+            var count int
+            err := lg.mysqlDB.QueryRow(q.query, "Electronics").Scan(&count)
+            if err != nil {
+                log.Printf("MySQL %s error: %v", q.name, err)
+            }
+        default:
+            rows, err := lg.mysqlDB.Query(q.query)
+            if err != nil {
+                log.Printf("MySQL %s error: %v", q.name, err)
+            } else {
+                rows.Close()
+            }
+        }
+        
+        duration := time.Since(start)
+        log.Printf("MySQL %s completed in %v", q.name, duration)
+    }
+}
+EOF
+
+# Initialize go module and get dependencies
+RUN go mod init loadgen && \
+    go get github.com/lib/pq && \
+    go get github.com/go-sql-driver/mysql
+
+# Build the application
+RUN go build -o /loadgen main.go
+
+# Run the load generator
+CMD ["/loadgen"]

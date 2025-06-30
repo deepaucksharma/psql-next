@@ -48,14 +48,16 @@ tasks:
       TAG: '{{.TAG | default .VERSION}}'
       PLATFORM: '{{.PLATFORM | default "linux/amd64,linux/arm64"}}'
     deps: [binary]
+    vars:
+      DOCKER_BUILD_CMD: |
+        docker buildx build 
+          --platform {{.PLATFORM}} 
+          --tag {{.IMAGE}}:{{.TAG}} 
+          --tag {{.IMAGE}}:latest 
+          $(if .PUSH) --push $(end)
     cmds:
       - echo "[DOCKER] Building Docker image: {{.IMAGE}}:{{.TAG}}"
-      - |
-        docker buildx build \
-          --platform {{.PLATFORM}} \
-          --tag {{.IMAGE}}:{{.TAG}} \
-          --tag {{.IMAGE}}:latest \
-          {{if .PUSH}}--push{{else}}.{{end}}
+      - "{{.DOCKER_BUILD_CMD}}"
 
   docker:push:
     desc: Build and push Docker image
