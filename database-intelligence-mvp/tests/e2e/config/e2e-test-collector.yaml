@@ -1,79 +1,110 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+
 receivers:
   postgresql:
-    endpoint: ${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}
-    username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:postgres}
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER:-postgres}
+    password: ${env:POSTGRES_PASSWORD:-postgres}
     databases:
-      - testdb
-    collection_interval: 10s
+      - ${env:POSTGRES_DB:-postgres}
+    collection_interval: 30s
     tls:
       insecure: true
 
   mysql:
-    endpoint: ${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}
-    username: ${MYSQL_USER:root}
-    password: ${MYSQL_PASSWORD:mysql}
-    database: testdb
-    collection_interval: 10s
-    tls:
-      insecure: true
-
-  sqlquery:
-    driver: postgres
-    datasource: "host=${POSTGRES_HOST:localhost} port=${POSTGRES_PORT:5432} user=${POSTGRES_USER:postgres} password=${POSTGRES_PASSWORD:postgres} dbname=testdb sslmode=disable"
-    queries:
-      - sql: "SELECT COUNT(*) as active_connections FROM pg_stat_activity WHERE state = 'active'"
-        metrics:
-          - metric_name: sqlquery.active_connections
-            value_column: active_connections
-            value_type: int
-            attribute_columns:
-              - database
+    endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-mysql}
+    database: ${env:MYSQL_DB:-mysql}
     collection_interval: 30s
+
+  # SQL query receiver for test query logs
+  sqlquery/postgresql:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-postgres} sslmode=disable"
+    queries:
+      - sql: |
+          SELECT
+            'e2e_test_' || generate_series as query_id,
+            'SELECT * FROM test_table_' || generate_series as query_text,
+            (50 + random() * 100)::numeric(10,2) as avg_duration_ms,
+            (10 + random() * 90)::int as execution_count,
+            ((50 + random() * 100) * (10 + random() * 90))::numeric(10,2) as total_duration_ms,
+            current_database() as database_name
+          FROM generate_series(1, 5)
+        logs:
+          - body_column: query_text
+            attributes:
+              query_id: query_id
+              avg_duration_ms: avg_duration_ms
+              execution_count: execution_count
+              total_duration_ms: total_duration_ms
+              database_name: database_name
+    collection_interval: 60s
+
+  sqlquery/mysql:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-mysql}@tcp(${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306})/${env:MYSQL_DB:-mysql}"
+    queries:
+      - sql: |
+          SELECT 
+            'mysql_e2e_test_1' as query_id,
+            'SELECT * FROM users WHERE active = 1' as query_text,
+            75.5 as avg_duration_ms,
+            50 as execution_count,
+            3775.0 as total_duration_ms,
+            DATABASE() as database_name
+        logs:
+          - body_column: query_text
+            attributes:
+              query_id: query_id
+              avg_duration_ms: avg_duration_ms
+              execution_count: execution_count
+              total_duration_ms: total_duration_ms
+              database_name: database_name
+    collection_interval: 60s
 
 processors:
   memory_limiter:
     check_interval: 1s
-    limit_percentage: 75
-    spike_limit_percentage: 20
+    limit_mib: 512
+    spike_limit_mib: 128
 
-  adaptive_sampler:
-    in_memory_only: true
-    default_sample_rate: 0.5
-    rules:
-      - name: slow_queries
-        conditions:
-          - attribute: duration_ms
-            operator: gt
-            value: 1000
-        sample_rate: 1.0
-      - name: test_queries
-        conditions:
-          - attribute: query_text
-            operator: contains
-            value: e2e_test
-        sample_rate: 1.0
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: collector.name
+        value: otelcol
+        action: upsert
+      - key: test.environment
+        value: e2e
+        action: upsert
+      - key: test.run_id
+        value: ${env:TEST_RUN_ID:-default}
+        action: upsert
 
-  circuit_breaker:
-    failure_threshold: 10
-    open_state_timeout: 30s
-    half_open_requests: 5
+  # Transform processors for data normalization
+  transform/metrics:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - set(unit, "1") where unit == ""
 
-  plan_attribute_extractor:
-    enabled: true
-    parse_timeout: 5s
-    max_plan_size: 100KB
-
-  verification:
-    enabled: true
-    pii_detection:
-      enabled: true
-      patterns:
-        - ssn
-        - credit_card
-        - email
-      sanitization:
-        default_action: mask
+  transform/logs:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["avg_duration_ms"], Double(attributes["avg_duration_ms"])) where attributes["avg_duration_ms"] != nil
+          - set(attributes["execution_count"], Int(attributes["execution_count"])) where attributes["execution_count"] != nil
+          - set(attributes["total_duration_ms"], Double(attributes["total_duration_ms"])) where attributes["total_duration_ms"] != nil
 
   batch:
     timeout: 10s
@@ -84,15 +115,12 @@ processors:
       - key: test.environment
         value: e2e
         action: insert
-      - key: test.run_id
-        value: ${TEST_RUN_ID:default}
-        action: insert
 
 exporters:
   otlp/newrelic:
-    endpoint: ${NEW_RELIC_OTLP_ENDPOINT:otlp.nr-data.net:4317}
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
     headers:
-      api-key: ${NEW_RELIC_LICENSE_KEY}
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
     compression: gzip
     retry_on_failure:
       enabled: true
@@ -118,19 +146,21 @@ service:
   pipelines:
     metrics/postgres:
       receivers: [postgresql]
-      processors: [memory_limiter, adaptive_sampler, circuit_breaker, plan_attribute_extractor, verification, attributes, batch]
-      exporters: [otlp/newrelic, file]
+      processors: [memory_limiter, resource, transform/metrics, batch]
+      exporters: [otlp/newrelic, file, debug]
 
     metrics/mysql:
       receivers: [mysql]
-      processors: [memory_limiter, adaptive_sampler, circuit_breaker, plan_attribute_extractor, verification, attributes, batch]
-      exporters: [otlp/newrelic, file]
+      processors: [memory_limiter, resource, transform/metrics, batch]
+      exporters: [otlp/newrelic, file, debug]
 
-    metrics/custom:
-      receivers: [sqlquery]
-      processors: [memory_limiter, attributes, batch]
-      exporters: [otlp/newrelic, file]
+    logs/queries:
+      receivers: [sqlquery/postgresql, sqlquery/mysql]
+      processors: [memory_limiter, resource, transform/logs, attributes, batch]
+      exporters: [otlp/newrelic, file, debug]
 
+  extensions: [health_check, zpages]
+  
   telemetry:
     logs:
       level: info

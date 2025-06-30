@@ -8,19 +8,30 @@ echo "=== Database Intelligence Collector E2E Tests ==="
 
 # Check prerequisites
 if [ -z "$NEW_RELIC_LICENSE_KEY" ]; then
-    echo "ERROR: NEW_RELIC_LICENSE_KEY environment variable is required"
-    exit 1
+    echo "WARNING: NEW_RELIC_LICENSE_KEY not set - using local file export only"
+    export USE_LOCAL_EXPORT=true
+else
+    export USE_LOCAL_EXPORT=false
 fi
 
 if [ -z "$NEW_RELIC_ACCOUNT_ID" ]; then
-    echo "ERROR: NEW_RELIC_ACCOUNT_ID environment variable is required"
-    exit 1
+    echo "WARNING: NEW_RELIC_ACCOUNT_ID not set - NRDB queries will be skipped"
 fi
 
 # Set test environment
 export E2E_TESTS=true
 export TEST_RUN_ID=$(date +%s)
 export TEST_TIMEOUT=${TEST_TIMEOUT:-30m}
+
+# Set database connection defaults
+export POSTGRES_HOST=${POSTGRES_HOST:-localhost}
+export POSTGRES_PORT=${POSTGRES_PORT:-5432}
+export POSTGRES_USER=${POSTGRES_USER:-postgres}
+export POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+export MYSQL_HOST=${MYSQL_HOST:-localhost}
+export MYSQL_PORT=${MYSQL_PORT:-3306}
+export MYSQL_USER=${MYSQL_USER:-root}
+export MYSQL_PASSWORD=${MYSQL_PASSWORD:-mysql}
 
 # Colors for output
 RED='\033[0;31m'
@@ -79,16 +90,31 @@ if ! nc -z ${POSTGRES_HOST:-localhost} ${POSTGRES_PORT:-5432} 2>/dev/null; then
 fi
 
 # Build collector if needed
-if [ ! -f "./dist/database-intelligence-collector" ]; then
+COLLECTOR_BINARY="${PROJECT_ROOT:-$(pwd)}/dist/database-intelligence-collector"
+if [ ! -f "$COLLECTOR_BINARY" ]; then
     echo -e "\n${YELLOW}Building collector...${NC}"
     make build
+    
+    if [ ! -f "$COLLECTOR_BINARY" ]; then
+        echo -e "${RED}Failed to build collector${NC}"
+        exit 1
+    fi
 fi
 
 # Start collector
 echo -e "\n${YELLOW}Starting collector with e2e configuration...${NC}"
-./dist/database-intelligence-collector \
-    --config=tests/e2e/config/e2e-test-collector.yaml \
-    --set=service.telemetry.logs.level=debug &
+
+# Use simple config for local testing
+if [ "$USE_LOCAL_EXPORT" = "true" ]; then
+    CONFIG_FILE="tests/e2e/config/e2e-test-collector-local.yaml"
+else
+    CONFIG_FILE="tests/e2e/config/e2e-test-collector-simple.yaml"
+fi
+
+"$COLLECTOR_BINARY" \
+    --config="$CONFIG_FILE" \
+    --set=service.telemetry.logs.level=debug \
+    > /tmp/e2e-collector.log 2>&1 &
 
 COLLECTOR_PID=$!
 echo "Collector started with PID: $COLLECTOR_PID"

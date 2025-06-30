@@ -1,81 +1,79 @@
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
 
-  memory_ballast:
-    size_mib: 128
 
 receivers:
   # Standard OTEL receivers for database metrics
   postgresql:
-    endpoint: postgres-primary:5432
-    username: postgres
-    password: postgres123
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER:-postgres}
+    password: ${env:POSTGRES_PASSWORD:-postgres}
     databases:
-      - testdb
+      - ${env:POSTGRES_DB:-postgres}
     tls:
       insecure: true
     collection_interval: 60s
 
   mysql:
-    endpoint: mysql-primary:3306
-    username: root
-    password: mysql123
-    database: testdb
+    endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-mysql}
+    database: ${env:MYSQL_DB:-mysql}
     collection_interval: 60s
 
   # SQL query receiver for custom query statistics
   sqlquery/postgresql:
     driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-postgres} sslmode=disable"
     collection_interval: 300s
-    timeout: 10s
     queries:
-      logs:
-        - sql: |
-            -- Safety timeouts to prevent long-running queries
-            SET LOCAL statement_timeout = '3000ms';
-            SET LOCAL lock_timeout = '100ms';
+      - sql: |
+          -- Safety timeouts to prevent long-running queries
+          SET LOCAL statement_timeout = '3000ms';
+          SET LOCAL lock_timeout = '100ms';
 
-            -- Find the worst-performing query based on total execution time
-            WITH worst_query AS (
-              SELECT
-                queryid,
-                query,
-                mean_exec_time,
-                calls,
-                total_exec_time,
-                (mean_exec_time * calls) as impact_score
-              FROM pg_stat_statements
-              WHERE
-                mean_exec_time > 50        -- Only consider queries over 50ms
-                AND calls > 5              -- And those that are somewhat frequent
-                AND query NOT LIKE '%pg_%' -- Exclude system queries
-                AND query NOT LIKE '%EXPLAIN%'
-                AND query NOT LIKE '%SET LOCAL%'
-              ORDER BY impact_score DESC
-              LIMIT 1
-            )
-            SELECT
-              queryid::text as query_id,
-              query as query_text,
-              round(mean_exec_time::numeric, 2) as avg_duration_ms,
-              calls as execution_count,
-              round(total_exec_time::numeric, 2) as total_duration_ms,
-              -- This is a placeholder for the plan, as we are not collecting actual plans
-              json_build_object(
-                'plan_available', false,
-                'approach', 'metadata_only_for_safety'
-              ) as plan_metadata
-            FROM worst_query;
+          -- Check if pg_stat_statements exists
+          SELECT EXISTS (
+            SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'
+          ) as has_extension
+        metrics:
+          - metric_name: pg_stat_statements.available
+            value_column: has_extension
+            value_type: int
+            
+      - sql: |
+          -- Find slow queries from pg_stat_statements (if available)
+          SELECT
+            queryid::text as query_id,
+            query as query_text,
+            round(mean_exec_time::numeric, 2) as avg_duration_ms,
+            calls as execution_count,
+            round(total_exec_time::numeric, 2) as total_duration_ms,
+            current_database() as database_name
+          FROM pg_stat_statements
+          WHERE mean_exec_time > 50
+            AND query NOT LIKE '%pg_%'
+            AND query NOT LIKE '%EXPLAIN%'
+          ORDER BY mean_exec_time DESC
+          LIMIT 10
+        logs:
+          - body_column: query_text
+            attributes:
+              query_id: query_id
+              avg_duration_ms: avg_duration_ms
+              execution_count: execution_count
+              total_duration_ms: total_duration_ms
+              database_name: database_name
 
   sqlquery/mysql:
     driver: mysql
-    datasource: "root:mysql123@tcp(mysql-primary:3306)/testdb"
+    datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-mysql}@tcp(${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306})/${env:MYSQL_DB:-mysql}"
     collection_interval: 300s
-    timeout: 10s
     queries:
-      - sql: |
-          queries:
       - sql: |
           SELECT
             DIGEST as query_id,
@@ -83,18 +81,21 @@ receivers:
             ROUND(AVG_TIMER_WAIT/1000000, 2) as avg_duration_ms,
             COUNT_STAR as execution_count,
             ROUND((AVG_TIMER_WAIT * COUNT_STAR)/1000000, 2) as total_duration_ms,
-            JSON_OBJECT(
-              'plan_available', false,
-              'approach', 'performance_schema_metadata'
-            ) as plan_metadata
+            SCHEMA_NAME as database_name
           FROM performance_schema.events_statements_summary_by_digest
-          WHERE
-            SCHEMA_NAME = DATABASE()
-            AND SCHEMA_NAME IS NOT NULL
-            AND AVG_TIMER_WAIT > 50000000  -- 50ms+
+          WHERE SCHEMA_NAME IS NOT NULL
+            AND AVG_TIMER_WAIT > 50000000
             AND COUNT_STAR > 5
-          ORDER BY (AVG_TIMER_WAIT * COUNT_STAR) DESC
-          LIMIT 1;
+          ORDER BY AVG_TIMER_WAIT DESC
+          LIMIT 10
+        logs:
+          - body_column: query_text
+            attributes:
+              query_id: query_id
+              avg_duration_ms: avg_duration_ms
+              execution_count: execution_count
+              total_duration_ms: total_duration_ms
+              database_name: database_name
 
 processors:
   memory_limiter:
@@ -102,6 +103,37 @@ processors:
     limit_mib: 1024
     spike_limit_mib: 256
 
+  # Add collector.name attribute for dashboard queries
+  resource:
+    attributes:
+      - key: collector.name
+        value: otelcol
+        action: upsert
+      - key: collector.instance.id
+        value: ${env:HOSTNAME}
+        action: upsert
+
+  # Transform to ensure numeric values are properly typed
+  transform/metrics:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - set(unit, "1") where name == "pg_stat_statements.available"
+
+  transform/logs:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Ensure numeric fields are numbers
+          - set(attributes["avg_duration_ms"], Double(attributes["avg_duration_ms"])) where attributes["avg_duration_ms"] != nil
+          - set(attributes["execution_count"], Int(attributes["execution_count"])) where attributes["execution_count"] != nil
+          - set(attributes["total_duration_ms"], Double(attributes["total_duration_ms"])) where attributes["total_duration_ms"] != nil
+          # Set collector.name if not present
+          - set(attributes["collector.name"], "otelcol") where attributes["collector.name"] == nil
+
+  # PII sanitization
   transform/sanitize_pii:
     error_mode: ignore
     log_statements:
@@ -110,12 +142,6 @@ processors:
           - replace_all_patterns(attributes["query_text"], "'[^']*'", "'[REDACTED]'")
           - replace_all_patterns(attributes["query_text"], "\\b\\d{6,}\\b", "[ID]")
           - replace_all_patterns(body, "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "[EMAIL_REDACTED]")
-
-  resource:
-    attributes:
-      - key: "collector.instance.id"
-        value: "${env:HOSTNAME}"
-        action: upsert
 
   probabilistic_sampler:
     hash_seed: 22
@@ -127,10 +153,15 @@ processors:
     send_batch_max_size: 100
 
 exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
   otlp/newrelic:
-    endpoint: "${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}"
+    endpoint: ${env:OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
     headers:
-      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
     compression: gzip
     timeout: 30s
     retry_on_failure:
@@ -144,17 +175,23 @@ exporters:
       queue_size: 256
 
 service:
-  extensions: [health_check, memory_ballast]
+  extensions: [health_check, zpages]
   pipelines:
     metrics/databases:
       receivers: [postgresql, mysql]
-      processors: [memory_limiter, resource, batch]
-      exporters: [otlp/newrelic]
+      processors: [memory_limiter, resource, transform/metrics, batch]
+      exporters: [debug, otlp/newrelic]
     
-    logs/database_intelligence:
+    metrics/queries:
       receivers: [sqlquery/postgresql, sqlquery/mysql]
-      processors: [memory_limiter, transform/sanitize_pii, resource, probabilistic_sampler, batch]
-      exporters: [otlp/newrelic]
+      processors: [memory_limiter, resource, transform/metrics, batch]
+      exporters: [debug, otlp/newrelic]
+    
+    logs/queries:
+      receivers: [sqlquery/postgresql, sqlquery/mysql]
+      processors: [memory_limiter, resource, transform/logs, transform/sanitize_pii, probabilistic_sampler, batch]
+      exporters: [debug, otlp/newrelic]
+      
   telemetry:
     logs:
       level: info

@@ -19,7 +19,7 @@ import (
 
 func main() {
 	// Create factories map
-	factories, err := Components()
+		factories, err := Components()
 	if err != nil {
 		log.Fatalf("failed to build components: %v", err)
 	}

@@ -1,0 +1,107 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER:-postgres}
+    password: ${env:POSTGRES_PASSWORD:-postgres}
+    databases:
+      - postgres
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-mysql}
+    database: mysql
+    collection_interval: 10s
+
+  sqlquery:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=postgres sslmode=disable"
+    queries:
+      - sql: "SELECT COUNT(*) as active_connections FROM pg_stat_activity WHERE state = 'active'"
+        metrics:
+          - metric_name: sqlquery.active_connections
+            value_column: active_connections
+            value_type: int
+    collection_interval: 30s
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  batch:
+    timeout: 10s
+    send_batch_size: 100
+
+  attributes:
+    actions:
+      - key: test.environment
+        value: e2e
+        action: insert
+      - key: test.run_id
+        value: ${env:TEST_RUN_ID:-default}
+        action: insert
+      - key: collector.name
+        value: otelcol
+        action: insert
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  file:
+    path: /tmp/e2e-metrics.json
+    format: json
+
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+
+service:
+  extensions: [health_check, zpages]
+  
+  pipelines:
+    metrics/postgres:
+      receivers: [postgresql]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [debug, file, otlp/newrelic]
+
+    metrics/mysql:
+      receivers: [mysql]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [debug, file, otlp/newrelic]
+
+    metrics/custom:
+      receivers: [sqlquery]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [debug, file, otlp/newrelic]
+
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["/tmp/e2e-collector.log", "stdout"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

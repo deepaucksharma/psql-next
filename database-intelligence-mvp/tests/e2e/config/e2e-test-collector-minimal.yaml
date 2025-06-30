@@ -1,0 +1,63 @@
+extensions:
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - postgres
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: mysql
+    collection_interval: 10s
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  batch:
+    timeout: 10s
+    send_batch_size: 100
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  file:
+    path: /tmp/e2e-metrics.json
+    format: json
+
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  extensions: [zpages]
+  
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, batch]
+      exporters: [debug, file, prometheus]
+
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["stdout", "/tmp/e2e-collector.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

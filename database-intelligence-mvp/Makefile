@@ -22,12 +22,12 @@ all: deps build test
 
 build: ## Build the OTEL-first collector
 	@echo "🔨 Building OTEL-first collector..."
-	@if command -v ocb >/dev/null 2>&1; then \
-		echo "Using OpenTelemetry Collector Builder (ocb)..."; \
-		ocb --config=ocb-config.yaml; \
+	@if [ -f ~/go/bin/builder ]; then \
+		echo "Using OpenTelemetry Collector Builder..."; \
+		~/go/bin/builder --config=ocb-config.yaml; \
 	elif command -v builder >/dev/null 2>&1; then \
-		echo "Using legacy builder..."; \
-		builder --config=otelcol-builder.yaml --output-path=$(DIST_DIR); \
+		echo "Using builder from PATH..."; \
+		builder --config=ocb-config.yaml; \
 	else \
 		echo "❌ Error: OCB/builder not found. Run 'make install-tools' first."; \
 		exit 1; \
@@ -73,7 +73,6 @@ vet: ## Run go vet
 
 install-tools: ## Install required tools
 	@echo "📦 Installing required tools..."
-	@go install go.opentelemetry.io/collector/cmd/ocb@latest
 	@go install go.opentelemetry.io/collector/cmd/builder@latest
 	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	@go install golang.org/x/tools/cmd/goimports@latest
