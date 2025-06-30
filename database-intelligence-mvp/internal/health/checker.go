@@ -3,8 +3,8 @@ package health
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"runtime"
 	"sync"
 	"time"
 
@@ -358,13 +358,11 @@ func (rm *ResourceMonitor) GetMetrics() ResourceMetrics {
 	}
 }
 
-// Add missing import
-var runtime = struct {
-	MemStats       func(*runtime.MemStats)
-	ReadMemStats   func(*runtime.MemStats)
-	NumGoroutine   func() int
-}{
-	// Mock implementation for example
+// Runtime metrics helpers
+func getMemStats() runtime.MemStats {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m
 }
 
 // MemStats represents memory statistics

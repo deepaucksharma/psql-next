@@ -1,835 +1,369 @@
 # Testing Guide
 
-This guide covers testing strategies, procedures, and best practices for the Database Intelligence Collector.
+This guide covers the end-to-end testing approach for the Database Intelligence Collector, focusing on validating data flow from source databases to New Relic Database (NRDB).
 
-## Testing Overview
+## Testing Philosophy
 
-The project uses a multi-layered testing approach:
-- **Unit Tests**: Test individual components in isolation
-- **Integration Tests**: Test component interactions
-- **End-to-End Tests**: Test complete data flow
-- **Performance Tests**: Benchmark and load testing
-- **Validation Tests**: Configuration and security validation
+The Database Intelligence Collector uses **end-to-end testing exclusively**. We validate the complete data pipeline from database metrics collection through processing to final storage in NRDB. This approach ensures:
+
+1. **Real-world validation**: Tests verify actual data flow in production-like conditions
+2. **Integration confidence**: All components are tested together as they work in production
+3. **Business value focus**: Tests validate that metrics provide actionable insights in New Relic
 
 ## Test Structure
 
 ```
 tests/
-├── unit/                    # Unit tests
-├── integration/            # Integration tests
-├── e2e/                    # End-to-end tests
-├── performance/            # Performance tests
-├── fixtures/               # Test data and configurations
-└── helpers/                # Test utilities
+└── e2e/                         # End-to-end tests only
+    ├── nrdb_validation_test.go  # Core NRDB validation
+    ├── e2e_main_test.go        # Test suite setup
+    ├── e2e_metrics_flow_test.go # Metrics flow validation
+    ├── run-e2e-tests.sh        # Test runner script
+    ├── docker-compose-test.yaml # Test environment
+    ├── config/
+    │   └── e2e-test-collector.yaml
+    ├── sql/
+    │   ├── postgres-init.sql
+    │   └── mysql-init.sql
+    ├── validators/
+    │   └── nrdb_validator.go
+    └── reports/                # Test results
+```
+
+## Prerequisites
+
+### 1. New Relic Account
+```bash
+export NEW_RELIC_LICENSE_KEY=your_license_key
+export NEW_RELIC_ACCOUNT_ID=your_account_id
+```
+
+### 2. Test Databases
+Either have PostgreSQL and MySQL running locally, or let the test framework start them:
+```bash
+# Optional: specify custom database hosts
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5432
+export MYSQL_HOST=localhost
+export MYSQL_PORT=3306
+```
+
+### 3. Build the Collector
+```bash
+make build
+# or
+task build
 ```
 
 ## Running Tests
 
-### Quick Test Commands
-
+### Quick Start
 ```bash
-# Run all tests
+# Run all e2e tests
 make test
 
-# Run unit tests only
-make test-unit
+# Or using Task
+task test
+```
 
-# Run integration tests
-make test-integration
+### Detailed Test Execution
+```bash
+# Run with test script (recommended)
+./tests/e2e/run-e2e-tests.sh
 
-# Run with coverage
-make test-coverage
-
-# Run specific package tests
-go test ./processors/adaptivesampler/...
+# Run directly with Go
+E2E_TESTS=true go test -v -timeout=30m ./tests/e2e/...
 
 # Run specific test
-go test -run TestAdaptiveSampler_ProcessMetrics ./processors/adaptivesampler/
+E2E_TESTS=true go test -v ./tests/e2e/... -run TestPostgreSQLMetricsFlow
+```
 
-# Run with verbose output
-go test -v ./...
+### CI/CD Integration
+```yaml
+# GitHub Actions example
+- name: Run E2E Tests
+  env:
+    NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+    NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+  run: make test-e2e
+```
 
-# Run with race detection
-go test -race ./...
+## Test Scenarios
+
+### 1. Database Metrics Flow Tests
+
+#### PostgreSQL Metrics Flow
+```go
+func testPostgreSQLMetricsFlow(t *testing.T) {
+    // Generate test workload
+    generatePostgreSQLLoad()
+    
+    // Wait for collection and export
+    time.Sleep(2 * time.Minute)
+    
+    // Query NRDB for metrics
+    results := queryNRDB("SELECT count(*) FROM Metric WHERE metricName LIKE 'postgresql.%'")
+    
+    // Validate metrics exist
+    assert.Greater(t, results[0]["count"], 0)
+}
+```
+
+#### MySQL Metrics Flow
+Similar validation for MySQL metrics ensuring data flows correctly.
+
+### 2. Processor Validation Tests
+
+#### Adaptive Sampling
+```sql
+-- Verify slow queries are sampled at 100%
+SELECT count(*) FROM Metric 
+WHERE sampled = true AND duration_ms > 1000 
+SINCE 10 minutes ago
+```
+
+#### Circuit Breaker
+Tests protection mechanisms by monitoring circuit state changes.
+
+#### Plan Extraction
+```sql
+-- Verify query plans are extracted
+SELECT count(*) FROM Metric 
+WHERE plan.hash IS NOT NULL 
+SINCE 10 minutes ago
+```
+
+#### PII Protection
+```sql
+-- Ensure no PII in metrics
+SELECT count(*) FROM Metric 
+WHERE query_text LIKE '%@%' OR query_text LIKE '%SSN%' 
+SINCE 10 minutes ago
+```
+
+### 3. Data Completeness Tests
+
+Validates all expected metric types are present:
+- `postgresql.database.size`
+- `postgresql.backends`
+- `mysql.threads`
+- `mysql.slow_queries`
+- And more...
+
+## Writing New E2E Tests
+
+### Test Template
+```go
+func (t *NRDBValidationTest) testNewFeature(tt *testing.T) {
+    // 1. Generate test data
+    db := connectToDatabase(tt)
+    generateSpecificWorkload(db)
+    
+    // 2. Wait for data pipeline
+    time.Sleep(2 * time.Minute)
+    
+    // 3. Query NRDB
+    query := fmt.Sprintf(`{
+        actor {
+            account(id: %s) {
+                nrql(query: "SELECT ... FROM Metric WHERE ... SINCE 10 minutes ago") {
+                    results
+                }
+            }
+        }
+    }`, t.nrAccountID)
+    
+    results := t.queryNRDB(tt, query)
+    
+    // 4. Validate results
+    assert.NotEmpty(tt, results)
+    assert.Greater(tt, results[0]["count"], 0)
+}
+```
+
+### Best Practices
+
+1. **Isolate Test Data**: Use `test.run_id` to tag test metrics
+2. **Wait Appropriately**: Allow 1-2 minutes for data to appear in NRDB
+3. **Clean Assertions**: Test one thing per test function
+4. **Meaningful Names**: Use descriptive test and metric names
+
+## Debugging Failed Tests
+
+### 1. Check Collector Logs
+```bash
+# View collector logs from test run
+cat tests/e2e/reports/collector-${TEST_RUN_ID}.log
+
+# Check for errors
+grep ERROR tests/e2e/reports/collector-*.log
+```
+
+### 2. Verify Exported Metrics
+```bash
+# View metrics that would be exported
+jq . tests/e2e/reports/metrics-${TEST_RUN_ID}.json | less
+```
+
+### 3. Query NRDB Directly
+Use New Relic Query Builder:
+```sql
+SELECT * FROM Metric 
+WHERE test.run_id = 'YOUR_TEST_RUN_ID' 
+SINCE 1 hour ago
+LIMIT 100
+```
+
+### 4. Common Issues
+
+#### No Metrics in NRDB
+- Check NEW_RELIC_LICENSE_KEY is valid
+- Verify network connectivity to New Relic
+- Look for NrIntegrationError events
+
+#### Database Connection Failures
+```bash
+# Test connectivity
+psql -h localhost -U postgres -d testdb -c "SELECT 1"
+mysql -h localhost -u root -pmysql -e "SELECT 1"
+```
+
+#### Timing Issues
+- Increase wait times if metrics don't appear
+- Check collector startup time in logs
+- Verify collection intervals in config
+
+## Test Environment
+
+### Local Test Databases
+The test framework can start databases automatically:
+```yaml
+# tests/e2e/docker-compose-test.yaml
+services:
+  postgres-test:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: testdb
+    
+  mysql-test:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: testdb
 ```
 
 ### Test Configuration
-
-Create `test.env` for test-specific settings:
-```bash
-# Test databases
-TEST_POSTGRES_HOST=localhost
-TEST_POSTGRES_PORT=5433
-TEST_POSTGRES_USER=test_user
-TEST_POSTGRES_PASSWORD=test_pass
-
-TEST_MYSQL_HOST=localhost
-TEST_MYSQL_PORT=3307
-TEST_MYSQL_USER=test_user
-TEST_MYSQL_PASSWORD=test_pass
-
-# Test timeouts
-TEST_TIMEOUT=30s
-TEST_RETRY_COUNT=3
-```
-
-## Unit Testing
-
-### Testing Processors
-
-```go
-package adaptivesampler
-
-import (
-    "context"
-    "testing"
-    "time"
-    
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/require"
-    "go.opentelemetry.io/collector/pdata/pmetric"
-    "go.uber.org/zap/zaptest"
-)
-
-func TestAdaptiveSampler_ShouldSample(t *testing.T) {
-    tests := []struct {
-        name           string
-        config         Config
-        metric         pmetric.Metric
-        expectedResult bool
-        expectedError  string
-    }{
-        {
-            name: "sample slow query",
-            config: Config{
-                Rules: []Rule{
-                    {
-                        Name: "slow_queries",
-                        Conditions: []Condition{
-                            {
-                                Attribute: "duration_ms",
-                                Operator:  "gt",
-                                Value:     "1000",
-                            },
-                        },
-                        SampleRate: 1.0,
-                    },
-                },
-                DefaultSampleRate: 0.1,
-                InMemoryOnly:     true,
-            },
-            metric:         createMetricWithAttribute("duration_ms", 2000),
-            expectedResult: true,
-        },
-        {
-            name: "skip fast query",
-            config: Config{
-                Rules: []Rule{
-                    {
-                        Name: "slow_queries",
-                        Conditions: []Condition{
-                            {
-                                Attribute: "duration_ms",
-                                Operator:  "gt",
-                                Value:     "1000",
-                            },
-                        },
-                        SampleRate: 0.0,
-                    },
-                },
-                DefaultSampleRate: 0.0,
-                InMemoryOnly:     true,
-            },
-            metric:         createMetricWithAttribute("duration_ms", 500),
-            expectedResult: false,
-        },
-    }
-    
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            logger := zaptest.NewLogger(t)
-            sampler, err := newAdaptiveSampler(logger, &tt.config, nil)
-            require.NoError(t, err)
-            
-            result, err := sampler.shouldSample(tt.metric)
-            
-            if tt.expectedError != "" {
-                require.Error(t, err)
-                assert.Contains(t, err.Error(), tt.expectedError)
-            } else {
-                require.NoError(t, err)
-                assert.Equal(t, tt.expectedResult, result)
-            }
-        })
-    }
-}
-
-// Helper functions
-func createMetricWithAttribute(key string, value interface{}) pmetric.Metric {
-    metric := pmetric.NewMetric()
-    metric.SetName("test.metric")
-    dp := metric.SetEmptyGauge().DataPoints().AppendEmpty()
-    
-    switch v := value.(type) {
-    case int:
-        dp.Attributes().PutInt(key, int64(v))
-    case string:
-        dp.Attributes().PutStr(key, v)
-    case float64:
-        dp.Attributes().PutDouble(key, v)
-    }
-    
-    return metric
-}
-```
-
-### Testing State Management
-
-```go
-func TestCircuitBreaker_StateTransitions(t *testing.T) {
-    cb := newTestCircuitBreaker(t)
-    
-    // Test closed -> open transition
-    for i := 0; i < 5; i++ {
-        cb.recordFailure("test_db")
-    }
-    assert.Equal(t, StateOpen, cb.getState("test_db"))
-    
-    // Test open -> half-open transition
-    time.Sleep(cb.config.OpenStateTimeout)
-    cb.allowRequest("test_db")
-    assert.Equal(t, StateHalfOpen, cb.getState("test_db"))
-    
-    // Test half-open -> closed transition
-    cb.recordSuccess("test_db")
-    assert.Equal(t, StateClosed, cb.getState("test_db"))
-}
-```
-
-### Testing with Mocks
-
-```go
-type mockConsumer struct {
-    mock.Mock
-    receivedMetrics []pmetric.Metrics
-}
-
-func (m *mockConsumer) ConsumeMetrics(ctx context.Context, md pmetric.Metrics) error {
-    m.receivedMetrics = append(m.receivedMetrics, md)
-    args := m.Called(ctx, md)
-    return args.Error(0)
-}
-
-func TestProcessor_ConsumeMetrics(t *testing.T) {
-    mockConsumer := new(mockConsumer)
-    mockConsumer.On("ConsumeMetrics", mock.Anything, mock.Anything).Return(nil)
-    
-    processor := newTestProcessor(t, mockConsumer)
-    
-    metrics := generateTestMetrics(10)
-    err := processor.ConsumeMetrics(context.Background(), metrics)
-    
-    require.NoError(t, err)
-    mockConsumer.AssertExpectations(t)
-    assert.Len(t, mockConsumer.receivedMetrics, 1)
-}
-```
-
-## Integration Testing
-
-### Database Integration Tests
-
-```go
-// +build integration
-
-package integration
-
-import (
-    "database/sql"
-    "testing"
-    "time"
-    
-    _ "github.com/lib/pq"
-    "github.com/testcontainers/testcontainers-go"
-    "github.com/testcontainers/testcontainers-go/wait"
-)
-
-func TestPostgreSQLReceiver_Integration(t *testing.T) {
-    if testing.Short() {
-        t.Skip("Skipping integration test")
-    }
-    
-    // Start PostgreSQL container
-    ctx := context.Background()
-    req := testcontainers.ContainerRequest{
-        Image:        "postgres:15",
-        ExposedPorts: []string{"5432/tcp"},
-        Env: map[string]string{
-            "POSTGRES_PASSWORD": "test",
-            "POSTGRES_DB":       "testdb",
-        },
-        WaitingFor: wait.ForSQL("5432/tcp", "postgres", func(host string, port nat.Port) string {
-            return fmt.Sprintf("postgres://postgres:test@%s:%s/testdb?sslmode=disable", host, port.Port())
-        }),
-    }
-    
-    postgres, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-        ContainerRequest: req,
-        Started:          true,
-    })
-    require.NoError(t, err)
-    defer postgres.Terminate(ctx)
-    
-    // Get connection details
-    host, err := postgres.Host(ctx)
-    require.NoError(t, err)
-    
-    port, err := postgres.MappedPort(ctx, "5432")
-    require.NoError(t, err)
-    
-    // Configure and start receiver
-    config := &postgresqlreceiver.Config{
-        Endpoint:  fmt.Sprintf("%s:%s", host, port.Port()),
-        Username:  "postgres",
-        Password:  "test",
-        Databases: []string{"testdb"},
-    }
-    
-    receiver := createTestReceiver(t, config)
-    err = receiver.Start(ctx, componenttest.NewNopHost())
-    require.NoError(t, err)
-    defer receiver.Shutdown(ctx)
-    
-    // Wait for metrics
-    time.Sleep(2 * time.Second)
-    
-    // Verify metrics collected
-    metrics := receiver.GetCollectedMetrics()
-    assert.Greater(t, len(metrics), 0)
-    
-    // Verify specific metrics
-    hasMetric := false
-    for _, metric := range metrics {
-        if metric.Name() == "postgresql.database.size" {
-            hasMetric = true
-            break
-        }
-    }
-    assert.True(t, hasMetric, "Expected postgresql.database.size metric")
-}
-```
-
-### Processor Pipeline Tests
-
-```go
-func TestProcessorPipeline_Integration(t *testing.T) {
-    // Create pipeline
-    pipeline := createTestPipeline(t, PipelineConfig{
-        Processors: []string{
-            "memory_limiter",
-            "adaptive_sampler",
-            "circuit_breaker",
-            "batch",
-        },
-    })
-    
-    // Send test data
-    testMetrics := generateDiverseMetrics(1000)
-    err := pipeline.ConsumeMetrics(context.Background(), testMetrics)
-    require.NoError(t, err)
-    
-    // Wait for processing
-    time.Sleep(100 * time.Millisecond)
-    
-    // Verify output
-    output := pipeline.GetOutput()
-    
-    // Should have fewer metrics due to sampling
-    assert.Less(t, len(output), 1000)
-    
-    // Verify sampling rules applied
-    for _, metric := range output {
-        attrs := metric.Attributes()
-        if duration, ok := attrs.Get("duration_ms"); ok {
-            // Slow queries should all be present
-            if duration.Int() > 1000 {
-                assert.True(t, true, "Slow query sampled")
-            }
-        }
-    }
-}
-```
-
-## End-to-End Testing
-
-### Complete Flow Test
-
-```go
-func TestCollector_EndToEnd(t *testing.T) {
-    // Start test environment
-    env := startTestEnvironment(t)
-    defer env.Cleanup()
-    
-    // Start collector
-    collector := startCollector(t, "config/test-e2e.yaml", env)
-    defer collector.Shutdown()
-    
-    // Generate database load
-    generateDatabaseLoad(t, env.PostgresURL, LoadProfile{
-        Duration:      30 * time.Second,
-        QPS:           100,
-        SlowQueryRate: 0.1,
-    })
-    
-    // Wait for data to flow through
-    time.Sleep(5 * time.Second)
-    
-    // Verify metrics in export destination
-    exportedMetrics := env.GetExportedMetrics()
-    
-    // Verify key metrics present
-    metricsFound := map[string]bool{
-        "postgresql.database.size":     false,
-        "postgresql.backends":          false,
-        "postgresql.commits":           false,
-        "postgresql.rollbacks":         false,
-        "sqlquery.duration":           false,
-    }
-    
-    for _, metric := range exportedMetrics {
-        metricsFound[metric.Name()] = true
-    }
-    
-    for name, found := range metricsFound {
-        assert.True(t, found, "Metric %s not found", name)
-    }
-    
-    // Verify sampling worked
-    slowQueries := countSlowQueries(exportedMetrics)
-    totalQueries := countTotalQueries(exportedMetrics)
-    samplingRate := float64(slowQueries) / float64(totalQueries)
-    
-    assert.InDelta(t, 0.1, samplingRate, 0.05, "Sampling rate should be ~10%")
-}
-```
-
-### New Relic Integration Test
-
-```go
-func TestNewRelicExport_E2E(t *testing.T) {
-    if os.Getenv("NEW_RELIC_LICENSE_KEY") == "" {
-        t.Skip("NEW_RELIC_LICENSE_KEY not set")
-    }
-    
-    // Configure collector with New Relic export
-    config := `
+```yaml
+# tests/e2e/config/e2e-test-collector.yaml
 receivers:
   postgresql:
-    endpoint: ${TEST_POSTGRES_HOST}:5432
-    username: ${TEST_POSTGRES_USER}
-    password: ${TEST_POSTGRES_PASSWORD}
-
+    collection_interval: 10s  # Faster for testing
+    
 processors:
-  batch:
-    timeout: 10s
-
+  adaptive_sampler:
+    rules:
+      - name: test_queries
+        conditions:
+          - attribute: query_text
+            operator: contains
+            value: e2e_test
+        sample_rate: 1.0  # Sample all test queries
+        
 exporters:
   otlp/newrelic:
     endpoint: otlp.nr-data.net:4317
     headers:
       api-key: ${NEW_RELIC_LICENSE_KEY}
-
-service:
-  pipelines:
-    metrics:
-      receivers: [postgresql]
-      processors: [batch]
-      exporters: [otlp/newrelic]
-`
-    
-    collector := startCollectorWithConfig(t, config)
-    defer collector.Shutdown()
-    
-    // Wait for metrics to be exported
-    time.Sleep(2 * time.Minute)
-    
-    // Query New Relic for metrics
-    client := newrelic.NewClient(os.Getenv("NEW_RELIC_LICENSE_KEY"))
-    
-    query := `
-        SELECT count(*) 
-        FROM Metric 
-        WHERE metricName LIKE 'postgresql.%' 
-        SINCE 5 minutes ago
-    `
-    
-    result, err := client.Query(query)
-    require.NoError(t, err)
-    
-    count := result[0]["count"].(float64)
-    assert.Greater(t, count, 0.0, "Should have PostgreSQL metrics in New Relic")
-}
 ```
 
-## Performance Testing
+## Performance Considerations
 
-### Benchmark Tests
+- Each test run generates ~1000-2000 metrics
+- Tests typically complete in 5-10 minutes
+- Data appears in NRDB within 1-2 minutes
+- Use TEST_RUN_ID to isolate parallel test runs
 
-```go
-func BenchmarkAdaptiveSampler_ProcessMetrics(b *testing.B) {
-    configs := []struct {
-        name   string
-        rules  int
-        cache  int
-    }{
-        {"small", 5, 1000},
-        {"medium", 20, 10000},
-        {"large", 100, 50000},
-    }
-    
-    for _, cfg := range configs {
-        b.Run(cfg.name, func(b *testing.B) {
-            sampler := createBenchmarkSampler(b, cfg.rules, cfg.cache)
-            metrics := generateMetrics(1000)
-            
-            b.ResetTimer()
-            b.ReportAllocs()
-            
-            for i := 0; i < b.N; i++ {
-                _, err := sampler.ProcessMetrics(context.Background(), metrics)
-                if err != nil {
-                    b.Fatal(err)
-                }
-            }
-            
-            metricsPerSec := float64(1000*b.N) / b.Elapsed().Seconds()
-            b.ReportMetric(metricsPerSec, "metrics/sec")
-            b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*1000), "ns/metric")
-        })
-    }
-}
-```
-
-### Load Testing
-
-```go
-func TestCollector_LoadTest(t *testing.T) {
-    if testing.Short() {
-        t.Skip("Skipping load test")
-    }
-    
-    collector := startCollector(t, "config/load-test.yaml")
-    defer collector.Shutdown()
-    
-    // Metrics collection
-    metrics := &sync.Map{}
-    go collectMetrics(t, collector, metrics)
-    
-    // Generate increasing load
-    loadProfiles := []LoadProfile{
-        {QPS: 100, Duration: 1 * time.Minute},
-        {QPS: 500, Duration: 1 * time.Minute},
-        {QPS: 1000, Duration: 1 * time.Minute},
-        {QPS: 5000, Duration: 1 * time.Minute},
-    }
-    
-    for _, profile := range loadProfiles {
-        t.Logf("Testing with %d QPS", profile.QPS)
-        
-        generateLoad(t, collector, profile)
-        
-        // Check metrics
-        checkMetrics(t, metrics, MetricExpectations{
-            MaxMemoryMB:      512,
-            MaxCPUPercent:    80,
-            MaxLatencyMs:     100,
-            MinThroughputQPS: profile.QPS * 0.9,
-        })
-    }
-    
-    // Generate report
-    generateLoadTestReport(t, metrics)
-}
-```
-
-### Memory Leak Detection
-
-```go
-func TestCollector_MemoryLeak(t *testing.T) {
-    if testing.Short() {
-        t.Skip("Skipping memory leak test")
-    }
-    
-    collector := startCollector(t, "config/memory-test.yaml")
-    defer collector.Shutdown()
-    
-    // Baseline memory
-    runtime.GC()
-    baseline := getCurrentMemory()
-    
-    // Run for extended period
-    for i := 0; i < 100; i++ {
-        metrics := generateLargeMetrics(10000)
-        err := collector.ConsumeMetrics(context.Background(), metrics)
-        require.NoError(t, err)
-        
-        if i%10 == 0 {
-            runtime.GC()
-            current := getCurrentMemory()
-            growth := current - baseline
-            
-            t.Logf("Iteration %d: Memory %d MB (growth: %d MB)", 
-                i, current/1024/1024, growth/1024/1024)
-            
-            // Fail if memory grows too much
-            assert.Less(t, growth, int64(100*1024*1024), 
-                "Memory growth exceeds 100MB")
-        }
-        
-        time.Sleep(100 * time.Millisecond)
-    }
-}
-```
-
-## Configuration Validation
-
-### Config Test Suite
-
-```go
-func TestConfiguration_Validation(t *testing.T) {
-    testCases := []struct {
-        name        string
-        configFile  string
-        shouldError bool
-        errorMsg    string
-    }{
-        {
-            name:        "valid production config",
-            configFile:  "config/collector-production.yaml",
-            shouldError: false,
-        },
-        {
-            name:        "invalid sampling rate",
-            configFile:  "fixtures/invalid-sampling-rate.yaml",
-            shouldError: true,
-            errorMsg:    "sample_rate must be between 0 and 1",
-        },
-        {
-            name:        "missing required fields",
-            configFile:  "fixtures/missing-fields.yaml",
-            shouldError: true,
-            errorMsg:    "endpoint is required",
-        },
-    }
-    
-    for _, tc := range testCases {
-        t.Run(tc.name, func(t *testing.T) {
-            cfg, err := loadConfig(tc.configFile)
-            if err != nil {
-                if tc.shouldError {
-                    assert.Contains(t, err.Error(), tc.errorMsg)
-                    return
-                }
-                t.Fatal(err)
-            }
-            
-            err = cfg.Validate()
-            if tc.shouldError {
-                require.Error(t, err)
-                assert.Contains(t, err.Error(), tc.errorMsg)
-            } else {
-                require.NoError(t, err)
-            }
-        })
-    }
-}
-```
-
-### Environment Variable Expansion
-
-```go
-func TestConfiguration_EnvVarExpansion(t *testing.T) {
-    // Set test environment variables
-    os.Setenv("TEST_DB_HOST", "testhost")
-    os.Setenv("TEST_DB_PASS", "testpass")
-    os.Setenv("TEST_SAMPLE_RATE", "0.5")
-    defer os.Unsetenv("TEST_DB_HOST")
-    defer os.Unsetenv("TEST_DB_PASS")
-    defer os.Unsetenv("TEST_SAMPLE_RATE")
-    
-    config := `
-receivers:
-  postgresql:
-    endpoint: ${TEST_DB_HOST}:5432
-    password: ${TEST_DB_PASS}
-
-processors:
-  adaptive_sampler:
-    default_sample_rate: ${TEST_SAMPLE_RATE}
-`
-    
-    cfg := parseConfig(t, config)
-    
-    assert.Equal(t, "testhost:5432", cfg.Receivers.PostgreSQL.Endpoint)
-    assert.Equal(t, "testpass", cfg.Receivers.PostgreSQL.Password)
-    assert.Equal(t, 0.5, cfg.Processors.AdaptiveSampler.DefaultSampleRate)
-}
-```
-
-## Test Helpers
-
-### Test Fixtures
-
-```go
-// fixtures/metrics.go
-func GenerateTestMetrics(count int) pmetric.Metrics {
-    md := pmetric.NewMetrics()
-    rm := md.ResourceMetrics().AppendEmpty()
-    sm := rm.ScopeMetrics().AppendEmpty()
-    
-    for i := 0; i < count; i++ {
-        metric := sm.Metrics().AppendEmpty()
-        metric.SetName(fmt.Sprintf("test.metric.%d", i))
-        metric.SetEmptyGauge()
-        
-        dp := metric.Gauge().DataPoints().AppendEmpty()
-        dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
-        dp.SetDoubleValue(rand.Float64() * 100)
-        
-        // Add random attributes
-        dp.Attributes().PutStr("host", fmt.Sprintf("host-%d", i%5))
-        dp.Attributes().PutInt("duration_ms", int64(rand.Intn(5000)))
-    }
-    
-    return md
-}
-```
-
-### Test Environment
-
-```go
-type TestEnvironment struct {
-    PostgresContainer testcontainers.Container
-    MySQLContainer    testcontainers.Container
-    Collector         *TestCollector
-    ExportBuffer      *bytes.Buffer
-}
-
-func StartTestEnvironment(t *testing.T) *TestEnvironment {
-    ctx := context.Background()
-    
-    // Start PostgreSQL
-    postgresReq := testcontainers.ContainerRequest{
-        Image:        "postgres:15",
-        ExposedPorts: []string{"5432/tcp"},
-        Env: map[string]string{
-            "POSTGRES_PASSWORD": "test",
-        },
-        WaitingFor: wait.ForListeningPort("5432/tcp"),
-    }
-    
-    postgres, err := testcontainers.GenericContainer(ctx,
-        testcontainers.GenericContainerRequest{
-            ContainerRequest: postgresReq,
-            Started:          true,
-        })
-    require.NoError(t, err)
-    
-    // Similar for MySQL...
-    
-    return &TestEnvironment{
-        PostgresContainer: postgres,
-        // ...
-    }
-}
-```
-
-## CI/CD Integration
+## Continuous Integration
 
 ### GitHub Actions
-
 ```yaml
-name: Tests
-
+name: E2E Tests
 on: [push, pull_request]
 
 jobs:
-  unit-tests:
+  e2e-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
+      
+      - name: Setup Go
+        uses: actions/setup-go@v4
         with:
           go-version: '1.21'
       
-      - name: Run unit tests
-        run: make test-unit
+      - name: Build Collector
+        run: make build
       
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.out
-
-  integration-tests:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
+      - name: Run E2E Tests
         env:
-          POSTGRES_PASSWORD: test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
-      
-      - name: Run integration tests
-        env:
-          TEST_POSTGRES_HOST: localhost
-          TEST_POSTGRES_PORT: 5432
-        run: make test-integration
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+        run: make test-e2e
 ```
 
-## Test Coverage
+### Test Reports
+Test results are saved in `tests/e2e/reports/`:
+- `summary-${TEST_RUN_ID}.txt` - Test summary
+- `collector-${TEST_RUN_ID}.log` - Collector logs
+- `metrics-${TEST_RUN_ID}.json` - Exported metrics
 
-### Coverage Requirements
+## NRQL Queries for Validation
 
-- Overall: 80% minimum
-- Critical paths: 90% minimum
-- New code: 85% minimum
-
-### Coverage Commands
-
-```bash
-# Generate coverage report
-go test -coverprofile=coverage.out ./...
-
-# View coverage in browser
-go tool cover -html=coverage.out
-
-# Check coverage threshold
-go-coverage-threshold -t 80 coverage.out
-
-# Package-specific coverage
-go test -cover ./processors/adaptivesampler/
+### Basic Metric Count
+```sql
+SELECT count(*) FROM Metric 
+WHERE test.environment = 'e2e' 
+SINCE 30 minutes ago
 ```
 
-### Coverage Report
+### Validate Processing
+```sql
+SELECT count(*), average(value) FROM Metric 
+WHERE metricName = 'postgresql.database.size' 
+FACET db.name 
+SINCE 10 minutes ago
+```
 
+### Check Data Freshness
+```sql
+SELECT latest(timestamp) FROM Metric 
+WHERE test.run_id = 'YOUR_RUN_ID' 
+SINCE 10 minutes ago
 ```
-github.com/database-intelligence-mvp/processors/adaptivesampler    85.2%
-github.com/database-intelligence-mvp/processors/circuitbreaker     82.7%
-github.com/database-intelligence-mvp/processors/planattributeextractor  78.4%
-github.com/database-intelligence-mvp/processors/verification       88.1%
-github.com/database-intelligence-mvp/internal/health              91.3%
-github.com/database-intelligence-mvp/internal/ratelimit           79.5%
+
+### Processor Effectiveness
+```sql
+-- Sampling rate
+SELECT percentage(count(*), WHERE sampled = true) FROM Metric 
+WHERE duration_ms > 0 
+SINCE 1 hour ago
+
+-- Circuit breaker trips
+SELECT count(*) FROM Metric 
+WHERE circuit_breaker.state = 'open' 
+SINCE 1 hour ago
 ```
+
+## Summary
+
+The Database Intelligence Collector's testing strategy focuses on **end-to-end validation** of the complete data pipeline. By testing against real databases and validating data in NRDB, we ensure the collector works correctly in production environments. This approach provides confidence that:
+
+1. Metrics are collected accurately from databases
+2. Processors function correctly in the pipeline
+3. Data arrives in New Relic with proper attributes
+4. The system provides business value through actionable insights
 
 ---
 

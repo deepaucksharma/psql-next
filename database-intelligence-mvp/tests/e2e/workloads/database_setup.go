@@ -4,8 +4,16 @@
 package workloads
 
 import (
+	"database/sql"
 	"fmt"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
 )
+
+// E2EMetricsFlowTestSuite placeholder for test suite
+type E2EMetricsFlowTestSuite struct{}
 
 // preparePostgreSQLTestData creates test schema and sample data for PostgreSQL
 func (wg *WorkloadGenerator) preparePostgreSQLTestData() error {

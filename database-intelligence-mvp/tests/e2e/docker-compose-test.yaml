@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  postgres-test:
+    image: postgres:15
+    container_name: e2e-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./sql/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mysql-test:
+    image: mysql:8.0
+    container_name: e2e-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./sql/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+networks:
+  default:
+    name: e2e-test-network

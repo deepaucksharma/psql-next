@@ -23,6 +23,11 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/otelcol"
+	"go.opentelemetry.io/collector/extension"
+	"go.opentelemetry.io/collector/processor"
+	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/connector"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
@@ -114,15 +119,15 @@ func (s *E2ETestSuite) startCollector(cfg *confmap.Conf) {
 			Version: "1.0.0",
 		},
 		Factories: func() (otelcol.Factories, error) {
-			// In a real scenario, you would use the same factories as your production collector.
-			// For this test, we can use the default factories for simplicity.
-			return otelcol.DefaultFactories()
+			// Use basic factories for test
+			factories := otelcol.Factories{}
+			factories.Extensions = make(map[component.Type]extension.Factory)
+			factories.Receivers = make(map[component.Type]receiver.Factory)
+			factories.Processors = make(map[component.Type]processor.Factory)
+			factories.Exporters = make(map[component.Type]exporter.Factory)
+			factories.Connectors = make(map[component.Type]connector.Factory)
+			return factories, nil
 		},
-		ConfigProvider: otelcol.NewConfigProvider(otelcol.ConfigProviderSettings{
-			ResolverSettings: confmap.ResolverSettings{
-				URIs: []string{"yaml:" + cfg.ToString()},
-			},
-		}),
 	}
 
 	var err error

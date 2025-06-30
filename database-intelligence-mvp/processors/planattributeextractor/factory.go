@@ -13,6 +13,9 @@ import (
 // ComponentType is the name of this processor
 var componentType = component.MustNewType("planattributeextractor")
 
+// TypeStr is the string representation of the component type for backwards compatibility
+const TypeStr = "planattributeextractor"
+
 // NewFactory creates a new factory for the plan attribute extractor processor
 func NewFactory() processor.Factory {
 	return processor.NewFactory(

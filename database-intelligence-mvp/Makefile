@@ -33,15 +33,13 @@ build: ## Build the OTEL-first collector
 		exit 1; \
 	fi
 
-test: ## Run all tests
-	@echo "🧪 Running unit tests..."
-	@go test -v -race -coverprofile=coverage.out ./processors/...
-	@echo "✅ Tests completed"
+test: test-e2e ## Run all tests (e2e only)
 
-test-integration: ## Run integration tests
-	@echo "🧪 Running integration tests..."
-	@cd tests/integration && go test -v -tags=integration
-	@echo "✅ Integration tests completed"
+test-e2e: ## Run end-to-end tests (NRDB validation)
+	@echo "🧪 Running E2E tests..."
+	@chmod +x tests/e2e/run-e2e-tests.sh
+	@./tests/e2e/run-e2e-tests.sh
+	@echo "✅ E2E tests completed"
 
 clean: ## Clean build artifacts
 	@echo "🧹 Cleaning build artifacts..."

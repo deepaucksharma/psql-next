@@ -442,7 +442,7 @@ func (mv *MetricValidator) findMatchingMetrics(rule ValidationRule) []*MetricDat
 	
 	var matchingMetrics []*MetricData
 	
-	for key, metric := range mv.collectedMetrics {
+	for _, metric := range mv.collectedMetrics {
 		// Check metric name/pattern match
 		nameMatch := false
 		if rule.MetricName != "" {

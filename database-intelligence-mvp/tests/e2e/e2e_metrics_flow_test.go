@@ -34,6 +34,45 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
+// Missing type definitions for E2E tests
+type WorkloadGenerator struct {
+	logger *zap.Logger
+	db     *sql.DB
+}
+
+type MetricValidator struct {
+	logger *zap.Logger
+}
+
+type PerformanceBenchmark struct {
+	logger *zap.Logger
+}
+
+type TestReportGenerator struct {
+	logger *zap.Logger
+}
+
+type NRDBValidator struct {
+	logger *zap.Logger
+}
+
+type ResourceMonitor struct {
+	logger *zap.Logger
+}
+
+type StressTestManager struct {
+	logger *zap.Logger
+}
+
+type E2ETestConfig struct {
+	TestDuration time.Duration
+}
+
+type E2ETestResults struct {
+	TestsPassed int
+	TestsFailed int
+}
+
 // E2EMetricsFlowTestSuite contains comprehensive end-to-end tests for the entire metrics flow
 type E2EMetricsFlowTestSuite struct {
 	suite.Suite

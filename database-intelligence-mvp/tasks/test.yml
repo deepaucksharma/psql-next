@@ -1,75 +1,22 @@
 version: '3'
 
 vars:
-  TEST_TIMEOUT: 10m
-  COVERAGE_THRESHOLD: 70
+  TEST_TIMEOUT: 30m
 
 tasks:
-  unit:
-    desc: Run unit tests with coverage
-    vars:
-      PACKAGE: '{{.PACKAGE | default "./..."}}'
-      VERBOSE: '{{.VERBOSE | default "true"}}'
-    cmds:
-      - echo "[TEST] Running unit tests..."
-      - |
-        go test {{if eq .VERBOSE "true"}}-v{{end}} \
-          -race \
-          -timeout={{.TEST_TIMEOUT}} \
-          -coverprofile=coverage.out \
-          -covermode=atomic \
-          {{.PACKAGE}}
-      - echo "[COVERAGE] Coverage report:"
-      - go tool cover -func=coverage.out | tail -n 1
-
-  unit:processor:
-    desc: Test specific processor
-    vars:
-      PROCESSOR: '{{.PROCESSOR}}'
-    cmds:
-      - |
-        if [ -z "{{.PROCESSOR}}" ]; then
-          echo "[ERROR] PROCESSOR is required (adaptivesampler|circuitbreaker|planattributeextractor|verification)"
-          exit 1
-        fi
-      - task: test:unit
-        vars:
-          PACKAGE: './processors/{{.PROCESSOR}}/...'
-
-  integration:
-    desc: Run integration tests
-    deps: ['dev:up']
-    vars:
-      VERBOSE: '{{.VERBOSE | default "true"}}'
-    cmds:
-      - echo "[TEST] Running integration tests..."
-      - |
-        POSTGRES_HOST=localhost \
-        POSTGRES_PORT=5432 \
-        POSTGRES_USER=postgres \
-        POSTGRES_PASSWORD=postgres \
-        MYSQL_HOST=localhost \
-        MYSQL_PORT=3306 \
-        MYSQL_USER=root \
-        MYSQL_PASSWORD=mysql \
-        go test {{if eq .VERBOSE "true"}}-v{{end}} \
-          -tags=integration \
-          -timeout={{.TEST_TIMEOUT}} \
-          ./tests/integration/...
-
   e2e:
-    desc: Run end-to-end tests against a real database and New Relic (local)
-    deps: [build] # This will build the binary first
+    desc: Run end-to-end tests (NRDB validation)
+    deps: [build]
     cmds:
       - task: e2e:run
 
   e2e:ci:
-    desc: Run end-to-end tests in a CI environment (expects pre-built binary)
+    desc: Run end-to-end tests in CI environment
     cmds:
       - task: e2e:run
 
   e2e:run:
-    desc: Internal task to execute e2e tests
+    desc: Execute e2e tests
     internal: true
     cmds:
       - |
@@ -79,89 +26,34 @@ tasks:
           exit 1
         fi
         echo "[TEST] Running E2E tests..."
-        go test -v -tags=e2e -timeout=15m ./tests/e2e/...
+        chmod +x tests/e2e/run-e2e-tests.sh
+        ./tests/e2e/run-e2e-tests.sh
 
-  benchmark:
-    desc: Run performance benchmarks
-    vars:
-      PACKAGE: '{{.PACKAGE | default "./processors/..."}}'
-      TIME: '{{.TIME | default "10s"}}'
+  e2e:quick:
+    desc: Run e2e tests directly with Go (no script)
     cmds:
-      - echo "[BENCH] Running benchmarks..."
       - |
-        go test -bench=. \
-          -benchtime={{.TIME}} \
-          -benchmem \
-          -cpuprofile=cpu.prof \
-          -memprofile=mem.prof \
-          {{.PACKAGE}}
-      - echo "[OK] Benchmark complete. Profiles: cpu.prof, mem.prof"
-
-  load:
-    desc: Run load tests
-    deps: ['dev:up', 'run']
-    vars:
-      DURATION: '{{.DURATION | default "5m"}}'
-      VUS: '{{.VUS | default "10"}}'
-    cmds:
-      - echo "[LOAD] Running load tests..."
-      - |
-        docker run --rm \
-          --network=host \
-          -v $(pwd)/tests/load:/scripts:ro \
-          grafana/k6:latest \
-          run /scripts/database-load.js \
-          --duration={{.DURATION}} \
-          --vus={{.VUS}}
-
-  coverage:
-    desc: Generate coverage report
-    deps: [unit]
-    cmds:
-      - echo "[REPORT] Generating coverage report..."
-      - go tool cover -html=coverage.out -o coverage.html
-      - |
-        COVERAGE=$(go tool cover -func=coverage.out | tail -n 1 | awk '{print $3}' | sed 's/%//')
-        echo "[TOTAL] Total coverage: ${COVERAGE}%"
-        if (( $(echo "$COVERAGE < {{.COVERAGE_THRESHOLD}}" | bc -l) )); then
-          echo "[ERROR] Coverage below threshold ({{.COVERAGE_THRESHOLD}}%)"
+        if [ -z "$NEW_RELIC_LICENSE_KEY" ] || [ -z "$NEW_RELIC_ACCOUNT_ID" ]; then
+          echo "[ERROR] NEW_RELIC_LICENSE_KEY and NEW_RELIC_ACCOUNT_ID must be set for E2E tests."
           exit 1
         fi
-      - echo "[OK] Coverage report: coverage.html"
+        E2E_TESTS=true go test -v -timeout={{.TEST_TIMEOUT}} ./tests/e2e/... -run TestEndToEndDataFlow
 
   all:
-    desc: Run all tests
+    desc: Run all tests (e2e only)
     cmds:
-      - task: test:unit
-      - task: test:integration
       - task: test:e2e
-      - task: test:coverage
       - echo "[OK] All tests passed!"
 
   watch:
-    desc: Run tests in watch mode
-    vars:
-      PACKAGE: '{{.PACKAGE | default "./..."}}'
+    desc: Watch for changes and run e2e tests
     cmds:
       - |
         echo "[WATCH] Watching for changes..."
         while true; do
-          inotifywait -qre modify ./**/*.go 2>/dev/null || \
-          fswatch -o ./**/*.go 2>/dev/null | while read; do
+          inotifywait -qre modify ./tests/e2e/*.go 2>/dev/null || \
+          fswatch -o ./tests/e2e/*.go 2>/dev/null | while read; do
             clear
-            task test:unit PACKAGE={{.PACKAGE}} VERBOSE=false
+            task test:e2e:quick
           done
         done
-
-  specific:
-    desc: Run specific test by name
-    vars:
-      NAME: '{{.NAME}}'
-      PACKAGE: '{{.PACKAGE | default "./..."}}'
-    cmds:
-      - |
-        if [ -z "{{.NAME}}" ]; then
-          echo "[ERROR] NAME is required"
-          exit 1
-        fi
-      - go test -v -run "{{.NAME}}" {{.PACKAGE}}

@@ -7,6 +7,11 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/otelcol"
+	"go.opentelemetry.io/collector/extension"
+	"go.opentelemetry.io/collector/processor"
+	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/connector"
 	
 	// Import custom processors
 	"github.com/database-intelligence-mvp/processors/planattributeextractor"
@@ -29,7 +34,9 @@ func main() {
 	// Create and run the collector
 	params := otelcol.CollectorSettings{
 		BuildInfo: info,
-		Factories: factories,
+		Factories: func() (otelcol.Factories, error) {
+			return factories, nil
+		},
 	}
 
 	if err := otelcol.NewCommand(params).Execute(); err != nil {
@@ -40,34 +47,18 @@ func main() {
 // components returns the set of components for the collector
 // This is a minimal set - mostly standard OTEL components
 func Components() (otelcol.Factories, error) {
-	var err error
 	factories := otelcol.Factories{}
 
-	// Get default OTEL components
-	factories.Extensions, err = otelcol.DefaultExtensions()
-	if err != nil {
-		return factories, err
-	}
-
-	factories.Receivers, err = otelcol.DefaultReceivers()
-	if err != nil {
-		return factories, err
-	}
-
-	factories.Exporters, err = otelcol.DefaultExporters()
-	if err != nil {
-		return factories, err
-	}
-
-	// Start with default processors
-	factories.Processors, err = otelcol.DefaultProcessors()
-	if err != nil {
-		return factories, err
-	}
+	// Initialize empty factory maps
+	factories.Extensions = make(map[component.Type]extension.Factory)
+	factories.Receivers = make(map[component.Type]receiver.Factory)
+	factories.Processors = make(map[component.Type]processor.Factory)
+	factories.Exporters = make(map[component.Type]exporter.Factory)
+	factories.Connectors = make(map[component.Type]connector.Factory)
 
 	// Add our custom processors for gaps
 	// Only including processors that are actually built in ocb-config.yaml
-	factories.Processors[planattributeextractor.TypeStr] = planattributeextractor.NewFactory()
+	factories.Processors[planattributeextractor.GetType()] = planattributeextractor.NewFactory()
 
 	return factories, nil
 }

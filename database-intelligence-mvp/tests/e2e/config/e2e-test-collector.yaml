@@ -1,0 +1,140 @@
+receivers:
+  postgresql:
+    endpoint: ${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+    databases:
+      - testdb
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: ${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:mysql}
+    database: testdb
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  sqlquery:
+    driver: postgres
+    datasource: "host=${POSTGRES_HOST:localhost} port=${POSTGRES_PORT:5432} user=${POSTGRES_USER:postgres} password=${POSTGRES_PASSWORD:postgres} dbname=testdb sslmode=disable"
+    queries:
+      - sql: "SELECT COUNT(*) as active_connections FROM pg_stat_activity WHERE state = 'active'"
+        metrics:
+          - metric_name: sqlquery.active_connections
+            value_column: active_connections
+            value_type: int
+            attribute_columns:
+              - database
+    collection_interval: 30s
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  adaptive_sampler:
+    in_memory_only: true
+    default_sample_rate: 0.5
+    rules:
+      - name: slow_queries
+        conditions:
+          - attribute: duration_ms
+            operator: gt
+            value: 1000
+        sample_rate: 1.0
+      - name: test_queries
+        conditions:
+          - attribute: query_text
+            operator: contains
+            value: e2e_test
+        sample_rate: 1.0
+
+  circuit_breaker:
+    failure_threshold: 10
+    open_state_timeout: 30s
+    half_open_requests: 5
+
+  plan_attribute_extractor:
+    enabled: true
+    parse_timeout: 5s
+    max_plan_size: 100KB
+
+  verification:
+    enabled: true
+    pii_detection:
+      enabled: true
+      patterns:
+        - ssn
+        - credit_card
+        - email
+      sanitization:
+        default_action: mask
+
+  batch:
+    timeout: 10s
+    send_batch_size: 100
+
+  attributes:
+    actions:
+      - key: test.environment
+        value: e2e
+        action: insert
+      - key: test.run_id
+        value: ${TEST_RUN_ID:default}
+        action: insert
+
+exporters:
+  otlp/newrelic:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT:otlp.nr-data.net:4317}
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # File exporter for validation
+  file:
+    path: /tmp/e2e-metrics.json
+    format: json
+
+service:
+  pipelines:
+    metrics/postgres:
+      receivers: [postgresql]
+      processors: [memory_limiter, adaptive_sampler, circuit_breaker, plan_attribute_extractor, verification, attributes, batch]
+      exporters: [otlp/newrelic, file]
+
+    metrics/mysql:
+      receivers: [mysql]
+      processors: [memory_limiter, adaptive_sampler, circuit_breaker, plan_attribute_extractor, verification, attributes, batch]
+      exporters: [otlp/newrelic, file]
+
+    metrics/custom:
+      receivers: [sqlquery]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [otlp/newrelic, file]
+
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["/tmp/e2e-collector.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
