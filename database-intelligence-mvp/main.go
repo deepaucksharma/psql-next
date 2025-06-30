@@ -14,7 +14,10 @@ import (
 	"go.opentelemetry.io/collector/connector"
 	
 	// Import custom processors
+	"github.com/database-intelligence-mvp/processors/adaptivesampler"
+	"github.com/database-intelligence-mvp/processors/circuitbreaker"
 	"github.com/database-intelligence-mvp/processors/planattributeextractor"
+	"github.com/database-intelligence-mvp/processors/verification"
 )
 
 func main() {
@@ -59,6 +62,9 @@ func Components() (otelcol.Factories, error) {
 	// Add our custom processors for gaps
 	// Only including processors that are actually built in ocb-config.yaml
 	factories.Processors[planattributeextractor.GetType()] = planattributeextractor.NewFactory()
+	factories.Processors[adaptivesampler.GetType()] = adaptivesampler.NewFactory()
+	factories.Processors[circuitbreaker.GetType()] = circuitbreaker.NewFactory()
+	factories.Processors[verification.GetType()] = verification.NewFactory()
 
 	return factories, nil
 }

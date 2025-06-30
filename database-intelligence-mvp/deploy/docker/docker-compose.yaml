@@ -22,7 +22,7 @@ services:
     
     # Configuration using OTEL-first config
     volumes:
-      - ../../config/collector-otel-first.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ../../config/collector-simplified.yaml:/etc/otelcol-contrib/config.yaml:ro
       - collector-storage:/var/lib/otel/storage
       - collector-logs:/var/log
     
@@ -99,7 +99,7 @@ services:
     
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+      - ./init-scripts/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - postgres-logs:/var/log/postgresql
     
     ports:

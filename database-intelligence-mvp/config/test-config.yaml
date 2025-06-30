@@ -7,6 +7,11 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
+  resource:
+    attributes:
+      - key: collector.name
+        value: otelcol
+        action: upsert
   batch:
 
 exporters:
@@ -20,9 +25,9 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [resource, batch]
       exporters: [debug]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [resource, batch]
       exporters: [debug]

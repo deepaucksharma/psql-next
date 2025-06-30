@@ -8,11 +8,11 @@ extensions:
 receivers:
   # PostgreSQL metrics using standard receiver
   postgresql:
-    endpoint: ${env:POSTGRES_HOST:localhost}:${env:POSTGRES_PORT:5432}
-    username: ${env:POSTGRES_USER:postgres}
-    password: ${env:POSTGRES_PASSWORD:postgres}
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER:-postgres}
+    password: ${env:POSTGRES_PASSWORD:-postgres}
     databases:
-      - ${env:POSTGRES_DB:postgres}
+      - ${env:POSTGRES_DB:-postgres}
     collection_interval: 15s
     tls:
       insecure: true
@@ -20,7 +20,7 @@ receivers:
   # Custom queries for data PostgreSQL receiver can't get
   sqlquery:
     driver: postgres
-    datasource: "host=${env:POSTGRES_HOST:localhost} port=${env:POSTGRES_PORT:5432} user=${env:POSTGRES_USER:postgres} password=${env:POSTGRES_PASSWORD:postgres} dbname=${env:POSTGRES_DB:postgres} sslmode=disable"
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-postgres} sslmode=disable"
     queries:
       # pg_stat_statements for query performance
       - sql: |
@@ -74,11 +74,14 @@ processors:
 
   resource:
     attributes:
+      - key: collector.name
+        value: otelcol
+        action: upsert
       - key: service.name
         value: database-monitoring
         action: insert
       - key: deployment.environment
-        value: ${env:ENVIRONMENT:production}
+        value: ${env:ENVIRONMENT:-production}
         action: insert
 
   attributes:
@@ -117,7 +120,7 @@ processors:
 exporters:
   # OTLP to New Relic
   otlp:
-    endpoint: ${env:OTLP_ENDPOINT:otlp.nr-data.net:4317}
+    endpoint: ${env:OTLP_ENDPOINT:-otlp.nr-data.net:4317}
     headers:
       api-key: ${env:NEW_RELIC_LICENSE_KEY}
     compression: gzip
@@ -160,7 +163,7 @@ service:
 
   telemetry:
     logs:
-      level: ${env:LOG_LEVEL:info}
+      level: ${env:LOG_LEVEL:-info}
     metrics:
       level: detailed
       address: 0.0.0.0:8888

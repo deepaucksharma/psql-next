@@ -25,7 +25,7 @@ func NewFactory() processor.Factory {
 // createLogsProcessor creates a new circuit breaker processor for logs
 func createLogsProcessor(
 	ctx context.Context,
-	set processor.CreateSettings,
+	set processor.Settings,
 	cfg component.Config,
 	nextConsumer consumer.Logs,
 ) (processor.Logs, error) {

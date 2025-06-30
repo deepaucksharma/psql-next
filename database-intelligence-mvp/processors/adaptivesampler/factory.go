@@ -25,7 +25,7 @@ func NewFactory() processor.Factory {
 // createLogsProcessor creates a new adaptive sampler processor for logs
 func createLogsProcessor(
 	ctx context.Context,
-	set component.TelemetrySettings,
+	set processor.Settings,
 	cfg component.Config,
 	nextConsumer consumer.Logs,
 ) (processor.Logs, error) {
@@ -48,8 +48,7 @@ func createLogsProcessor(
 	)
 	
 	logger.Info("Creating adaptive sampler processor",
-		zap.String("state_storage_type", processorConfig.StateStorage.Type),
-		zap.String("state_directory", processorConfig.StateStorage.FileStorage.Directory),
+		zap.Bool("in_memory_only", processorConfig.InMemoryOnly),
 		zap.Bool("deduplication_enabled", processorConfig.Deduplication.Enabled),
 		zap.Int("num_sampling_rules", len(processorConfig.SamplingRules)),
 		zap.Float64("default_sample_rate", processorConfig.DefaultSampleRate),

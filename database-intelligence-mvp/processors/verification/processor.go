@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -20,6 +18,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.uber.org/zap"
 )
 
@@ -312,6 +311,11 @@ func (vp *VerificationProcessor) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// Capabilities implements the consumer.Consumer interface
+func (vp *VerificationProcessor) Capabilities() consumer.Capabilities {
+	return consumer.Capabilities{MutatesData: true}
+}
+
 // ConsumeLogs implements the consumer.Logs interface
 func (vp *VerificationProcessor) ConsumeLogs(ctx context.Context, ld plog.Logs) error {
 	startTime := time.Now()
@@ -370,7 +374,7 @@ func (vp *VerificationProcessor) ConsumeLogs(ctx context.Context, ld plog.Logs) 
 }
 
 // verifyLogRecord performs verification on a single log record
-func (vp *VerificationProcessor) verifyLogRecord(resource plog.Resource, lr plog.LogRecord) {
+func (vp *VerificationProcessor) verifyLogRecord(resource pcommon.Resource, lr plog.LogRecord) {
 	vp.metrics.mu.Lock()
 	defer vp.metrics.mu.Unlock()
 	
@@ -404,22 +408,10 @@ func (vp *VerificationProcessor) verifyLogRecord(resource plog.Resource, lr plog
 	
 	// Verify entity synthesis attributes
 	hasEntityGuid := false
-	hasEntityType := false
-	hasServiceName := false
-	hasHostId := false
 	
 	if _, ok := attrs.Get("entity.guid"); ok {
 		hasEntityGuid = true
 		vp.metrics.entitiesCreated++
-	}
-	if _, ok := attrs.Get("entity.type"); ok {
-		hasEntityType = true
-	}
-	if _, ok := attrs.Get("service.name"); ok {
-		hasServiceName = true
-	}
-	if _, ok := attrs.Get("host.id"); ok {
-		hasHostId = true
 	}
 	
 	// Calculate entity correlation rate
@@ -655,7 +647,7 @@ func (vp *VerificationProcessor) exportFeedbackEvent(event FeedbackEvent) {
 	sl.Scope().SetName("verification_processor")
 	
 	lr := sl.LogRecords().AppendEmpty()
-	lr.SetTimestamp(plog.Timestamp(event.Timestamp.UnixNano()))
+	lr.SetTimestamp(pcommon.NewTimestampFromTime(event.Timestamp))
 	lr.SetSeverityText(event.Level)
 	lr.Body().SetStr(event.Message)
 	
@@ -730,7 +722,7 @@ func (vp *VerificationProcessor) validateQuality(lr plog.LogRecord) {
 	}
 	
 	// Check cardinality limits
-	attrs.Range(func(k string, v interface{}) bool {
+	attrs.Range(func(k string, v pcommon.Value) bool {
 		if limit, exists := vp.qualityValidator.cardinalityLimits[k]; exists {
 			// Create a hash of the record for duplicate detection
 			hash := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%s:%v", k, v))))
@@ -834,7 +826,7 @@ func (vp *VerificationProcessor) detectAndSanitizePII(lr plog.LogRecord) {
 	}
 	
 	// Check attributes for PII
-	attrs.Range(func(k string, v interface{}) bool {
+	attrs.Range(func(k string, v pcommon.Value) bool {
 		for _, piiField := range vp.piiDetector.commonPIIFields {
 			if strings.Contains(strings.ToLower(k), piiField) {
 				vp.piiDetector.violations++

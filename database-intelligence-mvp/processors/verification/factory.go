@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/processor"
-	"go.opentelemetry.io/collector/processor/processorhelper"
 )
 
 const (
@@ -20,10 +19,17 @@ const (
 	stability = component.StabilityLevelBeta
 )
 
+var componentType = component.MustNewType(typeStr)
+
+// GetType returns the type of this processor
+func GetType() component.Type {
+	return componentType
+}
+
 // NewFactory creates a new processor factory for the verification processor
 func NewFactory() processor.Factory {
 	return processor.NewFactory(
-		typeStr,
+		componentType,
 		createDefaultConfig,
 		processor.WithLogs(createLogsProcessor, stability),
 	)
@@ -32,7 +38,7 @@ func NewFactory() processor.Factory {
 // createLogsProcessor creates a logs processor
 func createLogsProcessor(
 	ctx context.Context,
-	set processor.CreateSettings,
+	set processor.Settings,
 	cfg component.Config,
 	nextConsumer consumer.Logs,
 ) (processor.Logs, error) {
@@ -51,14 +57,5 @@ func createLogsProcessor(
 		return nil, fmt.Errorf("failed to create verification processor: %w", err)
 	}
 	
-	return processorhelper.NewLogsProcessor(
-		ctx,
-		set,
-		cfg,
-		nextConsumer,
-		vp.ConsumeLogs,
-		processorhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		processorhelper.WithStart(vp.Start),
-		processorhelper.WithShutdown(vp.Shutdown),
-	)
+	return vp, nil
 }

@@ -76,8 +76,7 @@ services:
       COLLECTOR_VERSION: "2.0.0-unified"
       
     volumes:
-      - ../../config/collector-unified.yaml:/etc/otel-collector/config.yaml:ro
-      - ../../config/attribute-mapping.yaml:/etc/otel-collector/attribute-mapping.yaml:ro
+      - ../../config/collector-resilient.yaml:/etc/otel-collector/config.yaml:ro
       - otel-storage:/var/lib/otel/file_storage
       - /var/log/postgresql:/var/log/postgresql:ro
       - /var/log/mysql:/var/log/mysql:ro
@@ -156,8 +155,7 @@ services:
       DEBUG_SAMPLING_THEREAFTER: ${DEBUG_SAMPLING_THEREAFTER:-100}
       COLLECTOR_VERSION: "2.0.0-unified"
     volumes:
-      - ../../config/collector-unified.yaml:/etc/otel-collector/config.yaml:ro
-      - ../../config/attribute-mapping.yaml:/etc/otel-collector/attribute-mapping.yaml:ro
+      - ../../config/collector-resilient.yaml:/etc/otel-collector/config.yaml:ro
       - otel-storage-secondary:/var/lib/otel/file_storage
       - /var/log/postgresql:/var/log/postgresql:ro
       - /var/log/mysql:/var/log/mysql:ro

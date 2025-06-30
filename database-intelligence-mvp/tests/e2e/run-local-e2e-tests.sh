@@ -211,9 +211,15 @@ echo -e "\n${YELLOW}Checking Prometheus metrics...${NC}"
 if curl -sf http://localhost:8889/metrics > /dev/null; then
     echo -e "${GREEN}Prometheus endpoint is accessible${NC}"
     
-    # Check for database metrics
-    PG_METRICS=$(curl -s http://localhost:8889/metrics | grep -c "postgresql_")
-    MYSQL_METRICS=$(curl -s http://localhost:8889/metrics | grep -c "mysql_")
+    # Check for database metrics in the exported JSON file instead
+    # The Prometheus endpoint may have different metric names
+    if [ -f "/tmp/e2e-metrics.json" ]; then
+        PG_METRICS=$(jq -r '.resourceMetrics[].scopeMetrics[].metrics[].name' /tmp/e2e-metrics.json 2>/dev/null | grep -c "postgresql")
+        MYSQL_METRICS=$(jq -r '.resourceMetrics[].scopeMetrics[].metrics[].name' /tmp/e2e-metrics.json 2>/dev/null | grep -c "mysql")
+    else
+        PG_METRICS=0
+        MYSQL_METRICS=0
+    fi
     
     echo "PostgreSQL metrics found: $PG_METRICS"
     echo "MySQL metrics found: $MYSQL_METRICS"
@@ -232,27 +238,25 @@ if [ -f "/tmp/e2e-metrics.json" ]; then
     METRIC_LINES=$(wc -l < /tmp/e2e-metrics.json)
     echo "Metrics file has $METRIC_LINES lines"
     
-    # Check for specific metric types
-    if grep -q "postgresql.database.size" /tmp/e2e-metrics.json; then
-        echo -e "${GREEN}✓ PostgreSQL metrics found in export${NC}"
+    # Run comprehensive data shape validation
+    echo -e "\n${YELLOW}Running data shape validation...${NC}"
+    if [ -x "$SCRIPT_DIR/validate-data-shape.sh" ]; then
+        "$SCRIPT_DIR/validate-data-shape.sh" "/tmp/e2e-metrics.json"
+        SHAPE_VALIDATION=$?
     else
-        echo -e "${RED}✗ PostgreSQL metrics missing${NC}"
-    fi
-    
-    if grep -q "mysql.threads" /tmp/e2e-metrics.json; then
-        echo -e "${GREEN}✓ MySQL metrics found in export${NC}"
-    else
-        echo -e "${RED}✗ MySQL metrics missing${NC}"
+        echo -e "${YELLOW}Data shape validation script not found, skipping${NC}"
+        SHAPE_VALIDATION=0
     fi
 else
     echo -e "${RED}Metrics file not found${NC}"
+    SHAPE_VALIDATION=1
 fi
 
 # Generate test report
 echo -e "\n${YELLOW}Generating test report...${NC}"
 
 TEST_PASSED=true
-if [ $PG_METRICS -eq 0 ] || [ $MYSQL_METRICS -eq 0 ]; then
+if [ $PG_METRICS -eq 0 ] || [ $MYSQL_METRICS -eq 0 ] || [ ${SHAPE_VALIDATION:-1} -ne 0 ]; then
     TEST_PASSED=false
 fi
 

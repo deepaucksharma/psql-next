@@ -44,14 +44,6 @@ receivers:
               execution_count: execution_count
               total_duration_ms: total_duration_ms
               database_name: database_name
-        logs:
-          - body_column: query_text
-            attributes:
-              query_id: query_id
-              avg_duration_ms: avg_duration_ms
-              execution_count: execution_count
-              total_duration_ms: total_duration_ms
-              database_name: database_name
 
   sqlquery/mysql:
     driver: mysql
@@ -66,14 +58,6 @@ receivers:
             100 as execution_count,
             5050 as total_duration_ms,
             'mysql' as database_name
-        logs:
-          - body_column: query_text
-            attributes:
-              query_id: query_id
-              avg_duration_ms: avg_duration_ms
-              execution_count: execution_count
-              total_duration_ms: total_duration_ms
-              database_name: database_name
         logs:
           - body_column: query_text
             attributes:
@@ -113,7 +97,7 @@ exporters:
   otlp/newrelic:
     endpoint: "otlp.nr-data.net:4317"
     headers:
-      api-key: "${NEW_RELIC_LICENSE_KEY}"
+      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
     compression: gzip
     timeout: 30s
 

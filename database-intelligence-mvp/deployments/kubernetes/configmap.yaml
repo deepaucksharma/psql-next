@@ -8,25 +8,16 @@ data:
     extensions:
       health_check:
         endpoint: 0.0.0.0:13133
-
-      leader_election:
-        lease_name: db-intelligence-leader
-        lease_namespace: db-intelligence # This should match the namespace of your deployment
-
-      memory_ballast:
-        size_mib: 128
+      
+      zpages:
+        endpoint: 0.0.0.0:55679
 
     receivers:
       # PostgreSQL receiver for metadata collection
       sqlquery/postgresql:
         driver: postgres
-        dsn: "${env:PG_REPLICA_DSN}"
+        datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-postgres} sslmode=disable"
         collection_interval: 300s
-        timeout: 10s
-        max_open_connections: 2
-        max_idle_connections: 1
-        connection_max_lifetime: 300s
-        enabled_when_leader: true # Only the leader collects data
         queries:
           - sql: |
               -- Safety timeouts to prevent long-running queries
@@ -64,17 +55,19 @@ data:
                   'approach', 'metadata_only_for_safety'
                 ) as plan_metadata
               FROM worst_query;
+            logs:
+              - body_column: query_text
+                attributes:
+                  query_id: query_id
+                  avg_duration_ms: avg_duration_ms
+                  execution_count: execution_count
+                  total_duration_ms: total_duration_ms
 
       # MySQL receiver for metadata collection
       sqlquery/mysql:
         driver: mysql
-        dsn: "${env:MYSQL_READONLY_DSN}"
+        datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-mysql}@tcp(${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306})/${env:MYSQL_DB:-mysql}"
         collection_interval: 300s
-        timeout: 10s
-        max_open_connections: 2
-        max_idle_connections: 1
-        connection_max_lifetime: 300s
-        enabled_when_leader: true # Only the leader collects data
         queries:
           - sql: |
               SELECT
@@ -95,6 +88,14 @@ data:
                 AND COUNT_STAR > 5
               ORDER BY (AVG_TIMER_WAIT * COUNT_STAR) DESC
               LIMIT 1;
+            logs:
+              - body_column: query_text
+                attributes:
+                  query_id: query_id
+                  avg_duration_ms: avg_duration_ms
+                  execution_count: execution_count
+                  total_duration_ms: total_duration_ms
+                  database_name: database_name
 
     processors:
       memory_limiter:
@@ -115,6 +116,9 @@ data:
       # Add metadata to identify the collector instance
       resource:
         attributes:
+          - key: collector.name
+            value: otelcol
+            action: upsert
           - key: "collector.instance.id"
             value: "${env:HOSTNAME}"
             action: upsert

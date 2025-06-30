@@ -38,12 +38,15 @@ processors:
   # Memory protection
   memory_limiter:
     check_interval: 1s
-    limit_percentage: ${env:MEMORY_LIMIT_PERCENT}
-    spike_limit_percentage: 20
+    limit_mib: 1024
+    spike_limit_mib: 256
     
   # Add essential resource attributes
   resource:
     attributes:
+      - key: collector.name
+        value: otelcol
+        action: upsert
       - key: service.name
         value: database-intelligence
         action: upsert

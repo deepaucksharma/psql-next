@@ -1,0 +1,230 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "database-intelligence.fullname" . }}-config
+  labels:
+    {{- include "database-intelligence.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:{{ .Values.service.health.port }}
+      
+      zpages:
+        endpoint: 0.0.0.0:{{ .Values.service.zpages.port | default 55679 }}
+
+    receivers:
+      {{- if .Values.config.receivers.postgresql.enabled }}
+      postgresql:
+        endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+        username: ${env:POSTGRES_USER:-postgres}
+        password: ${env:POSTGRES_PASSWORD:-postgres}
+        databases:
+          {{- if .Values.config.receivers.postgresql.databases }}
+          {{- toYaml .Values.config.receivers.postgresql.databases | nindent 10 }}
+          {{- else }}
+          - ${env:POSTGRES_DATABASE:-postgres}
+          {{- end }}
+        collection_interval: {{ .Values.config.receivers.postgresql.collectionInterval }}
+        tls:
+          {{- toYaml .Values.config.receivers.postgresql.tls | nindent 10 }}
+      {{- end }}
+      
+      {{- if .Values.config.receivers.mysql.enabled }}
+      mysql:
+        endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+        username: ${env:MYSQL_USER:-root}
+        password: ${env:MYSQL_PASSWORD:-mysql}
+        {{- if .Values.config.receivers.mysql.database }}
+        database: {{ .Values.config.receivers.mysql.database }}
+        {{- else }}
+        database: ${env:MYSQL_DATABASE:-mysql}
+        {{- end }}
+        collection_interval: {{ .Values.config.receivers.mysql.collectionInterval }}
+      {{- end }}
+
+      {{- if .Values.config.receivers.sqlquery.postgresql.enabled }}
+      sqlquery/postgresql:
+        driver: postgres
+        datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DATABASE:-postgres} sslmode=disable"
+        collection_interval: {{ .Values.config.receivers.sqlquery.postgresql.collectionInterval }}
+        queries:
+          {{- range .Values.config.receivers.sqlquery.postgresql.queries }}
+          - sql: |
+{{ .sql | indent 14 }}
+            {{- if .logs }}
+            logs:
+              {{- toYaml .logs | nindent 14 }}
+            {{- end }}
+            {{- if .metrics }}
+            metrics:
+              {{- toYaml .metrics | nindent 14 }}
+            {{- end }}
+          {{- end }}
+      {{- end }}
+
+      {{- if .Values.config.receivers.sqlquery.mysql.enabled }}
+      sqlquery/mysql:
+        driver: mysql
+        datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-mysql}@tcp(${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306})/${env:MYSQL_DATABASE:-mysql}"
+        collection_interval: {{ .Values.config.receivers.sqlquery.mysql.collectionInterval }}
+        queries:
+          {{- range .Values.config.receivers.sqlquery.mysql.queries }}
+          - sql: |
+{{ .sql | indent 14 }}
+            {{- if .logs }}
+            logs:
+              {{- toYaml .logs | nindent 14 }}
+            {{- end }}
+            {{- if .metrics }}
+            metrics:
+              {{- toYaml .metrics | nindent 14 }}
+            {{- end }}
+          {{- end }}
+      {{- end }}
+
+    processors:
+      memory_limiter:
+        check_interval: {{ .Values.config.processors.memoryLimiter.checkInterval }}
+        limit_mib: {{ .Values.config.processors.memoryLimiter.limitMib | default 1024 }}
+        spike_limit_mib: {{ .Values.config.processors.memoryLimiter.spikeLimitMib | default 256 }}
+
+      # CRITICAL: Resource processor for collector.name attribute
+      resource:
+        attributes:
+          - key: collector.name
+            value: otelcol
+            action: upsert
+          - key: collector.instance.id
+            value: ${env:HOSTNAME}
+            action: upsert
+          - key: deployment.environment
+            value: {{ .Values.environment }}
+            action: upsert
+          - key: kubernetes.namespace
+            value: {{ .Release.Namespace }}
+            action: upsert
+          - key: kubernetes.pod.name
+            value: ${env:POD_NAME}
+            action: upsert
+          {{- range .Values.config.processors.resource.attributes }}
+          - key: {{ .key }}
+            value: {{ .value }}
+            action: {{ .action | default "upsert" }}
+          {{- end }}
+
+      {{- if .Values.config.processors.transform.enabled }}
+      transform/metrics:
+        error_mode: {{ .Values.config.processors.transform.errorMode | default "ignore" }}
+        metric_statements:
+          - context: metric
+            statements:
+              - set(unit, "1") where unit == ""
+              {{- range .Values.config.processors.transform.metricStatements }}
+              - {{ . }}
+              {{- end }}
+
+      transform/logs:
+        error_mode: {{ .Values.config.processors.transform.errorMode | default "ignore" }}
+        log_statements:
+          - context: log
+            statements:
+              - set(attributes["avg_duration_ms"], Double(attributes["avg_duration_ms"])) where attributes["avg_duration_ms"] != nil
+              - set(attributes["execution_count"], Int(attributes["execution_count"])) where attributes["execution_count"] != nil
+              - set(attributes["total_duration_ms"], Double(attributes["total_duration_ms"])) where attributes["total_duration_ms"] != nil
+              {{- range .Values.config.processors.transform.logStatements }}
+              - {{ . }}
+              {{- end }}
+      {{- end }}
+
+      {{- if .Values.config.processors.sanitizePii.enabled }}
+      transform/sanitize_pii:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - replace_all_patterns(attributes["query_text"], "'[^']*'", "'[REDACTED]'")
+              - replace_all_patterns(attributes["query_text"], "\\b\\d{6,}\\b", "[ID]")
+              - replace_all_patterns(body, "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "[EMAIL_REDACTED]")
+              {{- range .Values.config.processors.sanitizePii.patterns }}
+              - {{ . }}
+              {{- end }}
+      {{- end }}
+
+      {{- if .Values.config.processors.probabilisticSampler.enabled }}
+      probabilistic_sampler:
+        hash_seed: {{ .Values.config.processors.probabilisticSampler.hashSeed }}
+        sampling_percentage: {{ .Values.config.processors.probabilisticSampler.samplingPercentage }}
+      {{- end }}
+
+      batch:
+        timeout: {{ .Values.config.processors.batch.timeout }}
+        send_batch_size: {{ .Values.config.processors.batch.sendBatchSize }}
+        send_batch_max_size: {{ .Values.config.processors.batch.sendBatchMaxSize }}
+
+    exporters:
+      {{- if .Values.config.exporters.otlp.enabled }}
+      otlp/newrelic:
+        endpoint: ${env:OTLP_ENDPOINT:-{{ .Values.config.exporters.otlp.endpoint }}}
+        headers:
+          api-key: ${env:NEW_RELIC_LICENSE_KEY}
+          {{- range $key, $value := .Values.config.exporters.otlp.headers }}
+          {{ $key }}: {{ $value }}
+          {{- end }}
+        compression: {{ .Values.config.exporters.otlp.compression | default "gzip" }}
+        timeout: {{ .Values.config.exporters.otlp.timeout }}
+        retry_on_failure:
+          enabled: {{ .Values.config.exporters.otlp.retryOnFailure.enabled }}
+          initial_interval: {{ .Values.config.exporters.otlp.retryOnFailure.initialInterval }}
+          max_interval: {{ .Values.config.exporters.otlp.retryOnFailure.maxInterval }}
+          max_elapsed_time: {{ .Values.config.exporters.otlp.retryOnFailure.maxElapsedTime }}
+        sending_queue:
+          enabled: {{ .Values.config.exporters.otlp.sendingQueue.enabled }}
+          num_consumers: {{ .Values.config.exporters.otlp.sendingQueue.numConsumers }}
+          queue_size: {{ .Values.config.exporters.otlp.sendingQueue.queueSize }}
+      {{- end }}
+
+      {{- if .Values.config.exporters.debug.enabled }}
+      debug:
+        verbosity: {{ .Values.config.exporters.debug.verbosity }}
+        sampling_initial: {{ .Values.config.exporters.debug.samplingInitial }}
+        sampling_thereafter: {{ .Values.config.exporters.debug.samplingThereafter }}
+      {{- end }}
+
+    service:
+      extensions: [health_check, zpages]
+      
+      pipelines:
+        {{- if or .Values.config.receivers.postgresql.enabled .Values.config.receivers.mysql.enabled }}
+        metrics/databases:
+          receivers: 
+            {{- if .Values.config.receivers.postgresql.enabled }}
+            - postgresql
+            {{- end }}
+            {{- if .Values.config.receivers.mysql.enabled }}
+            - mysql
+            {{- end }}
+          processors: {{ .Values.config.pipelines.metrics.processors | toJson }}
+          exporters: {{ .Values.config.pipelines.metrics.exporters | toJson }}
+        {{- end }}
+        
+        {{- if or .Values.config.receivers.sqlquery.postgresql.enabled .Values.config.receivers.sqlquery.mysql.enabled }}
+        logs/queries:
+          receivers:
+            {{- if .Values.config.receivers.sqlquery.postgresql.enabled }}
+            - sqlquery/postgresql
+            {{- end }}
+            {{- if .Values.config.receivers.sqlquery.mysql.enabled }}
+            - sqlquery/mysql
+            {{- end }}
+          processors: {{ .Values.config.pipelines.logs.processors | toJson }}
+          exporters: {{ .Values.config.pipelines.logs.exporters | toJson }}
+        {{- end }}
+        
+      telemetry:
+        logs:
+          level: {{ .Values.config.telemetry.logs.level }}
+          encoding: {{ .Values.config.telemetry.logs.encoding | default "json" }}
+        metrics:
+          level: {{ .Values.config.telemetry.metrics.level }}
+          address: 0.0.0.0:{{ .Values.service.metrics.port }}
