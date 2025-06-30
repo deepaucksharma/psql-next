@@ -1,0 +1,312 @@
+{
+  "totalTests": 37,
+  "passed": 0,
+  "failed": 37,
+  "warnings": 0,
+  "startTime": "2025-06-30T13:15:41.818Z",
+  "results": [
+    {
+      "test": "postgresql.postgresql.backends",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.commits",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.rollbacks",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.database.disk_usage",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.blocks_read",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.bgwriter.buffers.allocated",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.bgwriter.buffers.writes",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.bgwriter.checkpoint.count",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.bgwriter.duration",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.bgwriter.maxwritten",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.database.locks",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "postgresql.postgresql.index.scans",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.threads",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.uptime",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.buffer_pool.data",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.buffer_pool.limit",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.buffer_pool.operations",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.buffer_pool.page_flushes",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.buffer_pool.pages",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.handlers",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.operations",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.opened_resources",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.tmp_resources",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.sorts",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "mysql.mysql.prepared_statements",
+      "status": "error",
+      "message": "Error testing metric: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "logs.query_id",
+      "status": "error",
+      "message": "Error testing log attribute: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "logs.query_text",
+      "status": "error",
+      "message": "Error testing log attribute: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "logs.avg_duration_ms",
+      "status": "error",
+      "message": "Error testing log attribute: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "logs.execution_count",
+      "status": "error",
+      "message": "Error testing log attribute: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "logs.total_duration_ms",
+      "status": "error",
+      "message": "Error testing log attribute: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "logs.database_name",
+      "status": "error",
+      "message": "Error testing log attribute: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "logs.plan_metadata",
+      "status": "error",
+      "message": "Error testing log attribute: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "logs.collector.name",
+      "status": "error",
+      "message": "Error testing log attribute: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "widget.Database Count",
+      "status": "error",
+      "message": "Error testing widget query: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "widget.PostgreSQL Query Performance",
+      "status": "error",
+      "message": "Error testing widget query: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "widget.Active Connections Combined",
+      "status": "error",
+      "message": "Error testing widget query: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    },
+    {
+      "test": "widget.Transaction Rates",
+      "status": "error",
+      "message": "Error testing widget query: [{\"message\":\"authentication required\"}]",
+      "details": {
+        "error": "Error: [{\"message\":\"authentication required\"}]"
+      }
+    }
+  ],
+  "endTime": "2025-06-30T13:15:55.439Z",
+  "duration": 13.621,
+  "readiness": {
+    "postgresql": false,
+    "mysql": false,
+    "queryLogs": false
+  }
+}

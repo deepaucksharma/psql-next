@@ -23,7 +23,7 @@ The Database Intelligence Collector is an OpenTelemetry-based monitoring solutio
 
 ### 4. Development
 - **[Development Guide](./development/GUIDE.md)** - Contributing and local development
-- **[Testing Guide](./development/TESTING.md)** - Testing procedures and validation
+- **[E2E Testing Guide](./E2E_TESTING_COMPLETE.md)** - Comprehensive end-to-end testing
 - **[API Reference](./development/API.md)** - Internal APIs and interfaces
 
 ### 5. Project Information

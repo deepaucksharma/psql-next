@@ -1,6 +1,6 @@
 # Testing Guide
 
-This guide covers the end-to-end testing approach for the Database Intelligence Collector, focusing on validating data flow from source databases to New Relic Database (NRDB).
+This guide provides a quick reference for testing the Database Intelligence Collector. For comprehensive E2E testing documentation, see [E2E Testing Complete Guide](../E2E_TESTING_COMPLETE.md).
 
 ## Testing Philosophy
 
