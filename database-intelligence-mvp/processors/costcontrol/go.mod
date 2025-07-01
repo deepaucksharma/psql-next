@@ -1,11 +1,10 @@
-module github.com/database-intelligence-mvp/processors/circuitbreaker
+module github.com/database-intelligence-mvp/processors/costcontrol
 
 go 1.23.0
 
 toolchain go1.24.3
 
 require (
-	github.com/database-intelligence-mvp/common/featuredetector v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/collector/component v1.35.0
 	go.opentelemetry.io/collector/consumer v1.35.0
@@ -47,5 +46,3 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/database-intelligence-mvp/common/featuredetector => ../../common/featuredetector

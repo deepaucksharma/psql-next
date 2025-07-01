@@ -44,6 +44,21 @@ type Config struct {
 
 	// NewRelicErrorPatterns is a list of strings that indicate a New Relic integration error
 	NewRelicErrorPatterns []string `mapstructure:"new_relic_error_patterns"`
+	
+	// ErrorPatterns define patterns for feature-aware error handling
+	ErrorPatterns []ErrorPatternConfig `mapstructure:"error_patterns"`
+	
+	// QueryFallbacks define fallback queries for primary queries
+	QueryFallbacks map[string]string `mapstructure:"query_fallbacks"`
+}
+
+// ErrorPatternConfig defines configuration for error pattern matching
+type ErrorPatternConfig struct {
+	Pattern     string        `mapstructure:"pattern"`
+	Action      string        `mapstructure:"action"`
+	Feature     string        `mapstructure:"feature"`
+	Backoff     time.Duration `mapstructure:"backoff"`
+	Description string        `mapstructure:"description"`
 }
 
 // Validate checks the processor configuration

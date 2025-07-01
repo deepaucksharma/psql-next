@@ -5,24 +5,30 @@ go 1.23.0
 toolchain go1.24.3
 
 require (
+	github.com/database-intelligence-mvp/common/featuredetector v0.0.0-00010101000000-000000000000
 	github.com/database-intelligence-mvp/processors/adaptivesampler v0.0.0-00010101000000-000000000000
 	github.com/database-intelligence-mvp/processors/circuitbreaker v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence-mvp/processors/costcontrol v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence-mvp/processors/nrerrormonitor v0.0.0-00010101000000-000000000000
 	github.com/database-intelligence-mvp/processors/planattributeextractor v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence-mvp/processors/querycorrelator v0.0.0-00010101000000-000000000000
 	github.com/database-intelligence-mvp/processors/verification v0.0.0-00010101000000-000000000000
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/lib/pq v1.10.9
+	github.com/newrelic/newrelic-client-go v1.1.0
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.37.0
 	github.com/testcontainers/testcontainers-go/modules/mysql v0.37.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.37.0
-	go.opentelemetry.io/collector/component v1.34.0
+	go.opentelemetry.io/collector/component v1.35.0
 	go.opentelemetry.io/collector/confmap v1.34.0
 	go.opentelemetry.io/collector/connector v0.128.0
 	go.opentelemetry.io/collector/exporter v0.128.0
 	go.opentelemetry.io/collector/extension v1.34.0
 	go.opentelemetry.io/collector/otelcol v0.128.0
-	go.opentelemetry.io/collector/processor v1.34.0
+	go.opentelemetry.io/collector/pdata v1.35.0
+	go.opentelemetry.io/collector/processor v1.35.0
 	go.opentelemetry.io/collector/receiver v1.34.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8
@@ -55,9 +61,13 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1 // indirect
+	github.com/hashicorp/go-cleanhttp v0.5.1 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.0 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
+	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
@@ -96,33 +106,34 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
+	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80 // indirect
+	github.com/valyala/fastjson v1.6.3 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
-	go.opentelemetry.io/collector/component/componentstatus v0.128.0 // indirect
-	go.opentelemetry.io/collector/component/componenttest v0.128.0 // indirect
+	go.opentelemetry.io/collector/component/componentstatus v0.129.0 // indirect
+	go.opentelemetry.io/collector/component/componenttest v0.129.0 // indirect
 	go.opentelemetry.io/collector/config/configtelemetry v0.128.0 // indirect
 	go.opentelemetry.io/collector/confmap/xconfmap v0.128.0 // indirect
 	go.opentelemetry.io/collector/connector/connectortest v0.128.0 // indirect
 	go.opentelemetry.io/collector/connector/xconnector v0.128.0 // indirect
-	go.opentelemetry.io/collector/consumer v1.34.0 // indirect
+	go.opentelemetry.io/collector/consumer v1.35.0 // indirect
 	go.opentelemetry.io/collector/consumer/consumererror v0.128.0 // indirect
-	go.opentelemetry.io/collector/consumer/consumertest v0.128.0 // indirect
-	go.opentelemetry.io/collector/consumer/xconsumer v0.128.0 // indirect
+	go.opentelemetry.io/collector/consumer/consumertest v0.129.0 // indirect
+	go.opentelemetry.io/collector/consumer/xconsumer v0.129.0 // indirect
 	go.opentelemetry.io/collector/exporter/exportertest v0.128.0 // indirect
 	go.opentelemetry.io/collector/exporter/xexporter v0.128.0 // indirect
 	go.opentelemetry.io/collector/extension/extensioncapabilities v0.128.0 // indirect
 	go.opentelemetry.io/collector/extension/extensiontest v0.128.0 // indirect
-	go.opentelemetry.io/collector/featuregate v1.34.0 // indirect
+	go.opentelemetry.io/collector/featuregate v1.35.0 // indirect
 	go.opentelemetry.io/collector/internal/fanoutconsumer v0.128.0 // indirect
-	go.opentelemetry.io/collector/internal/telemetry v0.128.0 // indirect
-	go.opentelemetry.io/collector/pdata v1.34.0 // indirect
-	go.opentelemetry.io/collector/pdata/pprofile v0.128.0 // indirect
-	go.opentelemetry.io/collector/pdata/testdata v0.128.0 // indirect
-	go.opentelemetry.io/collector/pipeline v0.128.0 // indirect
+	go.opentelemetry.io/collector/internal/telemetry v0.129.0 // indirect
+	go.opentelemetry.io/collector/pdata/pprofile v0.129.0 // indirect
+	go.opentelemetry.io/collector/pdata/testdata v0.129.0 // indirect
+	go.opentelemetry.io/collector/pipeline v0.129.0 // indirect
 	go.opentelemetry.io/collector/pipeline/xpipeline v0.128.0 // indirect
 	go.opentelemetry.io/collector/processor/processorhelper v0.128.0 // indirect
-	go.opentelemetry.io/collector/processor/processortest v0.128.0 // indirect
-	go.opentelemetry.io/collector/processor/xprocessor v0.128.0 // indirect
+	go.opentelemetry.io/collector/processor/processortest v0.129.0 // indirect
+	go.opentelemetry.io/collector/processor/xprocessor v0.129.0 // indirect
 	go.opentelemetry.io/collector/receiver/receivertest v0.128.0 // indirect
 	go.opentelemetry.io/collector/receiver/xreceiver v0.128.0 // indirect
 	go.opentelemetry.io/collector/service v0.128.0 // indirect
@@ -167,8 +178,13 @@ require (
 
 // Replace directives for local development
 replace (
+	github.com/database-intelligence-mvp/common/featuredetector => ./common/featuredetector
 	github.com/database-intelligence-mvp/processors/adaptivesampler => ./processors/adaptivesampler
 	github.com/database-intelligence-mvp/processors/circuitbreaker => ./processors/circuitbreaker
+	github.com/database-intelligence-mvp/processors/costcontrol => ./processors/costcontrol
+	github.com/database-intelligence-mvp/processors/nrerrormonitor => ./processors/nrerrormonitor
 	github.com/database-intelligence-mvp/processors/planattributeextractor => ./processors/planattributeextractor
+	github.com/database-intelligence-mvp/processors/querycorrelator => ./processors/querycorrelator
 	github.com/database-intelligence-mvp/processors/verification => ./processors/verification
+	github.com/database-intelligence-mvp/receivers/enhancedsql => ./receivers/enhancedsql
 )

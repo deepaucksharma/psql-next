@@ -58,7 +58,9 @@ func createLogsProcessor(
 		zap.Duration("health_check_interval", processorConfig.HealthCheckInterval),
 		zap.Int("memory_threshold_mb", processorConfig.MemoryThresholdMB),
 		zap.Float64("cpu_threshold_percent", processorConfig.CPUThresholdPercent),
-		zap.Bool("debug_logging", processorConfig.EnableDebugLogging))
+		zap.Bool("debug_logging", processorConfig.EnableDebugLogging),
+		zap.Int("error_patterns", len(processorConfig.ErrorPatterns)),
+		zap.Int("query_fallbacks", len(processorConfig.QueryFallbacks)))
 	
 	// Create and return the processor
 	processor := newCircuitBreakerProcessor(processorConfig, logger, nextConsumer)

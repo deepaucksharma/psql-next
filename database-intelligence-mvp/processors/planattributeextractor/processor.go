@@ -107,12 +107,26 @@ func (p *planAttributeExtractor) processLogRecord(ctx context.Context, record pl
 	timeoutCtx, cancel := context.WithTimeout(ctx, p.config.GetTimeout())
 	defer cancel()
 	
+	// Apply query anonymization first if enabled (applies to all records)
+	if p.config.QueryAnonymization.Enabled {
+		p.applyQueryAnonymization(record)
+	}
+	
 	// Check if this record contains plan data
 	planData, planType := p.detectPlanType(record)
 	if planData == "" {
 		// No plan data found, log debug message if enabled
 		if p.config.EnableDebugLogging {
 			p.logger.Debug("No plan data found in record - this is normal if using pg_stat_statements or similar basic collectors")
+		}
+		// Still generate hash if configured (for records without plan data)
+		if p.config.HashConfig.Output != "" {
+			hash, err := p.generatePlanHash(record)
+			if err != nil {
+				p.logger.Warn("Failed to generate plan hash", zap.Error(err))
+			} else {
+				record.Attributes().PutStr(p.config.HashConfig.Output, hash)
+			}
 		}
 		return nil
 	}
@@ -142,14 +156,12 @@ func (p *planAttributeExtractor) processLogRecord(ctx context.Context, record pl
 	}
 	
 	// Apply extracted attributes to the log record
+	if p.config.EnableDebugLogging {
+		p.logger.Debug("Extracted attributes", zap.Any("attributes", extractedAttrs))
+	}
 	p.applyAttributes(record, extractedAttrs)
 	
-	// Apply query anonymization if enabled
-	if p.config.QueryAnonymization.Enabled {
-		p.applyQueryAnonymization(record)
-	}
-	
-	// Generate plan hash for deduplication
+	// Generate plan hash for deduplication (regenerate after plan attributes are added)
 	if p.config.HashConfig.Output != "" {
 		hash, err := p.generatePlanHash(record)
 		if err != nil {
@@ -166,8 +178,16 @@ func (p *planAttributeExtractor) processLogRecord(ctx context.Context, record pl
 func (p *planAttributeExtractor) detectPlanType(record plog.LogRecord) (string, string) {
 	// Check for PostgreSQL plan in various locations
 	if planJson := p.getAttributeAsString(record, "plan_json"); planJson != "" {
+		if p.config.EnableDebugLogging {
+			p.logger.Debug("Checking plan_json attribute",
+				zap.String("plan_json", p.truncateString(planJson, 100)),
+				zap.String("detection_path", p.config.PostgreSQLRules.DetectionJSONPath))
+		}
 		if gjson.Get(planJson, p.config.PostgreSQLRules.DetectionJSONPath).Exists() {
 			return planJson, "postgresql"
+		}
+		if p.config.EnableDebugLogging {
+			p.logger.Debug("PostgreSQL detection path not found in plan_json")
 		}
 	}
 	
@@ -398,10 +418,20 @@ func (p *planAttributeExtractor) convertGJSONValue(result gjson.Result) interfac
 	case gjson.String:
 		return result.String()
 	case gjson.Number:
-		if result.Int() == int64(result.Float()) {
-			return result.Int()
+		// For numbers, check if it's a whole number
+		floatVal := result.Float()
+		intVal := result.Int()
+		if p.config.EnableDebugLogging {
+			p.logger.Debug("Converting number value",
+				zap.Float64("float", floatVal),
+				zap.Int64("int", intVal),
+				zap.Bool("is_whole", float64(intVal) == floatVal))
 		}
-		return result.Float()
+		// Compare float representation to check if it's a whole number
+		if float64(intVal) == floatVal {
+			return intVal
+		}
+		return floatVal
 	case gjson.True, gjson.False:
 		return result.Bool()
 	default:

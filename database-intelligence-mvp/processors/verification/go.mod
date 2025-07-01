@@ -11,7 +11,6 @@ require (
 	go.opentelemetry.io/collector/consumer/consumertest v0.128.0
 	go.opentelemetry.io/collector/pdata v1.34.0
 	go.opentelemetry.io/collector/processor v1.34.0
-	go.opentelemetry.io/collector/processor/processorhelper v0.128.0
 	go.uber.org/zap v1.27.0
 )
 

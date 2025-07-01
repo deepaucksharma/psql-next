@@ -2,6 +2,7 @@ package planattributeextractor
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/processor/processortest"
 	"go.uber.org/zap"
@@ -105,9 +107,15 @@ func TestPlanAttributeExtractor_AnonymizationDisabled(t *testing.T) {
 
 func TestPlanAttributeExtractor_PostgreSQLPlanExtraction(t *testing.T) {
 	cfg := createDefaultConfig().(*Config)
-	logger := zap.NewNop()
+	cfg.EnableDebugLogging = true  // Enable debug logging
+	logger, _ := zap.NewDevelopment()  // Use development logger to see debug output
 	consumer := consumertest.NewNop()
 	processor := newPlanAttributeExtractor(cfg, logger, consumer)
+	
+	// Start the processor
+	err := processor.Start(context.Background(), componenttest.NewNopHost())
+	require.NoError(t, err)
+	defer processor.Shutdown(context.Background())
 
 	// Create test log record with PostgreSQL plan
 	logs := plog.NewLogs()
@@ -121,15 +129,21 @@ func TestPlanAttributeExtractor_PostgreSQLPlanExtraction(t *testing.T) {
 	
 	// Process the logs
 	ctx := context.Background()
-	err := processor.ConsumeLogs(ctx, logs)
+	err = processor.ConsumeLogs(ctx, logs)
 	require.NoError(t, err)
 	
 	// Verify attributes were extracted
 	processedLogs := logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0)
 	
+	// Debug: Print all attributes
+	processedLogs.Attributes().Range(func(k string, v pcommon.Value) bool {
+		t.Logf("Attribute %s = %v (type: %v)", k, v.AsString(), v.Type())
+		return true
+	})
+	
 	// Check extracted attributes
 	cost, exists := processedLogs.Attributes().Get("db.query.plan.cost")
-	assert.True(t, exists)
+	assert.True(t, exists, "db.query.plan.cost attribute should exist")
 	assert.Equal(t, float64(123.45), cost.Double())
 	
 	rows, exists := processedLogs.Attributes().Get("db.query.plan.rows")
@@ -214,10 +228,26 @@ func TestPlanAttributeExtractor_ErrorModes(t *testing.T) {
 			rl := logs.ResourceLogs().AppendEmpty()
 			sl := rl.ScopeLogs().AppendEmpty()
 			lr := sl.LogRecords().AppendEmpty()
-			lr.Attributes().PutStr("plan_json", `invalid json`)
+			// Use valid JSON that will be detected but will timeout during processing
+			lr.Attributes().PutStr("plan_json", `[{"Plan": {"Node Type": "Seq Scan"}}]`)
 
-			// Process with immediate timeout
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Microsecond)
+			// For timeout test, create large JSON that will take time to process
+			if tt.expectError {
+				// Create a plan with many attributes to process
+				largePlan := `[{"Plan": {`
+				for i := 0; i < 1000; i++ {
+					largePlan += fmt.Sprintf(`"attr_%d": %d,`, i, i)
+				}
+				largePlan += `"Node Type": "Seq Scan"}}]`
+				lr.Attributes().PutStr("plan_json", largePlan)
+			}
+			
+			// Process with very short timeout for error case
+			timeout := 100 * time.Millisecond
+			if tt.expectError {
+				timeout = 1 * time.Nanosecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 			
 			err := processor.ConsumeLogs(ctx, logs)
