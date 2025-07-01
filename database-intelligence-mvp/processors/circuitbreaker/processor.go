@@ -38,11 +38,10 @@ func (s State) String() string {
 	}
 }
 
-// circuitBreakerProcessor implements the circuit breaker pattern for database safety
-type circuitBreakerProcessor struct {
+// CircuitBreaker provides circuit breaker functionality
+type CircuitBreaker struct {
 	config   *Config
 	logger   *zap.Logger
-	consumer consumer.Logs
 
 	// Circuit breaker state
 	state        State
@@ -60,6 +59,61 @@ type circuitBreakerProcessor struct {
 
 	// Adaptive timeout
 	currentTimeout time.Duration
+	timeoutMutex   sync.RWMutex
+}
+
+// NewCircuitBreaker creates a new circuit breaker instance
+func NewCircuitBreaker(config *Config, logger *zap.Logger) *CircuitBreaker {
+	cb := &CircuitBreaker{
+		config:         config,
+		logger:         logger,
+		state:          Closed,
+		databaseStates: make(map[string]*databaseCircuitState),
+		currentTimeout: config.Timeout,
+	}
+	
+	if config.MaxConcurrent > 0 {
+		cb.semaphore = make(chan struct{}, config.MaxConcurrent)
+	}
+	
+	return cb
+}
+
+// RecordError records a failure and potentially opens the circuit
+func (cb *CircuitBreaker) RecordError(err error) {
+	cb.stateMutex.Lock()
+	defer cb.stateMutex.Unlock()
+
+	cb.failureCount++
+	cb.lastFailure = time.Now()
+
+	if cb.state == Closed && cb.failureCount >= cb.config.FailureThreshold {
+		cb.state = Open
+		cb.logger.Warn("Circuit breaker opened",
+			zap.Int("failure_count", cb.failureCount),
+			zap.Error(err))
+	}
+}
+
+// RecordSuccess records a success and potentially closes the circuit
+func (cb *CircuitBreaker) RecordSuccess() {
+	cb.stateMutex.Lock()
+	defer cb.stateMutex.Unlock()
+
+	cb.successCount++
+	
+	if cb.state == HalfOpen && cb.successCount >= cb.config.SuccessThreshold {
+		cb.state = Closed
+		cb.failureCount = 0
+		cb.successCount = 0
+		cb.logger.Info("Circuit breaker closed")
+	}
+}
+
+// circuitBreakerProcessor implements the circuit breaker pattern for database safety
+type circuitBreakerProcessor struct {
+	*CircuitBreaker
+	consumer consumer.Logs
 	timeoutMutex   sync.RWMutex
 
 	// Metrics
@@ -95,14 +149,10 @@ type databaseCircuitState struct {
 
 // newCircuitBreakerProcessor creates a new circuit breaker processor
 func newCircuitBreakerProcessor(cfg *Config, logger *zap.Logger, consumer consumer.Logs) *circuitBreakerProcessor {
+	cb := NewCircuitBreaker(cfg, logger)
 	return &circuitBreakerProcessor{
-		config:            cfg,
-		logger:            logger,
+		CircuitBreaker:    cb,
 		consumer:          consumer,
-		state:             Closed,
-		databaseStates:    make(map[string]*databaseCircuitState),
-		semaphore:         make(chan struct{}, cfg.MaxConcurrentRequests),
-		currentTimeout:    cfg.BaseTimeout,
 		shutdownChan:      make(chan struct{}),
 		throughputMonitor: NewThroughputMonitor(time.Minute),
 		latencyTracker:    NewLatencyTracker(1000),

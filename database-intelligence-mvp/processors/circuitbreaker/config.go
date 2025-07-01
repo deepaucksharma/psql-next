@@ -20,9 +20,15 @@ type Config struct {
 
 	// MaxConcurrentRequests maximum concurrent requests allowed
 	MaxConcurrentRequests int `mapstructure:"max_concurrent_requests"`
+	
+	// MaxConcurrent is an alias for MaxConcurrentRequests
+	MaxConcurrent int `mapstructure:"max_concurrent"`
 
 	// BaseTimeout base timeout for requests
 	BaseTimeout time.Duration `mapstructure:"base_timeout"`
+	
+	// Timeout is an alias for BaseTimeout
+	Timeout time.Duration `mapstructure:"timeout"`
 
 	// MaxTimeout maximum timeout for adaptive timeout
 	MaxTimeout time.Duration `mapstructure:"max_timeout"`

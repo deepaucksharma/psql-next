@@ -2,6 +2,7 @@ package nrerrormonitor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -9,9 +10,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
-	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-	"go.opentelemetry.io/collector/processor"
 	"go.uber.org/zap"
 )
 
@@ -179,7 +178,9 @@ func (p *nrErrorMonitor) countUniqueTimeSeries(metric pmetric.Metric) int {
 // attributesToKey creates a unique key from attributes
 func (p *nrErrorMonitor) attributesToKey(attrs pcommon.Map) string {
 	// Simple implementation - in production would use a more efficient method
-	return attrs.AsRaw().String()
+	raw := attrs.AsRaw()
+	b, _ := json.Marshal(raw)
+	return string(b)
 }
 
 // recordError tracks detected errors

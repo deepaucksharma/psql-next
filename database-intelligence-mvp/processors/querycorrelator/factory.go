@@ -8,13 +8,11 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/processor"
-	"go.opentelemetry.io/collector/processor/processorhelper"
-	"go.uber.org/zap"
 )
 
-const (
-	// TypeStr is the type string for this processor
-	TypeStr = "querycorrelator"
+var (
+	// componentType is the type of this processor
+	componentType = component.MustNewType("querycorrelator")
 	// stability is the stability level of this processor
 	stability = component.StabilityLevelBeta
 )
@@ -22,7 +20,7 @@ const (
 // NewFactory creates a new processor factory
 func NewFactory() processor.Factory {
 	return processor.NewFactory(
-		TypeStr,
+		componentType,
 		createDefaultConfig,
 		processor.WithMetrics(createMetricsProcessor, stability),
 	)
@@ -48,7 +46,7 @@ func createDefaultConfig() component.Config {
 // createMetricsProcessor creates a metrics processor
 func createMetricsProcessor(
 	ctx context.Context,
-	set processor.CreateSettings,
+	set processor.Settings,
 	cfg component.Config,
 	nextConsumer consumer.Metrics,
 ) (processor.Metrics, error) {
@@ -70,14 +68,5 @@ func createMetricsProcessor(
 		databaseIndex: make(map[string]*databaseInfo),
 	}
 
-	return processorhelper.NewMetricsProcessor(
-		ctx,
-		set,
-		cfg,
-		nextConsumer,
-		correlator.ConsumeMetrics,
-		processorhelper.WithCapabilities(correlator.Capabilities()),
-		processorhelper.WithStart(correlator.Start),
-		processorhelper.WithShutdown(correlator.Shutdown),
-	)
+	return correlator, nil
 }

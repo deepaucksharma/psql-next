@@ -1,0 +1,348 @@
+# E2E Test Collector Configuration
+# Comprehensive configuration for testing all features
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  # Standard PostgreSQL receiver
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases: 
+      - ${env:POSTGRES_DB}
+    tls:
+      insecure: true
+    collection_interval: 10s
+    
+  # Auto-explain receiver for plan collection
+  autoexplain:
+    log_path: ${env:POSTGRES_LOG_PATH}
+    log_format: json
+    
+    database:
+      endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+      username: ${env:POSTGRES_USER}
+      password: ${env:POSTGRES_PASSWORD}
+      database: ${env:POSTGRES_DB}
+      ssl_mode: disable
+      max_connections: 10
+    
+    plan_collection:
+      enabled: true
+      min_duration: 10ms        # Low threshold for testing
+      max_plans_per_query: 10
+      retention_duration: 1h
+      
+      regression_detection:
+        enabled: true
+        performance_degradation_threshold: 0.2
+        cost_increase_threshold: 0.3
+        min_executions: 5       # Lower for testing
+        statistical_confidence: 0.95
+        
+        node_analyzers:
+          - type: "Seq Scan"
+            cost_weight: 1.5
+            alert_on_table_size: 1000
+          
+          - type: "Nested Loop"
+            cost_weight: 2.0
+            alert_on_rows: 1000
+    
+    plan_anonymization:
+      enabled: true
+      anonymize_filters: true
+      anonymize_join_conditions: true
+      remove_cost_estimates: false
+      hash_literals: true
+      
+      sensitive_node_types:
+        - Filter
+        - Index Cond
+        - Recheck Cond
+        - Hash Cond
+      
+      sensitive_patterns:
+        - email
+        - ssn
+        - credit_card
+        - phone
+        - ip_address
+        - api_key
+  
+  # ASH receiver
+  ash:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    database: ${env:POSTGRES_DB}
+    
+    collection_interval: 1s
+    retention_duration: 30m
+    
+    sampling:
+      enabled: true
+      sample_rate: 1.0          # 100% for testing
+      active_session_rate: 1.0
+      blocked_session_rate: 1.0
+      long_running_threshold: 2s
+      adaptive_sampling: true
+    
+    storage:
+      buffer_size: 1800
+      aggregation_windows: [1m, 5m, 15m]
+      compression_enabled: true
+    
+    analysis:
+      wait_event_analysis: true
+      blocking_analysis: true
+      resource_analysis: true
+      anomaly_detection: true
+      top_query_analysis: true
+      trend_analysis: true
+    
+    feature_detection:
+      enabled: true
+      check_interval: 30s
+      required_extensions:
+        - pg_stat_statements
+        - pg_wait_sampling
+
+processors:
+  # Memory limiter
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+    
+  # Resource enrichment
+  resource:
+    attributes:
+      - key: service.name
+        value: postgresql-test
+        action: upsert
+      - key: deployment.environment
+        value: e2e-test
+        action: upsert
+      - key: db.system
+        value: postgresql
+        action: upsert
+      - key: test.run_id
+        value: ${env:TEST_RUN_ID:-default}
+        action: upsert
+  
+  # Circuit breaker
+  circuitbreaker:
+    failure_threshold: 5
+    timeout: 30s
+    cooldown_period: 1m
+    
+    error_patterns:
+      - pattern: "auto_explain.*not loaded"
+        action: disable_plan_collection
+        backoff: 5m
+        
+      - pattern: "permission denied.*pg_stat_statements"
+        action: disable_query
+        backoff: 10m
+        
+      - pattern: "connection refused"
+        action: circuit_open
+        backoff: 30s
+  
+  # Wait analysis
+  waitanalysis:
+    enabled: true
+    
+    patterns:
+      - name: lock_waits
+        event_types: ["Lock"]
+        category: "Concurrency"
+        severity: "warning"
+        
+      - name: io_waits
+        event_types: ["IO"]
+        events: ["DataFileRead", "DataFileWrite", "WALWrite"]
+        category: "Storage"
+        severity: "info"
+        
+      - name: cpu_waits
+        event_types: ["CPU"]
+        category: "Compute"
+        severity: "info"
+        
+      - name: network_waits
+        event_types: ["Client", "IPC"]
+        category: "Network"
+        severity: "info"
+    
+    alert_rules:
+      - name: excessive_lock_waits
+        condition: "wait_time > 5s AND event_type = 'Lock'"
+        threshold: 10
+        window: 1m
+        action: alert
+        
+      - name: io_saturation
+        condition: "event IN ('DataFileRead', 'DataFileWrite') AND sessions > 20"
+        threshold: 50
+        window: 2m
+        action: alert
+  
+  # Adaptive sampling
+  adaptivesampler:
+    enabled: true
+    in_memory_only: true
+    default_sampling_rate: 0.5
+    max_cardinality: 1000
+    
+    rules:
+      - name: always_regressions
+        conditions:
+          - attribute: event_type
+            value: plan_regression
+        sample_rate: 1.0
+        
+      - name: always_blocked
+        conditions:
+          - attribute: blocked
+            value: true
+        sample_rate: 1.0
+        
+      - name: slow_queries
+        conditions:
+          - attribute: exec_time_ms
+            operator: gt
+            value: 1000
+        sample_rate: 1.0
+        
+      - name: high_frequency
+        conditions:
+          - attribute: execution_count
+            operator: gt
+            value: 100
+        sample_rate: 0.1
+  
+  # Plan attribute extractor
+  planattributeextractor:
+    enabled: true
+    safe_mode: true
+    
+    plan_sources:
+      - auto_explain
+      - pg_stat_statements
+    
+    anonymization:
+      enabled: true
+      sensitive_patterns: [email, ssn, credit_card, phone, ip_address]
+    
+    plan_analysis:
+      enabled: true
+      detect_issues: true
+      generate_recommendations: true
+    
+    regression_tracking:
+      enabled: true
+      store_duration: 1h
+      alert_on_regression: true
+  
+  # Batch processor
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+    send_batch_max_size: 2000
+
+exporters:
+  # OTLP exporter (to mock endpoint)
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    tls:
+      insecure: true
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 120s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+    timeout: 30s
+    
+  # Prometheus for local metrics
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    namespace: dbintel
+    const_labels:
+      environment: e2e-test
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+    
+  # Debug exporter for testing
+  debug:
+    verbosity: detailed
+    sampling_initial: 100
+    sampling_thereafter: 1000
+
+service:
+  extensions: [health_check, zpages]
+  
+  pipelines:
+    # Infrastructure metrics
+    metrics/infrastructure:
+      receivers: [postgresql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/newrelic, prometheus]
+    
+    # Plan intelligence metrics
+    metrics/plans:
+      receivers: [autoexplain]
+      processors: 
+        - memory_limiter
+        - resource
+        - planattributeextractor
+        - circuitbreaker
+        - adaptivesampler
+        - batch
+      exporters: [otlp/newrelic, prometheus, debug]
+    
+    # ASH metrics
+    metrics/ash:
+      receivers: [ash]
+      processors: 
+        - memory_limiter
+        - resource
+        - waitanalysis
+        - adaptivesampler
+        - batch
+      exporters: [otlp/newrelic, prometheus]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      encoding: json
+      output_paths: ["/var/log/otel/collector.log", "stdout"]
+      error_output_paths: ["/var/log/otel/collector-error.log", "stderr"]
+      initial_fields:
+        service: otel-collector
+        version: e2e-test
+    
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      
+    traces:
+      processors:
+        - batch:
+            timeout: 5s
+            send_batch_size: 1024

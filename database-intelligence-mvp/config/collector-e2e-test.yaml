@@ -1,0 +1,175 @@
+# Database Intelligence Collector - E2E Test Configuration
+# This configuration is designed for end-to-end testing from database to NRDB
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  # PostgreSQL metrics
+  postgresql:
+    endpoint: ${POSTGRES_URL:postgres://readonly:password@localhost:5432/postgres?sslmode=disable}
+    collection_interval: 10s
+    tls:
+      insecure: true
+    databases:
+      - postgres
+    
+  # MySQL metrics  
+  mysql:
+    endpoint: ${MYSQL_URL:root:password@tcp(localhost:3306)/}
+    collection_interval: 10s
+    tls:
+      insecure: true
+    
+  # Query performance metrics using sqlquery receiver
+  sqlquery/postgresql_queries:
+    driver: postgres
+    datasource: ${POSTGRES_URL:postgres://readonly:password@localhost:5432/postgres?sslmode=disable}
+    collection_interval: 15s
+    queries:
+      - sql: |
+          SELECT 
+            queryid::text as query_id,
+            query as query_text,
+            calls as execution_count,
+            total_exec_time as total_time_ms,
+            mean_exec_time as avg_time_ms,
+            rows as total_rows,
+            shared_blks_hit + shared_blks_read as total_blocks
+          FROM pg_stat_statements
+          WHERE query NOT LIKE '%pg_%'
+          ORDER BY mean_exec_time DESC
+          LIMIT 100
+        metrics:
+          - metric_name: db.query.performance
+            value_column: avg_time_ms
+            attribute_columns: [query_id, query_text]
+            value_type: double
+            
+  sqlquery/mysql_queries:
+    driver: mysql
+    datasource: ${MYSQL_URL:root:password@tcp(localhost:3306)/}
+    collection_interval: 15s
+    queries:
+      - sql: |
+          SELECT
+            DIGEST as query_id,
+            DIGEST_TEXT as query_text,
+            COUNT_STAR as execution_count,
+            AVG_TIMER_WAIT/1000000 as avg_time_ms,
+            SUM_ROWS_SENT as total_rows
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE SCHEMA_NAME IS NOT NULL
+          ORDER BY AVG_TIMER_WAIT DESC
+          LIMIT 100
+        metrics:
+          - metric_name: db.query.performance
+            value_column: avg_time_ms
+            attribute_columns: [query_id, query_text]
+            value_type: double
+
+processors:
+  # Essential processors only
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 30
+    
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: environment
+        value: ${ENVIRONMENT:development}
+        action: upsert
+      - key: service.name
+        value: database-intelligence
+        action: upsert
+      - key: collector.version
+        value: "1.0.0"
+        action: upsert
+        
+  # Transform metrics to match expected schema
+  transform:
+    metric_statements:
+      - context: metric
+        statements:
+          # Ensure db.system attribute exists
+          - set(attributes["db.system"], "postgresql") where name == "postgresql.backends" or name == "postgresql.commits"
+          - set(attributes["db.system"], "mysql") where name == "mysql.buffer_pool.pages" or name == "mysql.threads"
+          
+          # Add instrumentation library
+          - set(attributes["instrumentation.provider"], "database-intelligence-collector")
+          
+  # Plan attribute extractor (working)
+  planattributeextractor:
+    safe_mode: true
+    timeout: 100ms
+    error_mode: ignore
+    query_anonymization:
+      enabled: true
+
+exporters:
+  # Primary exporter to New Relic
+  otlp:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    sending_queue:
+      enabled: true
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+      
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+    
+  # Prometheus for local metrics
+  prometheus:
+    endpoint: 0.0.0.0:9090
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  pipelines:
+    # PostgreSQL metrics pipeline
+    metrics/postgresql:
+      receivers: [postgresql]
+      processors: [memory_limiter, resource, transform, batch]
+      exporters: [otlp, prometheus]
+      
+    # MySQL metrics pipeline
+    metrics/mysql:
+      receivers: [mysql]
+      processors: [memory_limiter, resource, transform, batch]
+      exporters: [otlp, prometheus]
+      
+    # Query performance pipeline
+    metrics/queries:
+      receivers: [sqlquery/postgresql_queries, sqlquery/mysql_queries]
+      processors: [memory_limiter, resource, planattributeextractor, transform, batch]
+      exporters: [otlp, prometheus, debug]
+      
+  extensions: [health_check, zpages]
+  
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: database-intelligence-collector
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

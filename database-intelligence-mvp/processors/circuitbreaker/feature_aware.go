@@ -177,7 +177,7 @@ func (facb *FeatureAwareCircuitBreaker) initializeErrorPatterns() {
 	for i := range patterns {
 		regex, err := regexp.Compile(patterns[i].Pattern)
 		if err != nil {
-			facb.logger.Warn("Failed to compile error pattern",
+			facb.CircuitBreaker.logger.Warn("Failed to compile error pattern",
 				zap.String("pattern", patterns[i].Pattern),
 				zap.Error(err))
 			continue
@@ -206,7 +206,7 @@ func (facb *FeatureAwareCircuitBreaker) ProcessError(ctx context.Context, err er
 	errorStr := err.Error()
 	for _, pattern := range facb.errorPatterns {
 		if pattern.Regex != nil && pattern.Regex.MatchString(errorStr) {
-			facb.logger.Info("Error pattern matched",
+			facb.CircuitBreaker.logger.Info("Error pattern matched",
 				zap.String("pattern", pattern.Name),
 				zap.String("action", pattern.Action),
 				zap.String("feature", pattern.Feature),
@@ -241,13 +241,15 @@ func (facb *FeatureAwareCircuitBreaker) ProcessError(ctx context.Context, err er
 			case "circuit_break":
 				// Use feature-specific circuit breaker
 				breaker := facb.getFeatureBreaker(pattern.Feature)
-				return breaker.RecordError(err)
+				breaker.RecordError(err)
+				return nil
 			}
 		}
 	}
 	
 	// Default circuit breaker behavior
-	return facb.CircuitBreaker.RecordError(err)
+	facb.CircuitBreaker.RecordError(err)
+	return nil
 }
 
 // ProcessSuccess processes a successful operation
@@ -281,7 +283,7 @@ func (facb *FeatureAwareCircuitBreaker) disableQuery(queryName, feature string, 
 	
 	facb.disabledQueries[queryName] = disabled
 	
-	facb.logger.Warn("Query disabled due to missing feature",
+	facb.CircuitBreaker.logger.Warn("Query disabled due to missing feature",
 		zap.String("query", queryName),
 		zap.String("feature", feature),
 		zap.Time("reenable_at", disabled.ReenableAt),
@@ -325,7 +327,7 @@ func (facb *FeatureAwareCircuitBreaker) reenableQuery(queryName string) {
 	
 	if _, exists := facb.disabledQueries[queryName]; exists {
 		delete(facb.disabledQueries, queryName)
-		facb.logger.Info("Query re-enabled after successful execution",
+		facb.CircuitBreaker.logger.Info("Query re-enabled after successful execution",
 			zap.String("query", queryName))
 	}
 }
@@ -350,10 +352,10 @@ func (facb *FeatureAwareCircuitBreaker) getFeatureBreaker(feature string) *Circu
 	}
 	
 	// Create feature-specific config
-	featureConfig := *facb.config
+	featureConfig := *facb.CircuitBreaker.config
 	featureConfig.Timeout = 30 * time.Second // Shorter timeout for features
 	
-	breaker = NewCircuitBreaker(&featureConfig, facb.logger.With(zap.String("feature", feature)))
+	breaker = NewCircuitBreaker(&featureConfig, facb.CircuitBreaker.logger.With(zap.String("feature", feature)))
 	facb.featureBreakers[feature] = breaker
 	
 	return breaker
