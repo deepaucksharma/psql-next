@@ -38,6 +38,17 @@ type errorTracker struct {
 	alertFired    bool
 }
 
+// newNrErrorMonitor creates a new error monitor processor
+func newNrErrorMonitor(config *Config, logger *zap.Logger, nextConsumer consumer.Metrics) *nrErrorMonitor {
+	return &nrErrorMonitor{
+		config:       config,
+		logger:       logger,
+		nextConsumer: nextConsumer,
+		errorCounts:  make(map[string]*errorTracker),
+		lastReport:   time.Now(),
+	}
+}
+
 // Start begins the error monitoring processor
 func (p *nrErrorMonitor) Start(ctx context.Context, host component.Host) error {
 	p.logger.Info("Starting NrIntegrationError monitor processor")
@@ -290,13 +301,3 @@ func (p *nrErrorMonitor) generateSummaryMetrics() {
 	}
 }
 
-// ProcessorCreateSettings returns the settings for creating the processor
-func newNrErrorMonitor(config *Config, logger *zap.Logger, nextConsumer consumer.Metrics) *nrErrorMonitor {
-	return &nrErrorMonitor{
-		config:       config,
-		logger:       logger,
-		nextConsumer: nextConsumer,
-		errorCounts:  make(map[string]*errorTracker),
-		lastReport:   time.Now(),
-	}
-}

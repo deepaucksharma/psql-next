@@ -2,6 +2,8 @@ package costcontrol
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -388,10 +390,53 @@ func (p *costControlProcessor) estimateLogSize(ld plog.Logs) int64 {
 func (p *costControlProcessor) countMetricCardinality(metric pmetric.Metric) int {
 	uniqueCombos := make(map[string]struct{})
 	
-	// Implementation simplified for brevity
-	// Would track unique attribute combinations
+	// Count unique attribute combinations across all data points
+	switch metric.Type() {
+	case pmetric.MetricTypeGauge:
+		dps := metric.Gauge().DataPoints()
+		for i := 0; i < dps.Len(); i++ {
+			key := getAttributeKey(dps.At(i).Attributes())
+			uniqueCombos[key] = struct{}{}
+		}
+	case pmetric.MetricTypeSum:
+		dps := metric.Sum().DataPoints()
+		for i := 0; i < dps.Len(); i++ {
+			key := getAttributeKey(dps.At(i).Attributes())
+			uniqueCombos[key] = struct{}{}
+		}
+	case pmetric.MetricTypeHistogram:
+		dps := metric.Histogram().DataPoints()
+		for i := 0; i < dps.Len(); i++ {
+			key := getAttributeKey(dps.At(i).Attributes())
+			uniqueCombos[key] = struct{}{}
+		}
+	case pmetric.MetricTypeSummary:
+		dps := metric.Summary().DataPoints()
+		for i := 0; i < dps.Len(); i++ {
+			key := getAttributeKey(dps.At(i).Attributes())
+			uniqueCombos[key] = struct{}{}
+		}
+	case pmetric.MetricTypeExponentialHistogram:
+		dps := metric.ExponentialHistogram().DataPoints()
+		for i := 0; i < dps.Len(); i++ {
+			key := getAttributeKey(dps.At(i).Attributes())
+			uniqueCombos[key] = struct{}{}
+		}
+	}
 	
 	return len(uniqueCombos)
+}
+
+// getAttributeKey creates a unique key from attribute map
+func getAttributeKey(attrs pcommon.Map) string {
+	var keys []string
+	attrs.Range(func(k string, v pcommon.Value) bool {
+		keys = append(keys, k+"="+v.AsString())
+		return true
+	})
+	// Sort for consistency
+	sort.Strings(keys)
+	return strings.Join(keys, "|")
 }
 
 func (p *costControlProcessor) truncateLargeLogs(ld plog.Logs) {

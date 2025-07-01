@@ -12,19 +12,19 @@ import (
 )
 
 func TestNewNRErrorMonitor(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
+	consumer := &consumertest.MetricsSink{}
 	
-	processor := newNRErrorMonitor(logger, cfg, consumer)
+	processor := newNrErrorMonitor(cfg, logger, consumer)
 	require.NotNil(t, processor)
 }
 
 func TestNRErrorMonitor_ValidMetrics(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
-	processor := newNRErrorMonitor(logger, cfg, consumer)
+	consumer := &consumertest.MetricsSink{}
+	processor := newNrErrorMonitor(cfg, logger, consumer)
 	
 	err := processor.Start(context.Background(), nil)
 	require.NoError(t, err)
@@ -57,12 +57,12 @@ func TestNRErrorMonitor_ValidMetrics(t *testing.T) {
 }
 
 func TestNRErrorMonitor_MissingSemanticConventions(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	cfg.AlertThreshold = 1 // Alert on first error
 	
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
-	processor := newNRErrorMonitor(logger, cfg, consumer)
+	consumer := &consumertest.MetricsSink{}
+	processor := newNrErrorMonitor(cfg, logger, consumer)
 	
 	err := processor.Start(context.Background(), nil)
 	require.NoError(t, err)
@@ -89,16 +89,20 @@ func TestNRErrorMonitor_MissingSemanticConventions(t *testing.T) {
 	assert.Equal(t, 1, len(consumer.AllMetrics()))
 	
 	// Error count should have increased
-	assert.Greater(t, processor.errorCount, uint64(0))
+	// Check that errors were tracked
+	processor.mutex.RLock()
+	errorCount := len(processor.errorCounts)
+	processor.mutex.RUnlock()
+	assert.Greater(t, errorCount, 0)
 }
 
 func TestNRErrorMonitor_LongAttributeNames(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	cfg.MaxAttributeLength = 50
 	
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
-	processor := newNRErrorMonitor(logger, cfg, consumer)
+	consumer := &consumertest.MetricsSink{}
+	processor := newNrErrorMonitor(cfg, logger, consumer)
 	
 	err := processor.Start(context.Background(), nil)
 	require.NoError(t, err)
@@ -123,17 +127,21 @@ func TestNRErrorMonitor_LongAttributeNames(t *testing.T) {
 	require.NoError(t, err)
 	
 	// Should have detected the issue
-	assert.Greater(t, processor.errorCount, uint64(0))
+	// Check that errors were tracked
+	processor.mutex.RLock()
+	errorCount := len(processor.errorCounts)
+	processor.mutex.RUnlock()
+	assert.Greater(t, errorCount, 0)
 }
 
 func TestNRErrorMonitor_HighCardinality(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	cfg.CardinalityWarningThreshold = 10
-	cfg.CardinalityErrorThreshold = 20
+	cfg.AlertThreshold = 20
 	
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
-	processor := newNRErrorMonitor(logger, cfg, consumer)
+	consumer := &consumertest.MetricsSink{}
+	processor := newNrErrorMonitor(cfg, logger, consumer)
 	
 	err := processor.Start(context.Background(), nil)
 	require.NoError(t, err)
@@ -156,16 +164,20 @@ func TestNRErrorMonitor_HighCardinality(t *testing.T) {
 	}
 	
 	// Should have detected high cardinality
-	assert.Greater(t, processor.errorCount, uint64(0))
+	// Check that errors were tracked
+	processor.mutex.RLock()
+	errorCount := len(processor.errorCounts)
+	processor.mutex.RUnlock()
+	assert.Greater(t, errorCount, 0)
 }
 
 func TestNRErrorMonitor_MetricNameValidation(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	cfg.MaxMetricNameLength = 100
 	
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
-	processor := newNRErrorMonitor(logger, cfg, consumer)
+	consumer := &consumertest.MetricsSink{}
+	processor := newNrErrorMonitor(cfg, logger, consumer)
 	
 	err := processor.Start(context.Background(), nil)
 	require.NoError(t, err)
@@ -193,5 +205,9 @@ func TestNRErrorMonitor_MetricNameValidation(t *testing.T) {
 	require.NoError(t, err)
 	
 	// Should have detected the issues
-	assert.Greater(t, processor.errorCount, uint64(0))
+	// Check that errors were tracked
+	processor.mutex.RLock()
+	errorCount := len(processor.errorCounts)
+	processor.mutex.RUnlock()
+	assert.Greater(t, errorCount, 0)
 }
