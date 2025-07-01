@@ -107,6 +107,7 @@ func TestAdaptiveSampler_Deduplication(t *testing.T) {
 	sl := rl.ScopeLogs().AppendEmpty()
 	lr := sl.LogRecords().AppendEmpty()
 	lr.Attributes().PutStr("query", "SELECT * FROM users WHERE id = 1")
+	lr.Attributes().PutStr("db.query.plan.hash", "test-hash-12345") // Add hash for deduplication
 	lr.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
 	
 	// Process same log multiple times
@@ -116,6 +117,7 @@ func TestAdaptiveSampler_Deduplication(t *testing.T) {
 	}
 	
 	// Should only have one log due to deduplication
+	t.Logf("Number of logs: %d", len(consumer.AllLogs()))
 	assert.Equal(t, 1, len(consumer.AllLogs()))
 	
 	err = processor.Shutdown(ctx)

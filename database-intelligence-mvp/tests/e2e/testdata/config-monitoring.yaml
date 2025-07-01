@@ -1,0 +1,137 @@
+# Monitoring Test Configuration
+# For testing monitoring and alerting functionality
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  # PostgreSQL receiver
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases: 
+      - ${env:POSTGRES_DB}
+    tls:
+      insecure: true
+    collection_interval: 10s
+    
+  # Auto-explain receiver
+  autoexplain:
+    log_path: ${env:POSTGRES_LOG_PATH}
+    log_format: json
+    
+    database:
+      endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+      username: ${env:POSTGRES_USER}
+      password: ${env:POSTGRES_PASSWORD}
+      database: ${env:POSTGRES_DB}
+      ssl_mode: disable
+    
+    plan_collection:
+      enabled: true
+      min_duration: 10ms
+  
+  # ASH receiver
+  ash:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    database: ${env:POSTGRES_DB}
+    
+    collection_interval: 1s
+    
+    sampling:
+      enabled: true
+      sample_rate: 1.0
+
+processors:
+  # Memory limiter with monitoring
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+    
+  # Resource processor
+  resource:
+    attributes:
+      - key: service.name
+        value: postgresql-monitoring-test
+        action: upsert
+      - key: deployment.environment
+        value: e2e-test
+        action: upsert
+  
+  # Circuit breaker with monitoring
+  circuitbreaker:
+    failure_threshold: 5
+    timeout: 30s
+    cooldown_period: 1m
+    
+    monitoring:
+      enabled: true
+      metrics_prefix: otelcol.processor.circuitbreaker
+  
+  # Batch processor
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+exporters:
+  # Prometheus exporter for monitoring
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    namespace: dbintel
+    const_labels:
+      environment: e2e-test
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+    
+    # Metric renaming for consistency
+    metric_expiration: 5m
+    
+  # OTLP exporter to mock endpoint
+  otlp/mock:
+    endpoint: ${env:OTLP_MOCK_ENDPOINT:-localhost:4317}
+    tls:
+      insecure: true
+    compression: gzip
+    
+  # Debug exporter
+  debug:
+    verbosity: normal
+    sampling_initial: 5
+    sampling_thereafter: 20
+
+service:
+  extensions: [health_check, zpages]
+  
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers: [postgresql, autoexplain, ash]
+      processors: [memory_limiter, resource, circuitbreaker, batch]
+      exporters: [prometheus, otlp/mock, debug]
+      
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+      output_paths: ["stdout", "/var/log/otel/collector.log"]
+      
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      
+      # Additional monitoring metrics
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8889

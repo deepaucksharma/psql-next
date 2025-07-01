@@ -428,7 +428,13 @@ func (p *adaptiveSampler) randomSample(rate float64) bool {
 func (p *adaptiveSampler) periodicCleanup() {
 	defer p.wg.Done()
 
-	ticker := time.NewTicker(p.config.Deduplication.CleanupInterval)
+	// Default to 60 seconds if cleanup interval is not set
+	cleanupInterval := p.config.Deduplication.CleanupInterval
+	if cleanupInterval <= 0 {
+		cleanupInterval = 60 * time.Second
+	}
+
+	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
 
 	for {

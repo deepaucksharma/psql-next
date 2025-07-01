@@ -1,33 +1,72 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
     branches: [ main, develop ]
-    tags: [ 'v*' ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
   workflow_dispatch:
 
 env:
   GO_VERSION: '1.21'
-  DOCKER_REGISTRY: ghcr.io
-  HELM_VERSION: '3.13.0'
-  OCB_VERSION: '0.88.0'
-
-permissions:
-  contents: read
-  packages: write
-  security-events: write
+  DOCKER_BUILDKIT: 1
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  validate:
-    name: Validate Code
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          fetch-depth: 0
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+
+      - name: Run golangci-lint
+        run: golangci-lint run ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          fmt_files=$(gofmt -l .)
+          if [ -n "$fmt_files" ]; then
+            echo "The following files need formatting:"
+            echo "$fmt_files"
+            exit 1
+          fi
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -38,96 +77,36 @@ jobs:
       - name: Install dependencies
         run: |
           go mod download
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install gotest.tools/gotestsum@latest
 
-      - name: Run validation
+      - name: Run unit tests
         run: |
-          make validate-modules
-          make lint
-          make vet
-          make fmt-check
+          mkdir -p test-results
+          gotestsum --junitfile test-results/unit-tests.xml -- -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Security scan
-        run: |
-          gosec -fmt sarif -out gosec-results.sarif ./...
-          
-      - name: Upload security results
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload test results
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: gosec-results.sarif
+          name: test-results
+          path: test-results/
 
-  test:
-    name: Run Tests
-    runs-on: ubuntu-latest
-    needs: validate
-    strategy:
-      matrix:
-        test-suite: [unit, integration]
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: testdb
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: mysql
-          MYSQL_DATABASE: testdb
-        options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-        ports:
-          - 3306:3306
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Run ${{ matrix.test-suite }} tests
-        env:
-          POSTGRES_HOST: localhost
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          MYSQL_HOST: localhost
-          MYSQL_USER: root
-          MYSQL_PASSWORD: mysql
-        run: |
-          if [ "${{ matrix.test-suite }}" = "unit" ]; then
-            make test
-          else
-            make test-integration
-          fi
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        if: matrix.test-suite == 'unit'
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
         with:
           file: ./coverage.out
           flags: unittests
           name: codecov-umbrella
 
   build:
-    name: Build Collector
+    name: Build
     runs-on: ubuntu-latest
-    needs: test
+    needs: [lint, test]
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -138,78 +117,49 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Install OCB
+      - name: Extract platform info
+        id: platform
         run: |
-          curl -L -o ocb https://github.com/open-telemetry/opentelemetry-collector/releases/download/cmd%2Fbuilder%2Fv${OCB_VERSION}/ocb_${OCB_VERSION}_linux_amd64
-          chmod +x ocb
-          sudo mv ocb /usr/local/bin/
+          platform="${{ matrix.platform }}"
+          echo "os=${platform%/*}" >> $GITHUB_OUTPUT
+          echo "arch=${platform#*/}" >> $GITHUB_OUTPUT
 
-      - name: Build collector
-        run: make build
-
-      - name: Test binary
-        run: |
-          ./dist/otelcol --version
-          ./dist/otelcol validate --config=configs/collector.yaml
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: collector-binary
-          path: dist/otelcol
-          retention-days: 7
-
-  e2e:
-    name: End-to-End Tests
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download binary
-        uses: actions/download-artifact@v3
-        with:
-          name: collector-binary
-          path: dist/
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Run E2E tests
+      - name: Build binary
         env:
-          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
-          NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+          GOOS: ${{ steps.platform.outputs.os }}
+          GOARCH: ${{ steps.platform.outputs.arch }}
         run: |
-          chmod +x dist/otelcol
-          task test:e2e:ci
+          go build -ldflags "-X main.Version=${GITHUB_SHA} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o otelcol-custom-${{ steps.platform.outputs.os }}-${{ steps.platform.outputs.arch }} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ steps.platform.outputs.os }}-${{ steps.platform.outputs.arch }}
+          path: otelcol-custom-*
 
   docker:
-    name: Build Docker Image
+    name: Docker Build
     runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name != 'pull_request'
+    needs: [lint, test]
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download binary
-        uses: actions/download-artifact@v3
-        with:
-          name: collector-binary
-          path: dist/
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Container Registry
+      - name: Log in to the Container registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.DOCKER_REGISTRY }}
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -217,114 +167,189 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
+          file: ./deployments/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ github.sha }}
+            BUILD_TIME=${{ steps.meta.outputs.created }}
 
-  helm:
-    name: Package Helm Chart
+  integration-test:
+    name: Integration Tests
     runs-on: ubuntu-latest
-    needs: docker
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [docker]
+    if: github.event_name != 'pull_request'
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Helm
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Pull Docker image
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA:0:7}
+
+      - name: Start collector
+        run: |
+          docker run -d \
+            --name collector \
+            --network host \
+            -e POSTGRES_HOST=localhost \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_USER=test_user \
+            -e POSTGRES_PASSWORD=test_password \
+            -e POSTGRES_DB=test_db \
+            -e NEW_RELIC_LICENSE_KEY=dummy \
+            -e OTLP_ENDPOINT=localhost:4317 \
+            -e LOG_LEVEL=debug \
+            -v $PWD/configs/collector-config.yaml:/etc/otel/config.yaml \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA:0:7} \
+            --config=/etc/otel/config.yaml
+
+      - name: Wait for collector to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -f http://localhost:13133/health; then
+              echo "Collector is ready"
+              break
+            fi
+            echo "Waiting for collector..."
+            sleep 2
+          done
+
+      - name: Run integration tests
+        run: |
+          cd tests/e2e
+          go test -v -tags=integration -timeout=10m .
+
+      - name: Collect logs
+        if: always()
+        run: |
+          docker logs collector > collector.log
+          
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-logs
+          path: collector.log
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [docker]
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA:0:7}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  helm-test:
+    name: Helm Chart Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
         uses: azure/setup-helm@v3
         with:
-          version: ${{ env.HELM_VERSION }}
+          version: v3.13.0
 
-      - name: Package Helm chart
+      - name: Lint Helm chart
         run: |
-          cd deployments/helm
-          helm package db-intelligence
-          helm repo index . --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          helm lint deployments/helm/database-intelligence
 
-      - name: Upload Helm package
-        uses: actions/upload-artifact@v3
-        with:
-          name: helm-chart
-          path: deployments/helm/*.tgz
-          retention-days: 30
+      - name: Template Helm chart
+        run: |
+          helm template test deployments/helm/database-intelligence \
+            --set config.newrelic.licenseKey=dummy > rendered.yaml
 
-  release:
-    name: Create Release
+      - name: Validate rendered manifests
+        run: |
+          kubectl create --dry-run=client -f rendered.yaml
+
+  performance-test:
+    name: Performance Tests
     runs-on: ubuntu-latest
-    needs: [docker, helm]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          draft: false
-          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
-          files: |
-            collector-binary/otelcol
-            helm-chart/*.tgz
-          generate_release_notes: true
-          body: |
-            ## What's Changed
-            
-            ### Docker Image
-            ```bash
-            docker pull ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}:${{ github.ref_name }}
-            ```
-            
-            ### Helm Chart
-            ```bash
-            helm repo add db-intelligence https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
-            helm repo update
-            helm install db-intelligence db-intelligence/db-intelligence --version ${{ github.ref_name }}
-            ```
-            
-            ### Binary
-            Download the `otelcol` binary from the release assets.
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-  deploy-docs:
-    name: Deploy Documentation
-    runs-on: ubuntu-latest
-    needs: release
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Build documentation
+      - name: Run benchmarks
         run: |
-          # If using a documentation generator like mkdocs or docusaurus
-          # npm install
-          # npm run build-docs
-          echo "Documentation deployment placeholder"
+          cd tests/performance
+          go test -bench=. -benchmem -benchtime=30s -run=^$ . | tee benchmark-results.txt
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs
+          name: benchmark-results
+          path: tests/performance/benchmark-results.txt
+
+      - name: Comment PR with benchmark results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = fs.readFileSync('tests/performance/benchmark-results.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## Benchmark Results\n```\n' + results + '\n```'
+            });

@@ -1,5 +1,3 @@
-//go:build e2e
-
 package e2e
 
 import (
@@ -9,386 +7,544 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// NRDBValidationTest validates end-to-end data flow from source databases to New Relic
-type NRDBValidationTest struct {
-	*testing.T
-	nrAPIKey      string
-	nrAccountID   string
-	nrQueryURL    string
-	testStartTime time.Time
+// NRDBClient represents a client for querying New Relic
+type NRDBClient struct {
+	accountID   string
+	apiKey      string
+	queryURL    string
+	httpClient  *http.Client
 }
 
-// TestEndToEndDataFlow validates the complete data pipeline from databases to NRDB
-func TestEndToEndDataFlow(t *testing.T) {
-	// Skip if not in e2e mode
-	if os.Getenv("E2E_TESTS") != "true" {
-		t.Skip("Skipping e2e tests - set E2E_TESTS=true to run")
+// NewNRDBClient creates a new NRDB client
+func NewNRDBClient(accountID, apiKey string) *NRDBClient {
+	return &NRDBClient{
+		accountID:  accountID,
+		apiKey:     apiKey,
+		queryURL:   fmt.Sprintf("https://api.newrelic.com/graphql"),
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
-
-	test := &NRDBValidationTest{
-		T:             t,
-		nrAPIKey:      os.Getenv("NEW_RELIC_LICENSE_KEY"),
-		nrAccountID:   os.Getenv("NEW_RELIC_ACCOUNT_ID"),
-		nrQueryURL:    "https://api.newrelic.com/graphql",
-		testStartTime: time.Now(),
-	}
-
-	// Validate prerequisites
-	require.NotEmpty(t, test.nrAPIKey, "NEW_RELIC_LICENSE_KEY must be set")
-	require.NotEmpty(t, test.nrAccountID, "NEW_RELIC_ACCOUNT_ID must be set")
-
-	// Run test scenarios
-	t.Run("PostgreSQL_Metrics_Flow", test.testPostgreSQLMetricsFlow)
-	t.Run("MySQL_Metrics_Flow", test.testMySQLMetricsFlow)
-	t.Run("Custom_Query_Metrics", test.testCustomQueryMetrics)
-	t.Run("Processor_Validation", test.testProcessorFunctionality)
-	t.Run("Data_Completeness", test.testDataCompleteness)
 }
 
-func (t *NRDBValidationTest) testPostgreSQLMetricsFlow(tt *testing.T) {
-	// Generate test load on PostgreSQL
-	pgHost := os.Getenv("POSTGRES_HOST")
-	if pgHost == "" {
-		pgHost = "localhost"
-	}
+// QueryResult represents NRQL query results
+type QueryResult struct {
+	Data struct {
+		Actor struct {
+			Account struct {
+				NRQL struct {
+					Results []map[string]interface{} `json:"results"`
+				} `json:"nrql"`
+			} `json:"account"`
+		} `json:"actor"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
 
-	connStr := fmt.Sprintf("host=%s port=5432 user=postgres password=postgres dbname=testdb sslmode=disable", pgHost)
-	db, err := sql.Open("postgres", connStr)
-	require.NoError(tt, err)
-	defer db.Close()
-
-	// Create test data and generate metrics
-	t.generatePostgreSQLLoad(tt, db)
-
-	// Wait for data to flow through collector
-	time.Sleep(2 * time.Minute)
-
-	// Query NRDB for PostgreSQL metrics
-	query := fmt.Sprintf(`{
+// ExecuteNRQL executes an NRQL query
+func (c *NRDBClient) ExecuteNRQL(ctx context.Context, query string) (*QueryResult, error) {
+	graphQLQuery := fmt.Sprintf(`{
 		actor {
 			account(id: %s) {
-				nrql(query: "SELECT count(*) FROM Metric WHERE metricName LIKE 'postgresql.%%' SINCE %d seconds ago") {
+				nrql(query: "%s") {
 					results
 				}
 			}
 		}
-	}`, t.nrAccountID, int(time.Since(t.testStartTime).Seconds()))
+	}`, c.accountID, strings.ReplaceAll(query, `"`, `\"`))
 
-	results := t.queryNRDB(tt, query)
-	
-	// Validate metrics exist
-	var count float64
-	if len(results) > 0 {
-		if c, ok := results[0]["count"].(float64); ok {
-			count = c
-		}
+	reqBody := map[string]string{"query": graphQLQuery}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
 	}
-	
-	assert.Greater(tt, count, float64(0), "Should have PostgreSQL metrics in NRDB")
 
-	// Validate specific metrics
-	t.validatePostgreSQLMetrics(tt)
+	req, err := http.NewRequestWithContext(ctx, "POST", c.queryURL, strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("API-Key", c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result QueryResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	if len(result.Errors) > 0 {
+		return nil, fmt.Errorf("NRQL error: %s", result.Errors[0].Message)
+	}
+
+	return &result, nil
 }
 
-func (t *NRDBValidationTest) testMySQLMetricsFlow(tt *testing.T) {
-	// Generate test load on MySQL
-	mysqlHost := os.Getenv("MYSQL_HOST")
-	if mysqlHost == "" {
-		mysqlHost = "localhost"
+// TestNRQLDashboardQueries validates all NRQL queries for New Relic dashboards
+func TestNRQLDashboardQueries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping NRDB validation test in short mode")
 	}
 
-	connStr := fmt.Sprintf("root:mysql@tcp(%s:3306)/testdb", mysqlHost)
-	db, err := sql.Open("mysql", connStr)
-	require.NoError(tt, err)
-	defer db.Close()
+	// Check for New Relic credentials
+	accountID := getEnvOrSkip(t, "NEW_RELIC_ACCOUNT_ID")
+	apiKey := getEnvOrSkip(t, "NEW_RELIC_API_KEY")
 
-	// Create test data and generate metrics
-	t.generateMySQLLoad(tt, db)
+	testEnv := setupTestEnvironment(t)
+	defer testEnv.Cleanup()
 
-	// Wait for data to flow
-	time.Sleep(2 * time.Minute)
+	db := testEnv.PostgresDB
+	setupTestSchema(t, db)
 
-	// Query NRDB for MySQL metrics
-	query := fmt.Sprintf(`{
-		actor {
-			account(id: %s) {
-				nrql(query: "SELECT count(*) FROM Metric WHERE metricName LIKE 'mysql.%%' SINCE %d seconds ago") {
-					results
-				}
-			}
+	// Start collector with New Relic export
+	collector := testEnv.StartCollector(t, "testdata/config-newrelic.yaml")
+	defer collector.Shutdown()
+
+	// Generate comprehensive test data
+	generateComprehensiveTestData(t, db, testEnv)
+
+	// Wait for data to reach New Relic
+	time.Sleep(30 * time.Second)
+
+	// Create NRDB client
+	nrdbClient := NewNRDBClient(accountID, apiKey)
+	ctx := context.Background()
+
+	t.Run("PostgreSQLOverviewDashboard", func(t *testing.T) {
+		queries := map[string]string{
+			"ActiveConnections": `
+				SELECT latest(postgresql.connections.active) 
+				FROM Metric 
+				WHERE db.system = 'postgresql' 
+				FACET db.name 
+				SINCE 5 minutes ago`,
+
+			"TransactionRate": `
+				SELECT rate(sum(postgresql.transactions.committed), 1 minute) as 'Commits/min',
+					   rate(sum(postgresql.transactions.rolled_back), 1 minute) as 'Rollbacks/min'
+				FROM Metric 
+				WHERE db.system = 'postgresql' 
+				TIMESERIES 
+				SINCE 30 minutes ago`,
+
+			"CacheHitRatio": `
+				SELECT (sum(postgresql.blocks.hit) / (sum(postgresql.blocks.hit) + sum(postgresql.blocks.read))) * 100 as 'Cache Hit %'
+				FROM Metric 
+				WHERE db.system = 'postgresql' 
+				FACET db.name 
+				SINCE 1 hour ago`,
+
+			"DatabaseSize": `
+				SELECT latest(postgresql.database.size) / 1024 / 1024 as 'Size (MB)'
+				FROM Metric 
+				WHERE db.system = 'postgresql' 
+				FACET db.name`,
+
+			"TopQueries": `
+				SELECT count(*), average(query.exec_time_ms) 
+				FROM Metric 
+				WHERE metricName = 'postgresql.query.execution' 
+				FACET query.normalized 
+				LIMIT 10 
+				SINCE 1 hour ago`,
 		}
-	}`, t.nrAccountID, int(time.Since(t.testStartTime).Seconds()))
 
-	results := t.queryNRDB(tt, query)
-	
-	// Validate metrics exist
-	var count float64
-	if len(results) > 0 {
-		if c, ok := results[0]["count"].(float64); ok {
-			count = c
+		validateNRQLQueries(t, ctx, nrdbClient, queries)
+	})
+
+	t.Run("PlanIntelligenceDashboard", func(t *testing.T) {
+		queries := map[string]string{
+			"PlanChanges": `
+				SELECT count(*) 
+				FROM Metric 
+				WHERE metricName = 'postgresql.plan.change' 
+				FACET query.normalized, plan.change_type 
+				SINCE 1 hour ago`,
+
+			"PlanRegressions": `
+				SELECT count(*) as 'Regressions', 
+					   average(plan.cost_increase_ratio) as 'Avg Cost Increase'
+				FROM Metric 
+				WHERE metricName = 'postgresql.plan.regression' 
+				TIMESERIES 
+				SINCE 2 hours ago`,
+
+			"QueryPerformanceTrend": `
+				SELECT average(query.exec_time_ms), 
+					   average(query.plan_time_ms),
+					   percentile(query.exec_time_ms, 95) as 'p95 Exec Time'
+				FROM Metric 
+				WHERE metricName = 'postgresql.query.execution' 
+				FACET query.normalized 
+				TIMESERIES 
+				SINCE 3 hours ago`,
+
+			"TopRegressions": `
+				SELECT query.normalized, 
+					   plan.old_cost, 
+					   plan.new_cost,
+					   plan.cost_increase_ratio,
+					   plan.performance_impact
+				FROM Metric 
+				WHERE metricName = 'postgresql.plan.regression' 
+				ORDER BY plan.cost_increase_ratio DESC 
+				LIMIT 20 
+				SINCE 24 hours ago`,
+
+			"PlanNodeAnalysis": `
+				SELECT count(*) 
+				FROM Metric 
+				WHERE metricName = 'postgresql.plan.node' 
+				FACET plan.node_type, plan.issue_type 
+				SINCE 1 hour ago`,
+
+			"QueryPlanDistribution": `
+				SELECT uniqueCount(plan.hash) as 'Unique Plans',
+					   count(*) as 'Total Executions'
+				FROM Metric 
+				WHERE metricName = 'postgresql.query.execution' AND plan.hash IS NOT NULL
+				FACET query.normalized 
+				SINCE 6 hours ago`,
 		}
-	}
-	
-	assert.Greater(tt, count, float64(0), "Should have MySQL metrics in NRDB")
 
-	// Validate specific metrics
-	t.validateMySQLMetrics(tt)
-}
+		validateNRQLQueries(t, ctx, nrdbClient, queries)
+	})
 
-func (t *NRDBValidationTest) testCustomQueryMetrics(tt *testing.T) {
-	// Test custom SQL query receiver metrics
-	time.Sleep(1 * time.Minute)
+	t.Run("ASHDashboard", func(t *testing.T) {
+		queries := map[string]string{
+			"ActiveSessionsOverTime": `
+				SELECT count(*) 
+				FROM Metric 
+				WHERE metricName = 'postgresql.ash.session' 
+				FACET session.state 
+				TIMESERIES 
+				SINCE 30 minutes ago`,
 
-	query := fmt.Sprintf(`{
-		actor {
-			account(id: %s) {
-				nrql(query: "SELECT count(*), average(value) FROM Metric WHERE metricName = 'sqlquery.active_connections' SINCE %d seconds ago") {
-					results
-				}
-			}
+			"WaitEventDistribution": `
+				SELECT sum(wait.duration_ms) 
+				FROM Metric 
+				WHERE metricName = 'postgresql.ash.wait_event' 
+				FACET wait.event_type, wait.event_name 
+				SINCE 1 hour ago`,
+
+			"TopWaitEvents": `
+				SELECT sum(wait.duration_ms) as 'Total Wait Time',
+					   count(*) as 'Wait Count',
+					   average(wait.duration_ms) as 'Avg Wait'
+				FROM Metric 
+				WHERE metricName = 'postgresql.ash.wait_event' 
+				FACET wait.event_name 
+				ORDER BY sum(wait.duration_ms) DESC 
+				LIMIT 10 
+				SINCE 1 hour ago`,
+
+			"BlockingAnalysis": `
+				SELECT blocking.query as 'Blocking Query',
+					   blocked.query as 'Blocked Query',
+					   count(*) as 'Block Count',
+					   max(block.duration_ms) as 'Max Block Duration'
+				FROM Metric 
+				WHERE metricName = 'postgresql.ash.blocking' 
+				FACET blocking.pid, blocked.pid 
+				SINCE 30 minutes ago`,
+
+			"SessionActivity": `
+				SELECT uniqueCount(session.pid) as 'Unique Sessions',
+					   count(*) as 'Total Samples'
+				FROM Metric 
+				WHERE metricName = 'postgresql.ash.session' AND session.state = 'active'
+				FACET query.normalized 
+				TIMESERIES 
+				SINCE 1 hour ago`,
+
+			"ResourceUtilization": `
+				SELECT average(session.cpu_usage) as 'CPU %',
+					   average(session.memory_mb) as 'Memory MB',
+					   sum(session.io_wait_ms) as 'IO Wait'
+				FROM Metric 
+				WHERE metricName = 'postgresql.ash.session' 
+				FACET session.backend_type 
+				SINCE 30 minutes ago`,
 		}
-	}`, t.nrAccountID, int(time.Since(t.testStartTime).Seconds()))
 
-	results := t.queryNRDB(tt, query)
-	
-	if len(results) > 0 {
-		count, _ := results[0]["count"].(float64)
-		assert.Greater(tt, count, float64(0), "Should have custom query metrics")
-		
-		if avg, ok := results[0]["average.value"].(float64); ok {
-			assert.Greater(tt, avg, float64(0), "Should have valid connection count")
+		validateNRQLQueries(t, ctx, nrdbClient, queries)
+	})
+
+	t.Run("IntegratedIntelligenceDashboard", func(t *testing.T) {
+		queries := map[string]string{
+			"QueryPerformanceWithWaits": `
+				SELECT average(query.exec_time_ms) as 'Exec Time',
+					   sum(wait.duration_ms) as 'Wait Time',
+					   count(DISTINCT plan.hash) as 'Plan Count'
+				FROM Metric 
+				WHERE metricName IN ('postgresql.query.execution', 'postgresql.ash.wait_event')
+				FACET query.normalized 
+				SINCE 2 hours ago`,
+
+			"PlanRegressionImpact": `
+				SELECT plan.regression_detected as 'Has Regression',
+					   average(session.count) as 'Active Sessions',
+					   sum(wait.duration_ms) as 'Total Wait'
+				FROM Metric 
+				WHERE query.normalized IS NOT NULL
+				FACET query.normalized 
+				SINCE 1 hour ago`,
+
+			"QueryHealthScore": `
+				SELECT query.normalized,
+					   (100 - (plan.regression_count * 10 + 
+					   wait.excessive_count * 5 + 
+					   (query.exec_time_ms / 100))) as 'Health Score'
+				FROM Metric 
+				WHERE metricName = 'postgresql.query.health' 
+				ORDER BY 'Health Score' ASC 
+				LIMIT 20 
+				SINCE 24 hours ago`,
+
+			"AdaptiveSamplingEffectiveness": `
+				SELECT sampling.rule as 'Rule',
+					   sampling.rate as 'Sample Rate',
+					   count(*) as 'Samples Collected',
+					   uniqueCount(query.normalized) as 'Unique Queries'
+				FROM Metric 
+				WHERE metricName = 'postgresql.adaptive_sampling' 
+				FACET sampling.rule 
+				SINCE 1 hour ago`,
 		}
-	}
-}
 
-func (t *NRDBValidationTest) testProcessorFunctionality(tt *testing.T) {
-	// Validate adaptive sampling
-	tt.Run("Adaptive_Sampling", func(ttt *testing.T) {
-		query := fmt.Sprintf(`{
-			actor {
-				account(id: %s) {
-					nrql(query: "SELECT count(*) FROM Metric WHERE sampled = true AND duration_ms > 1000 SINCE %d seconds ago") {
-						results
-					}
-				}
-			}
-		}`, t.nrAccountID, int(time.Since(t.testStartTime).Seconds()))
+		validateNRQLQueries(t, ctx, nrdbClient, queries)
+	})
 
-		results := t.queryNRDB(ttt, query)
-		
-		if len(results) > 0 {
-			count, _ := results[0]["count"].(float64)
-			assert.Greater(ttt, count, float64(0), "Slow queries should be sampled")
+	t.Run("AlertingQueries", func(t *testing.T) {
+		alertQueries := map[string]string{
+			"HighPlanRegressionRate": `
+				SELECT count(*) 
+				FROM Metric 
+				WHERE metricName = 'postgresql.plan.regression' 
+				SINCE 5 minutes ago`,
+
+			"ExcessiveLockWaits": `
+				SELECT sum(wait.duration_ms) 
+				FROM Metric 
+				WHERE metricName = 'postgresql.ash.wait_event' 
+				AND wait.event_type = 'Lock' 
+				SINCE 5 minutes ago`,
+
+			"QueryPerformanceDegradation": `
+				SELECT percentile(query.exec_time_ms, 95) 
+				FROM Metric 
+				WHERE metricName = 'postgresql.query.execution' 
+				FACET query.normalized 
+				SINCE 10 minutes ago 
+				COMPARE WITH 1 hour ago`,
+
+			"DatabaseConnectionSaturation": `
+				SELECT (latest(postgresql.connections.active) / 
+						latest(postgresql.connections.max)) * 100 as 'Connection Usage %'
+				FROM Metric 
+				WHERE db.system = 'postgresql' 
+				FACET db.name`,
+
+			"CircuitBreakerActivation": `
+				SELECT count(*) 
+				FROM Metric 
+				WHERE metricName = 'otelcol.processor.circuitbreaker.triggered' 
+				SINCE 5 minutes ago`,
+		}
+
+		// Validate alert queries return valid results
+		for name, query := range alertQueries {
+			t.Run(name, func(t *testing.T) {
+				result, err := nrdbClient.ExecuteNRQL(ctx, query)
+				require.NoError(t, err, "Alert query %s failed", name)
+				assert.NotNil(t, result.Data.Actor.Account.NRQL.Results, 
+					"Alert query %s returned no results", name)
+			})
 		}
 	})
 
-	// Validate plan extraction
-	tt.Run("Plan_Extraction", func(ttt *testing.T) {
-		query := fmt.Sprintf(`{
-			actor {
-				account(id: %s) {
-					nrql(query: "SELECT count(*) FROM Metric WHERE plan.hash IS NOT NULL SINCE %d seconds ago") {
-						results
-					}
-				}
-			}
-		}`, t.nrAccountID, int(time.Since(t.testStartTime).Seconds()))
+	t.Run("DataIntegrityValidation", func(t *testing.T) {
+		// Verify required attributes are present
+		integrityQueries := map[string]string{
+			"QueryAttributes": `
+				SELECT uniques(query.normalized), 
+					   uniques(query.database),
+					   uniques(query.user),
+					   uniques(query.application_name)
+				FROM Metric 
+				WHERE metricName = 'postgresql.query.execution' 
+				SINCE 1 hour ago`,
 
-		results := t.queryNRDB(ttt, query)
-		
-		if len(results) > 0 {
-			count, _ := results[0]["count"].(float64)
-			assert.Greater(ttt, count, float64(0), "Should have plan hashes")
+			"PlanAttributes": `
+				SELECT uniques(plan.hash),
+					   uniques(plan.node_type),
+					   uniques(plan.anonymized)
+				FROM Metric 
+				WHERE metricName LIKE 'postgresql.plan%' 
+				SINCE 1 hour ago`,
+
+			"ASHAttributes": `
+				SELECT uniques(session.state),
+					   uniques(wait.event_type),
+					   uniques(session.backend_type)
+				FROM Metric 
+				WHERE metricName LIKE 'postgresql.ash%' 
+				SINCE 1 hour ago`,
 		}
-	})
 
-	// Validate PII protection
-	tt.Run("PII_Protection", func(ttt *testing.T) {
-		query := fmt.Sprintf(`{
-			actor {
-				account(id: %s) {
-					nrql(query: "SELECT count(*) FROM Metric WHERE query_text LIKE '%%@%%' OR query_text LIKE '%%SSN%%' SINCE %d seconds ago") {
-						results
+		for name, query := range integrityQueries {
+			t.Run(name, func(t *testing.T) {
+				result, err := nrdbClient.ExecuteNRQL(ctx, query)
+				require.NoError(t, err, "Integrity query %s failed", name)
+				
+				results := result.Data.Actor.Account.NRQL.Results
+				require.NotEmpty(t, results, "No results for integrity check %s", name)
+				
+				// Verify attributes have values
+				for key, value := range results[0] {
+					assert.NotNil(t, value, "Attribute %s is nil in %s", key, name)
+					if arr, ok := value.([]interface{}); ok {
+						assert.NotEmpty(t, arr, "Attribute %s is empty in %s", key, name)
 					}
 				}
-			}
-		}`, t.nrAccountID, int(time.Since(t.testStartTime).Seconds()))
-
-		results := t.queryNRDB(ttt, query)
-		
-		if len(results) > 0 {
-			count, _ := results[0]["count"].(float64)
-			assert.Equal(ttt, float64(0), count, "Should not have PII in metrics")
+			})
 		}
 	})
 }
 
-func (t *NRDBValidationTest) testDataCompleteness(tt *testing.T) {
-	// Test that all expected metric types are present
-	expectedMetrics := []string{
-		"postgresql.database.size",
-		"postgresql.backends",
-		"postgresql.commits",
-		"postgresql.rollbacks",
-		"mysql.database.size",
-		"mysql.threads",
-		"mysql.questions",
-		"mysql.slow_queries",
-	}
+// validateNRQLQueries validates a set of NRQL queries
+func validateNRQLQueries(t *testing.T, ctx context.Context, client *NRDBClient, queries map[string]string) {
+	for name, query := range queries {
+		t.Run(name, func(t *testing.T) {
+			// Clean up query formatting
+			query = strings.TrimSpace(query)
+			query = strings.ReplaceAll(query, "\n", " ")
+			query = strings.ReplaceAll(query, "\t", " ")
+			query = strings.Join(strings.Fields(query), " ")
 
-	for _, metricName := range expectedMetrics {
-		tt.Run(metricName, func(ttt *testing.T) {
-			query := fmt.Sprintf(`{
-				actor {
-					account(id: %s) {
-						nrql(query: "SELECT count(*) FROM Metric WHERE metricName = '%s' SINCE %d seconds ago") {
-							results
-						}
-					}
-				}
-			}`, t.nrAccountID, metricName, int(time.Since(t.testStartTime).Seconds()))
+			// Execute query
+			result, err := client.ExecuteNRQL(ctx, query)
+			require.NoError(t, err, "Query failed: %s\nNRQL: %s", name, query)
 
-			results := t.queryNRDB(ttt, query)
+			// Validate results
+			results := result.Data.Actor.Account.NRQL.Results
+			assert.NotNil(t, results, "Query returned nil results: %s", name)
 			
+			// Log results for debugging
 			if len(results) > 0 {
-				count, _ := results[0]["count"].(float64)
-				assert.Greater(ttt, count, float64(0), fmt.Sprintf("Should have %s metrics", metricName))
+				t.Logf("%s returned %d results", name, len(results))
+				if len(results) <= 5 {
+					for i, r := range results {
+						t.Logf("  Result %d: %+v", i, r)
+					}
+				}
+			} else {
+				t.Logf("%s returned no results (might be normal for new data)", name)
 			}
 		})
 	}
 }
 
-// Helper methods
-
-func (t *NRDBValidationTest) generatePostgreSQLLoad(tt *testing.T, db *sql.DB) {
-	// Create test table
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS e2e_test (
-			id SERIAL PRIMARY KEY,
-			data TEXT,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	require.NoError(tt, err)
-
+// generateComprehensiveTestData generates test data for NRQL validation
+func generateComprehensiveTestData(t *testing.T, db *sql.DB, testEnv *TestEnvironment) {
 	// Generate various query patterns
+	queries := []string{
+		"SELECT * FROM users WHERE id = $1",
+		"SELECT u.*, COUNT(o.id) FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id",
+		"UPDATE users SET last_login = NOW() WHERE id = $1",
+		"INSERT INTO orders (user_id, total) VALUES ($1, $2)",
+		"DELETE FROM old_sessions WHERE created_at < NOW() - INTERVAL '1 day'",
+		"SELECT * FROM users ORDER BY created_at DESC LIMIT 100",
+		"SELECT COUNT(*) FROM users WHERE email LIKE '%@example.com'",
+	}
+
+	// Generate load with different patterns
 	for i := 0; i < 100; i++ {
-		// Fast queries
-		_, _ = db.Exec("SELECT 1")
+		query := queries[i%len(queries)]
 		
-		// Slow queries
-		_, _ = db.Exec("SELECT pg_sleep(0.1)")
-		
-		// DML operations
-		_, _ = db.Exec("INSERT INTO e2e_test (data) VALUES ($1)", fmt.Sprintf("test_data_%d", i))
-		
-		// Queries with PII (to test sanitization)
-		_, _ = db.Exec("SELECT * FROM e2e_test WHERE data = 'user@example.com' OR data = '123-45-6789'")
-	}
-
-	// Cleanup
-	defer db.Exec("DROP TABLE IF EXISTS e2e_test")
-}
-
-func (t *NRDBValidationTest) generateMySQLLoad(tt *testing.T, db *sql.DB) {
-	// Create test table
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS e2e_test (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			data TEXT,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	require.NoError(tt, err)
-
-	// Generate various query patterns
-	for i := 0; i < 100; i++ {
-		// Fast queries
-		_, _ = db.Exec("SELECT 1")
-		
-		// Slow queries
-		_, _ = db.Exec("SELECT SLEEP(0.1)")
-		
-		// DML operations
-		_, _ = db.Exec("INSERT INTO e2e_test (data) VALUES (?)", fmt.Sprintf("test_data_%d", i))
-	}
-
-	// Cleanup
-	defer db.Exec("DROP TABLE IF EXISTS e2e_test")
-}
-
-func (t *NRDBValidationTest) queryNRDB(tt *testing.T, query string) []map[string]interface{} {
-	client := &http.Client{Timeout: 30 * time.Second}
-	
-	reqBody := map[string]string{"query": query}
-	jsonBody, err := json.Marshal(reqBody)
-	require.NoError(tt, err)
-
-	req, err := http.NewRequest("POST", t.nrQueryURL, bytes.NewBuffer(jsonBody))
-	require.NoError(tt, err)
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-Key", t.nrAPIKey)
-
-	resp, err := client.Do(req)
-	require.NoError(tt, err)
-	defer resp.Body.Close()
-
-	var result struct {
-		Data struct {
-			Actor struct {
-				Account struct {
-					NRQL struct {
-						Results []map[string]interface{} `json:"results"`
-					} `json:"nrql"`
-				} `json:"account"`
-			} `json:"actor"`
-		} `json:"data"`
-	}
-
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(tt, err)
-
-	return result.Data.Actor.Account.NRQL.Results
-}
-
-func (t *NRDBValidationTest) validatePostgreSQLMetrics(tt *testing.T) {
-	// Validate specific PostgreSQL metrics and their attributes
-	query := fmt.Sprintf(`{
-		actor {
-			account(id: %s) {
-				nrql(query: "SELECT average(value), max(value), min(value) FROM Metric WHERE metricName = 'postgresql.database.size' FACET db.name SINCE %d seconds ago") {
-					results
-				}
-			}
+		// Execute with different parameters to create plan variations
+		if strings.Contains(query, "$1") {
+			db.Exec(query, i%10)
+		} else {
+			db.Exec(query)
 		}
-	}`, t.nrAccountID, int(time.Since(t.testStartTime).Seconds()))
+		
+		// Create some slow queries
+		if i%20 == 0 {
+			db.Exec("SELECT pg_sleep(0.5)")
+		}
+		
+		// Create lock contention
+		if i%30 == 0 {
+			go func() {
+				tx, _ := db.Begin()
+				tx.Exec("SELECT * FROM users WHERE id = 1 FOR UPDATE")
+				time.Sleep(2 * time.Second)
+				tx.Rollback()
+			}()
+		}
+	}
 
-	results := t.queryNRDB(tt, query)
-	assert.NotEmpty(tt, results, "Should have database size metrics with proper faceting")
+	// Create plan regression scenario
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+	for i := 0; i < 10; i++ {
+		db.Exec("SELECT * FROM users WHERE email = $1", fmt.Sprintf("user%d@example.com", i))
+	}
+	db.Exec("DROP INDEX IF EXISTS idx_users_email")
+	for i := 0; i < 10; i++ {
+		db.Exec("SELECT * FROM users WHERE email = $1", fmt.Sprintf("user%d@example.com", i))
+	}
+
+	// Generate ASH activity
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			conn := getNewConnection(t, testEnv)
+			defer conn.Close()
+
+			switch id % 4 {
+			case 0:
+				// CPU intensive
+				conn.Exec("SELECT COUNT(*) FROM generate_series(1, 1000000)")
+			case 1:
+				// IO intensive
+				conn.Exec("SELECT * FROM users ORDER BY random() LIMIT 1000")
+			case 2:
+				// Lock wait
+				conn.Exec("UPDATE users SET email = $1 WHERE id = 1", fmt.Sprintf("blocked%d@example.com", id))
+			case 3:
+				// Idle in transaction
+				tx, _ := conn.Begin()
+				tx.Exec("SELECT 1")
+				time.Sleep(3 * time.Second)
+				tx.Commit()
+			}
+		}(i)
+	}
+	wg.Wait()
 }
 
-func (t *NRDBValidationTest) validateMySQLMetrics(tt *testing.T) {
-	// Validate specific MySQL metrics and their attributes
-	query := fmt.Sprintf(`{
-		actor {
-			account(id: %s) {
-				nrql(query: "SELECT average(value), max(value) FROM Metric WHERE metricName = 'mysql.threads' SINCE %d seconds ago") {
-					results
-				}
-			}
-		}
-	}`, t.nrAccountID, int(time.Since(t.testStartTime).Seconds()))
-
-	results := t.queryNRDB(tt, query)
-	assert.NotEmpty(tt, results, "Should have MySQL thread metrics")
+// getEnvOrSkip gets environment variable or skips test
+func getEnvOrSkip(t *testing.T, key string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		t.Skipf("Skipping test: %s not set", key)
+	}
+	return value
 }

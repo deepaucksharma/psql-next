@@ -64,16 +64,24 @@ type CircuitBreaker struct {
 
 // NewCircuitBreaker creates a new circuit breaker instance
 func NewCircuitBreaker(config *Config, logger *zap.Logger) *CircuitBreaker {
+	// Handle config aliases
+	if config.MaxConcurrentRequests == 0 && config.MaxConcurrent > 0 {
+		config.MaxConcurrentRequests = config.MaxConcurrent
+	}
+	if config.BaseTimeout == 0 && config.Timeout > 0 {
+		config.BaseTimeout = config.Timeout
+	}
+
 	cb := &CircuitBreaker{
 		config:         config,
 		logger:         logger,
 		state:          Closed,
 		databaseStates: make(map[string]*databaseCircuitState),
-		currentTimeout: config.Timeout,
+		currentTimeout: config.BaseTimeout,
 	}
 	
-	if config.MaxConcurrent > 0 {
-		cb.semaphore = make(chan struct{}, config.MaxConcurrent)
+	if config.MaxConcurrentRequests > 0 {
+		cb.semaphore = make(chan struct{}, config.MaxConcurrentRequests)
 	}
 	
 	return cb

@@ -1,274 +1,237 @@
-# End-to-End Tests
+# End-to-End Tests for PostgreSQL Database Intelligence
 
-This directory contains comprehensive end-to-end tests for the Database Intelligence Collector, covering the complete data flow from PostgreSQL to New Relic Database (NRDB).
+This directory contains comprehensive E2E tests that validate the entire data flow from PostgreSQL through the OpenTelemetry collector to New Relic Database (NRDB).
 
-## Test Structure
+## Test Coverage
 
-### Test Files
+### 1. Plan Intelligence Tests (`plan_intelligence_test.go`)
+- Auto-explain log collection
+- Plan anonymization and PII protection
+- Plan regression detection
+- NRDB metric export validation
+- Circuit breaker functionality
 
-1. **`plan_intelligence_test.go`** - Tests for Plan Intelligence features
-   - Auto-explain log collection
-   - Plan anonymization and PII protection
-   - Regression detection
-   - Circuit breaker protection
-   - NRDB export validation
+### 2. Active Session History Tests (`ash_test.go`)
+- 1-second session sampling
+- Wait event analysis
+- Blocking session detection
+- Adaptive sampling under load
+- Query activity tracking
+- Time window aggregation
 
-2. **`ash_test.go`** - Tests for Active Session History (ASH)
-   - Session sampling at 1-second intervals
-   - Wait event analysis and categorization
-   - Blocking chain detection
-   - Adaptive sampling under load
-   - Query activity tracking
-   - Time-window aggregation
+### 3. Integration Tests (`integration_test.go`)
+- Combined Plan Intelligence + ASH correlation
+- Regression detection with wait analysis
+- Memory pressure handling
+- End-to-end data flow validation
 
-3. **`integration_test.go`** - Full integration tests
-   - Plan Intelligence + ASH correlation
-   - Regression detection with wait analysis
-   - Adaptive sampling under varying load
-   - Circuit breaker integration
-   - Memory pressure handling
-   - Feature detection and graceful degradation
+### 4. NRDB Validation Tests (`nrdb_validation_test.go`)
+- NRQL query validation
+- Dashboard query testing
+- Metric attribute verification
+- Data integrity checks
+- Alert query validation
 
-4. **`test_environment.go`** - Test infrastructure
-   - PostgreSQL container management
-   - Collector process lifecycle
-   - Mock NRDB exporter
-   - Metrics and logs collection
-   - Test utilities
+### 5. Performance Tests (`performance_test.go`)
+- Baseline performance metrics
+- High cardinality query handling
+- Sustained load testing
+- Burst load scenarios
+- Memory usage under stress
 
-## Running Tests
+### 6. Monitoring Tests (`monitoring_test.go`)
+- Collector health metrics
+- Pipeline metrics validation
+- Prometheus endpoint testing
+- Circuit breaker metrics
+- Alert rule validation
+
+## Running the Tests
 
 ### Prerequisites
 
-- Docker installed and running
-- Go 1.21+
-- OpenTelemetry Collector binary in PATH
-- Sufficient resources (4GB RAM, 2 CPU cores)
+1. Docker and Docker Compose installed
+2. Go 1.21+ installed
+3. New Relic account (for NRDB validation tests)
 
-### Run All E2E Tests
+### Environment Variables
 
+For basic tests:
 ```bash
-# Run all E2E tests
-go test -v ./tests/e2e/
-
-# Run with timeout (recommended)
-go test -v -timeout 30m ./tests/e2e/
-
-# Run specific test suite
-go test -v -run TestPlanIntelligenceE2E ./tests/e2e/
-go test -v -run TestASHE2E ./tests/e2e/
-go test -v -run TestFullIntegrationE2E ./tests/e2e/
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5432
+export POSTGRES_USER=test_user
+export POSTGRES_PASSWORD=test_password
+export POSTGRES_DB=test_db
+export POSTGRES_LOG_PATH=/var/log/postgresql/postgresql.log
 ```
 
-### Run Individual Tests
-
+For New Relic integration tests:
 ```bash
-# Test plan anonymization
-go test -v -run TestPlanIntelligenceE2E/PlanAnonymization ./tests/e2e/
-
-# Test blocking detection
-go test -v -run TestASHE2E/BlockingDetection ./tests/e2e/
-
-# Test memory pressure
-go test -v -run TestFullIntegrationE2E/MemoryPressureHandling ./tests/e2e/
+export NEW_RELIC_ACCOUNT_ID=your_account_id
+export NEW_RELIC_LICENSE_KEY=your_license_key
+export NEW_RELIC_API_KEY=your_api_key
+export NEW_RELIC_OTLP_ENDPOINT=otlp.nr-data.net:4317
 ```
 
-### Skip E2E Tests (for quick builds)
+### Running Tests
 
+#### All E2E Tests
 ```bash
-# Skip E2E tests using short mode
-go test -short ./...
+make test
 ```
 
-## Test Scenarios
-
-### Plan Intelligence Tests
-
-1. **Auto-Explain Log Collection**
-   - Generates slow queries that trigger auto_explain
-   - Verifies plan and execution time metrics
-   - Validates query attribution
-
-2. **Plan Anonymization**
-   - Tests PII detection and redaction
-   - Verifies email, SSN, credit card anonymization
-   - Ensures plan structure preservation
-
-3. **Regression Detection**
-   - Creates index changes to trigger plan changes
-   - Verifies statistical regression detection
-   - Validates regression severity metrics
-
-4. **Circuit Breaker**
-   - Simulates auto_explain errors
-   - Verifies circuit breaker activation
-   - Tests graceful degradation
-
-### ASH Tests
-
-1. **Session Sampling**
-   - Creates concurrent sessions with different states
-   - Verifies session count metrics by state
-   - Tests 1-second sampling interval
-
-2. **Wait Event Analysis**
-   - Generates various wait events (Lock, IO, CPU)
-   - Verifies wait event categorization
-   - Tests severity assignment
-
-3. **Blocking Detection**
-   - Creates explicit blocking chains
-   - Verifies blocking/blocked session metrics
-   - Tests chain depth detection
-
-4. **Adaptive Sampling**
-   - Creates high session counts
-   - Verifies sampling rate adjustment
-   - Tests priority sampling rules
-
-5. **Query Activity Tracking**
-   - Executes same query from multiple sessions
-   - Verifies query-level metrics
-   - Tests query duration tracking
-
-### Integration Tests
-
-1. **Plan + ASH Correlation**
-   - Verifies query_id correlation between systems
-   - Tests unified view of performance data
-
-2. **Regression + Wait Analysis**
-   - Creates scenarios with both plan changes and waits
-   - Tests comprehensive problem detection
-
-3. **Load Testing**
-   - Tests with varying session counts (10-200)
-   - Verifies adaptive behavior
-   - Monitors resource usage
-
-4. **Circuit Breaker Integration**
-   - Tests multiple failure scenarios
-   - Verifies protective mechanisms
-
-5. **Memory Management**
-   - Tests high cardinality scenarios
-   - Verifies memory limiter effectiveness
-
-6. **NRDB Validation**
-   - Verifies complete metric export
-   - Validates NRDB payload structure
-   - Tests metric enrichment
-
-## Test Environment
-
-The test environment provides:
-
-### PostgreSQL Container
-- PostgreSQL 15 with required extensions
-- Auto-explain pre-configured
-- Test schema with sample data
-- Log file access
-
-### Mock Infrastructure
-- Mock NRDB exporter endpoint
-- Metrics and logs storage
-- Health check endpoints
-
-### Test Utilities
-- Metric search and validation
-- Log parsing helpers
-- Database activity generators
-- Failure simulation methods
-
-## Test Data
-
-### Schema
-- `users` table with PII data
-- `orders` table for join queries
-- `ash_test_table` for ASH testing
-- `metrics` table for mixed workloads
-
-### Generated Activity
-- Slow queries for plan collection
-- Concurrent sessions for ASH
-- Blocking chains
-- Various wait events
-
-## Debugging Tests
-
-### Enable Debug Logging
-
+#### Specific Test Categories
 ```bash
-# Set debug log level
-export LOG_LEVEL=debug
-go test -v -run TestName ./tests/e2e/
+# Unit tests only (fast)
+make test-unit
+
+# Integration tests
+make test-integration
+
+# Performance tests
+make test-performance
+
+# Benchmarks
+make test-benchmark
+
+# Specific test
+make test-specific TEST=TestPlanIntelligenceE2E
 ```
 
-### Inspect Test Artifacts
-
+#### With Coverage
 ```bash
-# View PostgreSQL logs
-docker logs <postgres-container-id>
-
-# View collector logs
-tail -f /tmp/test-logs/collector.log
-
-# Check metrics endpoint
-curl http://localhost:8888/metrics
+make test-coverage
 ```
+
+#### In CI Mode
+```bash
+make ci
+```
+
+### Test Environment
+
+#### Starting Test Environment
+```bash
+make docker-up
+```
+
+#### Stopping Test Environment
+```bash
+make docker-down
+```
+
+### Test Output
+
+Test results are stored in the `test-results/` directory:
+- `test-results/current/` - Current test run results
+- `test-results/e2e-results-*.tar.gz` - Archived test results
+
+Each test run includes:
+- Test logs for each category
+- Collector logs
+- PostgreSQL logs
+- Prometheus metrics snapshot
+- OTLP request logs
+- Summary report
+
+## NRQL Queries Validated
+
+The tests validate all NRQL queries used in New Relic dashboards:
+
+### PostgreSQL Overview Dashboard
+- Active connections by database
+- Transaction rate (commits/rollbacks per minute)
+- Cache hit ratio
+- Database size
+- Top queries by execution count
+
+### Plan Intelligence Dashboard
+- Plan changes over time
+- Plan regression detection
+- Query performance trends
+- Top regressions by cost increase
+- Plan node analysis
+- Query plan distribution
+
+### Active Session History Dashboard
+- Active sessions over time by state
+- Wait event distribution
+- Top wait events
+- Blocking analysis
+- Session activity by query
+- Resource utilization
+
+### Integrated Intelligence Dashboard
+- Query performance with wait analysis
+- Plan regression impact
+- Query health scores
+- Adaptive sampling effectiveness
+
+### Alert Queries
+- High plan regression rate
+- Excessive lock waits
+- Query performance degradation
+- Database connection saturation
+- Circuit breaker activation
+
+## Troubleshooting
 
 ### Common Issues
 
-1. **Container Startup Timeout**
-   - Increase wait timeout in test
-   - Check Docker resource limits
+1. **PostgreSQL not starting**: Check Docker logs
+   ```bash
+   docker-compose -f testdata/docker-compose.test.yml logs postgres-test
+   ```
 
-2. **Collector Not Healthy**
-   - Verify collector binary in PATH
-   - Check port availability
-   - Review configuration
+2. **Collector not healthy**: Check collector logs
+   ```bash
+   docker-compose -f testdata/docker-compose.test.yml logs otel-collector
+   ```
 
-3. **Missing Metrics**
-   - Verify PostgreSQL extensions
-   - Check auto_explain settings
-   - Review log file permissions
+3. **NRQL tests failing**: Verify New Relic credentials
+   ```bash
+   curl -X POST https://api.newrelic.com/graphql \
+     -H "Content-Type: application/json" \
+     -H "API-Key: $NEW_RELIC_API_KEY" \
+     -d '{"query":"{ actor { user { name email } } }"}'
+   ```
+
+### Debug Mode
+
+Run tests with debug output:
+```bash
+go test -v -run TestName -debug
+```
+
+View collector metrics:
+```bash
+curl http://localhost:8888/metrics
+```
+
+View zpages:
+```bash
+open http://localhost:55679/debug/tracez
+```
 
 ## Contributing
 
-When adding new E2E tests:
+When adding new tests:
 
-1. Follow existing test patterns
-2. Use test environment utilities
-3. Clean up resources properly
-4. Document test scenarios
-5. Consider test execution time
+1. Follow the existing test structure
+2. Add appropriate test data generation
+3. Include cleanup in defer statements
+4. Document any new environment variables
+5. Update this README with new test coverage
 
-## CI/CD Integration
+## Performance Baselines
 
-```yaml
-# Example GitHub Actions workflow
-name: E2E Tests
-on: [push, pull_request]
+Expected performance metrics (on standard hardware):
+- Plan collection: < 5ms overhead per query
+- ASH sampling: < 1ms per sample
+- Memory usage: < 500MB under normal load
+- Metric export latency: < 100ms p95
 
-jobs:
-  e2e-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
-    
-    - name: Install collector
-      run: |
-        wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.88.0/otelcol_0.88.0_linux_amd64.tar.gz
-        tar -xvf otelcol_0.88.0_linux_amd64.tar.gz
-        sudo mv otelcol /usr/local/bin/
-    
-    - name: Run E2E tests
-      run: go test -v -timeout 20m ./tests/e2e/
-```
+## License
+
+See LICENSE file in the repository root.

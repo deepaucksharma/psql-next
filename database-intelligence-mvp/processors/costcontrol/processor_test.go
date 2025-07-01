@@ -8,27 +8,28 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/consumer/consumertest"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
 )
 
 func TestNewCostControlProcessor(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
 	
-	processor := newCostControlProcessor(logger, cfg, consumer)
+	processor := newCostControlProcessor(cfg, logger)
 	require.NotNil(t, processor)
 }
 
 func TestCostControlProcessor_UnderBudget(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	cfg.MonthlyBudgetUSD = 1000.0
 	cfg.MetricCardinalityLimit = 100
 	
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
-	processor := newCostControlProcessor(logger, cfg, consumer)
+	consumer := &consumertest.MetricsSink{}
+	processor := newCostControlProcessor(cfg, logger)
+	processor.nextMetrics = consumer
 	
 	err := processor.Start(context.Background(), nil)
 	require.NoError(t, err)
@@ -48,18 +49,19 @@ func TestCostControlProcessor_UnderBudget(t *testing.T) {
 }
 
 func TestCostControlProcessor_OverBudget(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	cfg.MonthlyBudgetUSD = 0.01 // Very small budget
 	cfg.AggressiveMode = true
 	cfg.MetricCardinalityLimit = 10
 	
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
-	processor := newCostControlProcessor(logger, cfg, consumer)
+	consumer := &consumertest.MetricsSink{}
+	processor := newCostControlProcessor(cfg, logger)
+	processor.nextMetrics = consumer
 	
 	// Manually set the processor to over-budget state
 	processor.costTracker.projectedCostUSD = 1.0
-	processor.costTracker.totalBytesProcessed = 3 * 1024 * 1024 * 1024 // 3GB
+	processor.costTracker.bytesIngested = 3 * 1024 * 1024 * 1024 // 3GB
 	
 	err := processor.Start(context.Background(), nil)
 	require.NoError(t, err)
@@ -91,13 +93,15 @@ func TestCostControlProcessor_OverBudget(t *testing.T) {
 }
 
 func TestCostControlProcessor_CardinalityReduction(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
+	cfg := CreateDefaultConfig().(*Config)
 	cfg.MetricCardinalityLimit = 5
-	cfg.HighCardinalityDimensions = []string{"query_id", "user_id", "session_id"}
+	// TODO: Add high cardinality dimensions to config
+	// cfg.HighCardinalityDimensions = []string{"query_id", "user_id", "session_id"}
 	
 	logger := zap.NewNop()
-	consumer := consumertest.NewMetrics()
-	processor := newCostControlProcessor(logger, cfg, consumer)
+	consumer := &consumertest.MetricsSink{}
+	processor := newCostControlProcessor(cfg, logger)
+	processor.nextMetrics = consumer
 	
 	err := processor.Start(context.Background(), nil)
 	require.NoError(t, err)
@@ -153,7 +157,7 @@ func createTestMetrics(numMetrics, numAttributes int) pmetric.Metrics {
 		metric.SetEmptyGauge()
 		dp := metric.Gauge().DataPoints().AppendEmpty()
 		dp.SetIntValue(int64(i))
-		dp.SetTimestamp(pmetric.NewTimestampFromTime(time.Now()))
+		dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
 		
 		for j := 0; j < numAttributes; j++ {
 			dp.Attributes().PutStr("attr"+string(rune('A'+j)), "value"+string(rune('0'+j)))

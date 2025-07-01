@@ -1,0 +1,287 @@
+{
+  "name": "PostgreSQL Database Intelligence",
+  "description": "Comprehensive monitoring for PostgreSQL with Plan Intelligence and Active Session History",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "PostgreSQL Overview",
+      "description": "High-level database performance and health metrics",
+      "widgets": [
+        {
+          "title": "Active Connections",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT latest(postgresql.connections.active) FROM Metric WHERE db.system = 'postgresql' FACET db.name SINCE 5 minutes ago"
+            }]
+          },
+          "visualization": "BILLBOARD"
+        },
+        {
+          "title": "Transaction Rate",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT rate(sum(postgresql.transactions.committed), 1 minute) as 'Commits/min', rate(sum(postgresql.transactions.rolled_back), 1 minute) as 'Rollbacks/min' FROM Metric WHERE db.system = 'postgresql' TIMESERIES SINCE 30 minutes ago"
+            }]
+          },
+          "visualization": "LINE_CHART"
+        },
+        {
+          "title": "Cache Hit Ratio",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT (sum(postgresql.blocks.hit) / (sum(postgresql.blocks.hit) + sum(postgresql.blocks.read))) * 100 as 'Cache Hit %' FROM Metric WHERE db.system = 'postgresql' FACET db.name SINCE 1 hour ago"
+            }]
+          },
+          "visualization": "PIE_CHART"
+        },
+        {
+          "title": "Database Size",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT latest(postgresql.database.size) / 1024 / 1024 as 'Size (MB)' FROM Metric WHERE db.system = 'postgresql' FACET db.name"
+            }]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Top Queries by Execution Count",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT count(*) as 'Executions', average(query.exec_time_ms) as 'Avg Time (ms)' FROM Metric WHERE metricName = 'postgresql.query.execution' FACET query.normalized LIMIT 10 SINCE 1 hour ago"
+            }]
+          },
+          "visualization": "TABLE"
+        }
+      ]
+    },
+    {
+      "name": "Plan Intelligence",
+      "description": "Query plan analysis and regression detection",
+      "widgets": [
+        {
+          "title": "Plan Changes Over Time",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT count(*) FROM Metric WHERE metricName = 'postgresql.plan.change' FACET plan.change_type TIMESERIES SINCE 1 hour ago"
+            }]
+          },
+          "visualization": "STACKED_BAR_CHART"
+        },
+        {
+          "title": "Plan Regressions Detected",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT count(*) as 'Regressions', average(plan.cost_increase_ratio) as 'Avg Cost Increase' FROM Metric WHERE metricName = 'postgresql.plan.regression' TIMESERIES SINCE 2 hours ago"
+            }]
+          },
+          "visualization": "LINE_CHART"
+        },
+        {
+          "title": "Query Performance Trend",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT average(query.exec_time_ms) as 'Avg Exec Time', average(query.plan_time_ms) as 'Avg Plan Time', percentile(query.exec_time_ms, 95) as 'p95 Exec Time' FROM Metric WHERE metricName = 'postgresql.query.execution' FACET query.normalized TIMESERIES SINCE 3 hours ago"
+            }]
+          },
+          "visualization": "LINE_CHART"
+        },
+        {
+          "title": "Top Plan Regressions",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT query.normalized, plan.old_cost, plan.new_cost, plan.cost_increase_ratio, plan.performance_impact FROM Metric WHERE metricName = 'postgresql.plan.regression' ORDER BY plan.cost_increase_ratio DESC LIMIT 20 SINCE 24 hours ago"
+            }]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Plan Node Analysis",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT count(*) FROM Metric WHERE metricName = 'postgresql.plan.node' FACET plan.node_type, plan.issue_type SINCE 1 hour ago"
+            }]
+          },
+          "visualization": "HEAT_MAP"
+        },
+        {
+          "title": "Query Plan Distribution",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT uniqueCount(plan.hash) as 'Unique Plans', count(*) as 'Total Executions' FROM Metric WHERE metricName = 'postgresql.query.execution' AND plan.hash IS NOT NULL FACET query.normalized SINCE 6 hours ago"
+            }]
+          },
+          "visualization": "TABLE"
+        }
+      ]
+    },
+    {
+      "name": "Active Session History",
+      "description": "Real-time session monitoring and wait event analysis",
+      "widgets": [
+        {
+          "title": "Active Sessions Over Time",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT count(*) FROM Metric WHERE metricName = 'postgresql.ash.session' FACET session.state TIMESERIES SINCE 30 minutes ago"
+            }]
+          },
+          "visualization": "STACKED_AREA_CHART"
+        },
+        {
+          "title": "Wait Event Distribution",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT sum(wait.duration_ms) FROM Metric WHERE metricName = 'postgresql.ash.wait_event' FACET wait.event_type, wait.event_name SINCE 1 hour ago"
+            }]
+          },
+          "visualization": "PIE_CHART"
+        },
+        {
+          "title": "Top Wait Events",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT sum(wait.duration_ms) as 'Total Wait Time', count(*) as 'Wait Count', average(wait.duration_ms) as 'Avg Wait' FROM Metric WHERE metricName = 'postgresql.ash.wait_event' FACET wait.event_name ORDER BY sum(wait.duration_ms) DESC LIMIT 10 SINCE 1 hour ago"
+            }]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Blocking Analysis",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT blocking.query as 'Blocking Query', blocked.query as 'Blocked Query', count(*) as 'Block Count', max(block.duration_ms) as 'Max Block Duration' FROM Metric WHERE metricName = 'postgresql.ash.blocking' FACET blocking.pid, blocked.pid SINCE 30 minutes ago"
+            }]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Session Activity by Query",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT uniqueCount(session.pid) as 'Unique Sessions', count(*) as 'Total Samples' FROM Metric WHERE metricName = 'postgresql.ash.session' AND session.state = 'active' FACET query.normalized TIMESERIES SINCE 1 hour ago"
+            }]
+          },
+          "visualization": "LINE_CHART"
+        },
+        {
+          "title": "Resource Utilization",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT average(session.cpu_usage) as 'CPU %', average(session.memory_mb) as 'Memory MB', sum(session.io_wait_ms) as 'IO Wait' FROM Metric WHERE metricName = 'postgresql.ash.session' FACET session.backend_type SINCE 30 minutes ago"
+            }]
+          },
+          "visualization": "BAR_CHART"
+        }
+      ]
+    },
+    {
+      "name": "Integrated Intelligence",
+      "description": "Combined insights from Plan Intelligence and ASH",
+      "widgets": [
+        {
+          "title": "Query Performance with Wait Analysis",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT average(query.exec_time_ms) as 'Exec Time', sum(wait.duration_ms) as 'Wait Time', count(DISTINCT plan.hash) as 'Plan Count' FROM Metric WHERE metricName IN ('postgresql.query.execution', 'postgresql.ash.wait_event') FACET query.normalized SINCE 2 hours ago"
+            }]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Plan Regression Impact Analysis",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT plan.regression_detected as 'Has Regression', average(session.count) as 'Active Sessions', sum(wait.duration_ms) as 'Total Wait' FROM Metric WHERE query.normalized IS NOT NULL FACET query.normalized SINCE 1 hour ago"
+            }]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Query Health Score",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT query.normalized, (100 - (plan.regression_count * 10 + wait.excessive_count * 5 + (query.exec_time_ms / 100))) as 'Health Score' FROM Metric WHERE metricName = 'postgresql.query.health' ORDER BY 'Health Score' ASC LIMIT 20 SINCE 24 hours ago"
+            }]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Adaptive Sampling Effectiveness",
+          "configuration": {
+            "nrqlQueries": [{
+              "query": "SELECT sampling.rule as 'Rule', sampling.rate as 'Sample Rate', count(*) as 'Samples Collected', uniqueCount(query.normalized) as 'Unique Queries' FROM Metric WHERE metricName = 'postgresql.adaptive_sampling' FACET sampling.rule SINCE 1 hour ago"
+            }]
+          },
+          "visualization": "TABLE"
+        }
+      ]
+    }
+  ],
+  "alertPolicies": [
+    {
+      "name": "PostgreSQL Intelligence Alerts",
+      "conditions": [
+        {
+          "name": "High Plan Regression Rate",
+          "type": "NRQL",
+          "nrql": {
+            "query": "SELECT count(*) FROM Metric WHERE metricName = 'postgresql.plan.regression' SINCE 5 minutes ago"
+          },
+          "critical": {
+            "threshold": 5,
+            "thresholdDuration": 300,
+            "thresholdOccurrences": "ALL"
+          }
+        },
+        {
+          "name": "Excessive Lock Waits",
+          "type": "NRQL",
+          "nrql": {
+            "query": "SELECT sum(wait.duration_ms) FROM Metric WHERE metricName = 'postgresql.ash.wait_event' AND wait.event_type = 'Lock' SINCE 5 minutes ago"
+          },
+          "critical": {
+            "threshold": 30000,
+            "thresholdDuration": 300,
+            "thresholdOccurrences": "ALL"
+          }
+        },
+        {
+          "name": "Query Performance Degradation",
+          "type": "NRQL",
+          "nrql": {
+            "query": "SELECT percentile(query.exec_time_ms, 95) FROM Metric WHERE metricName = 'postgresql.query.execution' FACET query.normalized SINCE 10 minutes ago COMPARE WITH 1 hour ago"
+          },
+          "critical": {
+            "threshold": 2,
+            "thresholdDuration": 600,
+            "thresholdOccurrences": "ALL"
+          }
+        },
+        {
+          "name": "Database Connection Saturation",
+          "type": "NRQL",
+          "nrql": {
+            "query": "SELECT (latest(postgresql.connections.active) / latest(postgresql.connections.max)) * 100 as 'Connection Usage %' FROM Metric WHERE db.system = 'postgresql' FACET db.name"
+          },
+          "critical": {
+            "threshold": 90,
+            "thresholdDuration": 300,
+            "thresholdOccurrences": "ALL"
+          }
+        },
+        {
+          "name": "Circuit Breaker Activation",
+          "type": "NRQL",
+          "nrql": {
+            "query": "SELECT count(*) FROM Metric WHERE metricName = 'otelcol.processor.circuitbreaker.triggered' SINCE 5 minutes ago"
+          },
+          "warning": {
+            "threshold": 1,
+            "thresholdDuration": 300,
+            "thresholdOccurrences": "ALL"
+          }
+        }
+      ]
+    }
+  ]
+}

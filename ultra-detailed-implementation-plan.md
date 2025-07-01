@@ -1776,6 +1776,452 @@ This ultra-detailed implementation plan provides a comprehensive roadmap for evo
 
 The phased approach ensures that security and robustness concerns are addressed first, followed by intelligence features and operational polish. With proper execution of this plan, the result will be a best-in-class database monitoring solution that leverages OpenTelemetry standards while providing enterprise-grade features for New Relic customers.
 
+## Technical Review and Recommendations
+
+### Component Implementation & Design
+
+#### Receivers
+
+The MVP demonstrates a sophisticated approach to database telemetry collection through custom receivers that prioritize safety and minimal overhead:
+
+1. **SQL Query Receiver**: Executes safe "worst query" SQL against target databases with aggressive safeguards:
+   - Short statement and lock timeouts (1 second)
+   - Filters out system and excessive queries
+   - Outputs key metrics without running expensive EXPLAINs inline
+   - Bundles metadata into JSON fields for deferred processing
+
+2. **Filelog Receiver**: Tails database log files for execution plans:
+   - Leverages PostgreSQL's auto_explain in JSON format
+   - Zero query overhead approach
+   - Regex parser extracts plan JSON from log lines
+   - JSON parser converts to structured data
+
+This dual-receiver architecture cleanly separates concerns:
+- SQL receivers gather performance stats at coarse intervals (5 min)
+- Filelog receiver streams granular execution plans asynchronously
+- All receivers integrate via standard OTel Collector interfaces
+
+#### Processors
+
+The design employs focused, composable processors following the "configure, don't build" philosophy:
+
+1. **Memory Protection** (First in Pipeline):
+   ```yaml
+   memory_limiter:
+     check_interval: 1s
+     limit_percentage: 80
+     spike_limit_percentage: 25
+   ```
+
+2. **Circuit Breaker** (Safety Layer):
+   - Currently prototyped with transform processor
+   - Tracks error occurrences in log records
+   - Intent: Self-throttle on database errors
+   - Full implementation marked as TODO
+
+3. **PII Redaction** (Transform Processor):
+   ```yaml
+   transform:
+     log_statements:
+       - context: log
+         statements:
+           # Email redaction
+           - replace_pattern(body, "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "[EMAIL_REDACTED]")
+           # Phone redaction
+           - replace_pattern(body, "\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b", "[PHONE_REDACTED]")
+           # SSN redaction
+           - replace_pattern(body, "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[SSN_REDACTED]")
+   ```
+
+4. **Attribute Enrichment**:
+   - Adds `db_system` label based on data source
+   - Classifies query type (SELECT, INSERT, etc.)
+   - Rates query performance (critical if > 1000ms)
+   - Computes SHA256 fingerprint for deduplication
+
+5. **Sampling**:
+   - Simplified to `probabilistic_sampler` at 25% rate
+   - Stateless for multi-instance support
+   - Original adaptive sampler concept preserved in code
+
+6. **Batching and Export**:
+   - Standard batch processor for throughput efficiency
+   - Dual export to New Relic OTLP and console for debugging
+
+### Strengths and Observations
+
+✅ **Aligned, Modular Architecture**: Clean OTel Collector model implementation with proper separation of concerns
+
+✅ **"Configure, Don't Build" Philosophy**: Complex tasks accomplished via declarative processors, reducing custom code surface area
+
+✅ **Safety-First Design**: 
+- Query timeouts and scope limits
+- Read-only replica connections
+- Out-of-band plan collection via logs
+- Memory limiters and circuit breakers
+
+✅ **Rich Data and Backward Compatibility**: 
+- Preserves 100% OHI compatibility
+- Adds new categories (plans, wait events)
+- Consistent schema across database types
+
+✅ **Comprehensive Deployment Support**: 
+- Helm charts, Dockerfiles, and scripts
+- Production-tuned configurations
+- Multi-environment readiness
+
+### Limitations and Growth Areas
+
+⚠️ **Partial Feature Implementation**:
+- Circuit breaker logic rudimentary (error counter only)
+- Adaptive sampling using simple probabilistic approach
+- PlanAttributeExtractor exists but not wired into pipeline
+
+⚠️ **Testing and Robustness Gaps**:
+- E2E tests are smoke tests with manual verification steps
+- Unit tests contain placeholders without real assertions
+- Limited automated validation of data pipelines
+
+⚠️ **Evolving Multi-Instance Support**:
+- Removed stateful components for horizontal scaling
+- True coordination still limited (no distributed deduplication)
+- Recommended: One collector per database cluster
+
+⚠️ **Configuration Complexity**:
+- Long, order-dependent transform processor lists
+- Risk of configuration drift
+- Heavy regex usage requires performance monitoring
+
+### End-to-End Test Enhancement Proposals
+
+#### 1. Automate Full Integration Scenarios with Containers
+
+**Implementation**: Use TestContainers to create ephemeral test environments:
+
+```go
+func TestFullPipeline(t *testing.T) {
+    // Spin up PostgreSQL container
+    postgres := testcontainers.StartPostgresContainer(t)
+    defer postgres.Terminate()
+    
+    // Start collector with test config
+    collector := StartCollectorContainer(t, postgres.ConnectionString())
+    defer collector.Terminate()
+    
+    // Start OTLP test receiver
+    otlpReceiver := StartOTLPReceiver(t)
+    defer otlpReceiver.Stop()
+    
+    // Generate known workload
+    GenerateSlowQueries(t, postgres.DB, []Query{
+        {Text: "SELECT * FROM users WHERE email = 'test@example.com'", ExpectedDuration: 1500},
+    })
+    
+    // Verify data received
+    require.Eventually(t, func() bool {
+        records := otlpReceiver.GetReceivedLogs()
+        return len(records) > 0 && 
+               records[0].Attributes["query_text"] == "SELECT * FROM users WHERE email = ?" &&
+               records[0].Attributes["db_system"] == "postgresql"
+    }, 30*time.Second, 1*time.Second)
+}
+```
+
+**Rationale**: Ensures entire pipeline correctness from database through processors to export.
+
+#### 2. Simulate Multi-DB and Multi-Instance Setups
+
+```go
+func TestMultiDatabaseCollection(t *testing.T) {
+    // Start both PostgreSQL and MySQL
+    postgres := testcontainers.StartPostgresContainer(t)
+    mysql := testcontainers.StartMySQLContainer(t)
+    
+    // Configure collector with both receivers
+    config := `
+receivers:
+  postgresql:
+    endpoint: %s
+  mysql:
+    endpoint: %s
+    
+processors:
+  attributes:
+    actions:
+      - key: db.system
+        value: postgresql
+        action: upsert
+      - key: db.system
+        value: mysql
+        action: upsert
+`
+    
+    // Verify proper segregation and processing
+    postgresLogs := filterByDBSystem(receivedLogs, "postgresql")
+    mysqlLogs := filterByDBSystem(receivedLogs, "mysql")
+    
+    assert.NotEmpty(t, postgresLogs)
+    assert.NotEmpty(t, mysqlLogs)
+    assert.NotEqual(t, postgresLogs[0].Attributes["query_id"], 
+                     mysqlLogs[0].Attributes["query_id"])
+}
+```
+
+#### 3. Leverage Collector's Testing Utilities and Telemetry
+
+```go
+func TestCollectorHealth(t *testing.T) {
+    collector := StartCollector(t)
+    
+    // Generate load
+    GenerateDatabaseLoad(t, LoadProfile{
+        QPS: 1000,
+        Duration: 1*time.Minute,
+    })
+    
+    // Scrape metrics endpoint
+    metrics := ScrapeMetrics(t, "http://localhost:8888/metrics")
+    
+    // Verify health invariants
+    assert.Less(t, metrics["go_memstats_heap_alloc_bytes"], 1e9, "Memory < 1GB")
+    assert.Less(t, metrics["otelcol_processor_dropped_metric_points"], 
+                  metrics["otelcol_receiver_accepted_metric_points"]*0.01, 
+                  "Drop rate < 1%")
+    
+    // Verify circuit breaker behavior
+    CauseDBErrors(t, 10)
+    time.Sleep(5*time.Second)
+    
+    assert.Greater(t, metrics["otelcol_processor_transform_circuit_breaker_failures"], 0)
+    assert.Equal(t, "200 OK", CheckHealth(t, "http://localhost:13133/health"))
+}
+```
+
+#### 4. Expand Unit Tests with Real Processor Logic
+
+```go
+func TestPlanAttributeExtractor(t *testing.T) {
+    processor := NewPlanAttributeExtractor(testConfig)
+    
+    // Create test log record with plan JSON
+    logRecord := plog.NewLogRecord()
+    logRecord.Body().SetStr(`{
+        "Plan": {
+            "Node Type": "Nested Loop",
+            "Total Cost": 1234.56,
+            "Plan Rows": 100,
+            "Filter": "email = 'user@example.com'"
+        }
+    }`)
+    
+    // Process the record
+    err := processor.ProcessLogs(context.Background(), plog.NewLogs())
+    require.NoError(t, err)
+    
+    // Verify extracted attributes
+    attrs := logRecord.Attributes()
+    assert.Equal(t, "Nested Loop", attrs.Get("db.query.plan.node_type"))
+    assert.Equal(t, 1234.56, attrs.Get("db.query.plan.cost"))
+    assert.Equal(t, int64(100), attrs.Get("db.query.plan.rows"))
+    assert.Equal(t, "email = ?", attrs.Get("db.query.plan.filter"))
+}
+
+func TestAdaptiveSamplingRules(t *testing.T) {
+    sampler := NewAdaptiveSampler(AdaptiveSamplerConfig{
+        Rules: []SamplingRule{
+            {Name: "slow_queries", Condition: "duration > 1000", SampleRate: 1.0},
+            {Name: "normal_queries", Condition: "duration <= 1000", SampleRate: 0.1},
+        },
+    })
+    
+    // Test with deterministic random
+    sampler.random = rand.New(rand.NewSource(42))
+    
+    // Slow query - always sampled
+    slowRecord := createLogRecord(t, map[string]interface{}{"duration": 1500})
+    assert.True(t, sampler.ShouldSample(slowRecord))
+    
+    // Fast queries - 10% sampled
+    sampled := 0
+    for i := 0; i < 1000; i++ {
+        fastRecord := createLogRecord(t, map[string]interface{}{"duration": 50})
+        if sampler.ShouldSample(fastRecord) {
+            sampled++
+        }
+    }
+    assert.InDelta(t, 100, sampled, 20, "Should sample ~10%")
+}
+```
+
+#### 5. End-to-End Validation of Exported Data
+
+```go
+func TestExportedDataFormat(t *testing.T) {
+    // Configure with file exporter for inspection
+    collector := StartCollectorWithFileExport(t, "/tmp/export.json")
+    
+    // Generate known queries
+    GenerateTestQueries(t, []TestQuery{
+        {
+            Text: "SELECT * FROM users WHERE email = 'test@example.com'",
+            Duration: 1234,
+            PlanJSON: `{"Node Type": "Index Scan", "Index Name": "users_email_idx"}`,
+        },
+    })
+    
+    // Stop and read exported data
+    collector.Stop()
+    exportedData := ReadExportedData(t, "/tmp/export.json")
+    
+    // Verify data format and content
+    require.Len(t, exportedData.ResourceLogs, 1)
+    logRecord := exportedData.ResourceLogs[0].ScopeLogs[0].LogRecords[0]
+    
+    // Check PII was redacted
+    assert.Equal(t, "SELECT * FROM users WHERE email = ?", 
+                  logRecord.Attributes["query_text"])
+    assert.Contains(t, logRecord.Body, "Index Scan")
+    assert.NotContains(t, logRecord.Body, "test@example.com")
+    
+    // Verify all expected attributes
+    expectedAttrs := []string{
+        "db.system", "db.name", "query_id", "query_fingerprint",
+        "query_type", "performance_category", "execution_count",
+    }
+    for _, attr := range expectedAttrs {
+        assert.NotEmpty(t, logRecord.Attributes[attr], 
+                        "Missing attribute: %s", attr)
+    }
+}
+```
+
+#### 6. Comprehensive Scenario Coverage
+
+```go
+func TestHighLoadScenario(t *testing.T) {
+    collector := StartCollector(t)
+    
+    // Generate burst of slow queries
+    var wg sync.WaitGroup
+    for i := 0; i < 100; i++ {
+        wg.Add(1)
+        go func(id int) {
+            defer wg.Done()
+            ExecuteSlowQuery(t, fmt.Sprintf("SELECT pg_sleep(0.1), %d", id))
+        }(i)
+    }
+    wg.Wait()
+    
+    // Verify sampling kicked in
+    metrics := GetCollectorMetrics(t)
+    receivedCount := metrics["otelcol_receiver_accepted_metric_points"]
+    exportedCount := metrics["otelcol_exporter_sent_metric_points"]
+    
+    // With 25% sampling, should export ~25 of 100
+    assert.Less(t, exportedCount, receivedCount*0.3)
+    assert.Greater(t, exportedCount, receivedCount*0.2)
+    
+    // Verify resource limits maintained
+    assert.Less(t, metrics["go_memstats_heap_alloc_bytes"], 500*1024*1024)
+    assert.Less(t, metrics["process_cpu_seconds_total"], 2.0)
+}
+
+func TestLongRunningQueryHandling(t *testing.T) {
+    // Start query that would run for 5 seconds
+    go ExecuteQuery(t, "SELECT pg_sleep(5)")
+    
+    // Verify it gets cancelled by timeout
+    time.Sleep(2 * time.Second)
+    
+    // Check pg_stat_activity
+    var count int
+    db.QueryRow("SELECT COUNT(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(5)%'").Scan(&count)
+    assert.Equal(t, 0, count, "Long query should be cancelled")
+    
+    // Verify collector logged timeout
+    logs := GetCollectorLogs(t)
+    assert.Contains(t, logs, "statement timeout")
+}
+```
+
+#### 7. Fixtures and Mocked Dependencies
+
+```go
+// receivers/sqlquery/receiver_test.go
+func TestReceiverWithMockDB(t *testing.T) {
+    // Create mock DB
+    mockDB := &MockDBExecutor{
+        Results: map[string][]QueryResult{
+            "pg_worst_queries": {
+                {QueryID: "123", QueryText: "SELECT * FROM users", MeanTime: 1500},
+                {QueryID: "456", QueryText: "UPDATE orders SET status = ?", MeanTime: 800},
+            },
+        },
+    }
+    
+    receiver := NewSQLQueryReceiver(config, mockDB)
+    metrics := receiver.Collect(context.Background())
+    
+    assert.Len(t, metrics, 2)
+    assert.Equal(t, "SELECT * FROM users WHERE email = ?", metrics[0].QueryText)
+    assert.Equal(t, float64(1500), metrics[0].MeanTime)
+}
+
+// Fixture-based testing
+func TestWithSampleData(t *testing.T) {
+    testCases := []struct {
+        name     string
+        fixture  string
+        expected int
+    }{
+        {"no_slow_queries", "testdata/empty_stats.json", 0},
+        {"single_slow_query", "testdata/one_slow_query.json", 1},
+        {"many_queries", "testdata/high_cardinality.json", 1000},
+    }
+    
+    for _, tc := range testCases {
+        t.Run(tc.name, func(t *testing.T) {
+            receiver := NewSQLQueryReceiver(config)
+            receiver.SetTestData(LoadFixture(t, tc.fixture))
+            
+            metrics := receiver.Collect(context.Background())
+            assert.Len(t, metrics, tc.expected)
+        })
+    }
+}
+```
+
+### Implementation Priorities
+
+Based on this review, the recommended implementation priorities are:
+
+1. **Complete Circuit Breaker Implementation** (Critical):
+   - Implement actual throttling/pausing logic
+   - Add feature-specific circuit breakers
+   - Include backoff and recovery mechanisms
+
+2. **Wire PlanAttributeExtractor into Pipeline** (High):
+   - Complete plan parsing logic
+   - Add to processor pipeline configuration
+   - Implement plan regression detection
+
+3. **Enhance Testing Infrastructure** (High):
+   - Replace manual E2E tests with automated scenarios
+   - Implement comprehensive unit tests with real logic
+   - Add performance benchmarks and load tests
+
+4. **Implement Adaptive Sampling** (Medium):
+   - Complete rule-based sampling logic
+   - Add cardinality controls
+   - Implement sampling metrics
+
+5. **Multi-Instance Coordination** (Future):
+   - Design distributed deduplication
+   - Implement shared state mechanisms
+   - Add instance coordination protocols
+
+This comprehensive testing approach will ensure the Database Intelligence Collector remains reliable, performant, and accurate as it evolves from MVP to production-grade solution.
+
 ## Appendices
 
 ### A. Configuration Templates

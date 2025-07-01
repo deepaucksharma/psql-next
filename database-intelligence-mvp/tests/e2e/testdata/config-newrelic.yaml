@@ -1,0 +1,258 @@
+# New Relic Integration Test Configuration
+# For E2E testing with actual New Relic backend
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  # PostgreSQL receiver for infrastructure metrics
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases: 
+      - ${env:POSTGRES_DB}
+    tls:
+      insecure: true
+    collection_interval: 10s
+    
+  # Auto-explain receiver for plan intelligence
+  autoexplain:
+    log_path: ${env:POSTGRES_LOG_PATH}
+    log_format: json
+    
+    database:
+      endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+      username: ${env:POSTGRES_USER}
+      password: ${env:POSTGRES_PASSWORD}
+      database: ${env:POSTGRES_DB}
+      ssl_mode: disable
+    
+    plan_collection:
+      enabled: true
+      min_duration: 10ms
+      max_plans_per_query: 10
+      
+      regression_detection:
+        enabled: true
+        performance_degradation_threshold: 0.2
+        cost_increase_threshold: 0.3
+    
+    plan_anonymization:
+      enabled: true
+      anonymize_filters: true
+      anonymize_join_conditions: true
+      hash_literals: true
+  
+  # ASH receiver
+  ash:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    database: ${env:POSTGRES_DB}
+    
+    collection_interval: 1s
+    retention_duration: 30m
+    
+    sampling:
+      enabled: true
+      sample_rate: 1.0
+      active_session_rate: 1.0
+      blocked_session_rate: 1.0
+      adaptive_sampling: true
+    
+    analysis:
+      wait_event_analysis: true
+      blocking_analysis: true
+      resource_analysis: true
+
+processors:
+  # Memory limiter
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+    
+  # Resource processor for New Relic attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: postgresql-database-intelligence
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT:-production}
+        action: upsert
+      - key: db.system
+        value: postgresql
+        action: upsert
+      - key: collector.version
+        value: 1.0.0
+        action: upsert
+      - key: host.id
+        value: ${env:HOST_ID}
+        action: upsert
+      - key: cloud.provider
+        value: ${env:CLOUD_PROVIDER:-none}
+        action: upsert
+      - key: cloud.region
+        value: ${env:CLOUD_REGION:-none}
+        action: upsert
+  
+  # Attributes processor for New Relic compatibility
+  attributes/newrelic:
+    actions:
+      # Ensure metric names follow New Relic conventions
+      - key: metricName
+        from_attribute: metric.name
+        action: upsert
+      
+      # Map database attributes
+      - key: db.name
+        from_attribute: postgresql.database.name
+        action: upsert
+      
+      # Map query attributes
+      - key: query.normalized
+        from_attribute: postgresql.query.text
+        action: hash
+      
+      - key: query.user
+        from_attribute: postgresql.query.user
+        action: upsert
+      
+      - key: query.application_name
+        from_attribute: postgresql.query.application_name
+        action: upsert
+      
+      # Map plan attributes
+      - key: plan.hash
+        from_attribute: postgresql.plan.hash
+        action: upsert
+      
+      - key: plan.node_type
+        from_attribute: postgresql.plan.node_type
+        action: upsert
+      
+      - key: plan.cost_increase_ratio
+        from_attribute: postgresql.plan.cost_increase_ratio
+        action: upsert
+      
+      # Map ASH attributes
+      - key: session.state
+        from_attribute: postgresql.session.state
+        action: upsert
+      
+      - key: wait.event_type
+        from_attribute: postgresql.wait.event_type
+        action: upsert
+      
+      - key: wait.event_name
+        from_attribute: postgresql.wait.event_name
+        action: upsert
+  
+  # Transform processor for metric naming
+  transform/metrics:
+    metric_statements:
+      - context: metric
+        statements:
+          # PostgreSQL infrastructure metrics
+          - set(name, "postgresql.connections.active") where name == "postgresql.database.connections"
+          - set(name, "postgresql.connections.max") where name == "postgresql.database.max_connections"
+          - set(name, "postgresql.transactions.committed") where name == "postgresql.commits"
+          - set(name, "postgresql.transactions.rolled_back") where name == "postgresql.rollbacks"
+          - set(name, "postgresql.blocks.hit") where name == "postgresql.blks_hit"
+          - set(name, "postgresql.blocks.read") where name == "postgresql.blks_read"
+          - set(name, "postgresql.database.size") where name == "postgresql.db_size"
+          
+          # Plan Intelligence metrics
+          - set(name, "postgresql.query.execution") where name == "query_execution"
+          - set(name, "postgresql.plan.change") where name == "plan_change"
+          - set(name, "postgresql.plan.regression") where name == "plan_regression"
+          - set(name, "postgresql.plan.node") where name == "plan_node_analysis"
+          
+          # ASH metrics
+          - set(name, "postgresql.ash.session") where name == "ash_session"
+          - set(name, "postgresql.ash.wait_event") where name == "ash_wait_event"
+          - set(name, "postgresql.ash.blocking") where name == "ash_blocking"
+  
+  # Circuit breaker
+  circuitbreaker:
+    failure_threshold: 5
+    timeout: 30s
+    cooldown_period: 1m
+  
+  # Batch processor
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+exporters:
+  # New Relic OTLP exporter
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+  
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  extensions: [health_check]
+  
+  pipelines:
+    # Infrastructure metrics pipeline
+    metrics/infrastructure:
+      receivers: [postgresql]
+      processors: 
+        - memory_limiter
+        - resource
+        - attributes/newrelic
+        - transform/metrics
+        - batch
+      exporters: [otlp/newrelic]
+    
+    # Plan Intelligence pipeline
+    metrics/plans:
+      receivers: [autoexplain]
+      processors: 
+        - memory_limiter
+        - resource
+        - attributes/newrelic
+        - transform/metrics
+        - circuitbreaker
+        - batch
+      exporters: [otlp/newrelic, debug]
+    
+    # ASH pipeline
+    metrics/ash:
+      receivers: [ash]
+      processors: 
+        - memory_limiter
+        - resource
+        - attributes/newrelic
+        - transform/metrics
+        - batch
+      exporters: [otlp/newrelic]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      encoding: json
+    
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

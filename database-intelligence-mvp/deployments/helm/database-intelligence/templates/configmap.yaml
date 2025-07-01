@@ -1,21 +1,21 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: database-intelligence-config
-  namespace: database-intelligence
+  name: {{ include "database-intelligence.configMapName" . }}
+  namespace: {{ include "database-intelligence.namespace" . }}
   labels:
-    app.kubernetes.io/name: database-intelligence
-    app.kubernetes.io/component: configuration
+    {{- include "database-intelligence.labels" . | nindent 4 }}
 data:
   collector-config.yaml: |
     receivers:
+      {{- if .Values.config.postgres.enabled }}
       postgresql:
         endpoint: ${POSTGRES_HOST}:${POSTGRES_PORT}
         username: ${POSTGRES_USER}
         password: ${POSTGRES_PASSWORD}
         databases:
           - ${POSTGRES_DB}
-        collection_interval: 10s
+        collection_interval: {{ .Values.config.postgres.collectionInterval }}
         tls:
           insecure: true
         metrics:
@@ -45,11 +45,11 @@ data:
             enabled: true
           postgresql.wal:
             enabled: true
-
-      sqlquery:
+      
+      sqlquery/postgresql:
         driver: postgres
-        datasource: "host=${POSTGRES_HOST} port=${POSTGRES_PORT} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB} sslmode=disable"
-        collection_interval: 10s
+        datasource: "host=${POSTGRES_HOST} port=${POSTGRES_PORT} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB} sslmode={{ .Values.config.postgres.sslmode }}"
+        collection_interval: {{ .Values.config.postgres.collectionInterval }}
         queries:
           - query: |
               SELECT 
@@ -81,35 +81,103 @@ data:
                 value_type: double
                 attribute_columns:
                   - query
+      {{- end }}
+      
+      {{- if .Values.config.mysql.enabled }}
+      mysql:
+        endpoint: ${MYSQL_HOST}:${MYSQL_PORT}
+        username: ${MYSQL_USER}
+        password: ${MYSQL_PASSWORD}
+        database: ${MYSQL_DB}
+        collection_interval: {{ .Values.config.mysql.collectionInterval }}
+        metrics:
+          mysql.buffer_pool.pages:
+            enabled: true
+          mysql.buffer_pool.data_pages:
+            enabled: true
+          mysql.buffer_pool.page_flushes:
+            enabled: true
+          mysql.commands:
+            enabled: true
+          mysql.handlers:
+            enabled: true
+          mysql.locks:
+            enabled: true
+          mysql.log_operations:
+            enabled: true
+          mysql.operations:
+            enabled: true
+          mysql.page_operations:
+            enabled: true
+          mysql.row_locks:
+            enabled: true
+          mysql.row_operations:
+            enabled: true
+          mysql.sorts:
+            enabled: true
+          mysql.threads:
+            enabled: true
+      
+      sqlquery/mysql:
+        driver: mysql
+        datasource: "${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(${MYSQL_HOST}:${MYSQL_PORT})/${MYSQL_DB}"
+        collection_interval: {{ .Values.config.mysql.collectionInterval }}
+        queries:
+          - query: |
+              SELECT 
+                DIGEST_TEXT as query,
+                COUNT_STAR as calls,
+                SUM_TIMER_WAIT/1000000000 as total_time_ms,
+                AVG_TIMER_WAIT/1000000000 as avg_time_ms,
+                MIN_TIMER_WAIT/1000000000 as min_time_ms,
+                MAX_TIMER_WAIT/1000000000 as max_time_ms,
+                SUM_ROWS_SENT as rows_sent,
+                SUM_ROWS_EXAMINED as rows_examined
+              FROM performance_schema.events_statements_summary_by_digest
+              WHERE DIGEST_TEXT IS NOT NULL
+              ORDER BY SUM_TIMER_WAIT DESC
+              LIMIT 100
+            metrics:
+              - metric_name: mysql.query.calls
+                value_column: calls
+                value_type: int
+                attribute_columns:
+                  - query
+              - metric_name: mysql.query.total_time
+                value_column: total_time_ms
+                value_type: double
+                attribute_columns:
+                  - query
+              - metric_name: mysql.query.avg_time
+                value_column: avg_time_ms
+                value_type: double
+                attribute_columns:
+                  - query
+      {{- end }}
 
     processors:
       memory_limiter:
         check_interval: 1s
-        limit_mib: 512
+        limit_mib: {{ .Values.resources.limits.memory | trimSuffix "Mi" | default "512" }}
         spike_limit_mib: 128
         limit_percentage: 75
         spike_limit_percentage: 20
 
       adaptive_sampler:
-        rules:
-          - name: slow_queries
-            expression: 'attributes["db.statement.duration"] > 1000'
-            sample_rate: 1.0
-          - name: error_queries
-            expression: 'attributes["db.statement.error"] != nil'
-            sample_rate: 1.0
-          - name: high_frequency
-            expression: 'attributes["db.statement.calls"] > 1000'
-            sample_rate: 0.1
-        default_sampling_rate: 0.5
+        default_sampling_rate: {{ .Values.config.sampling.defaultRate }}
         in_memory_only: true
         max_cache_size: 10000
         cache_ttl: 5m
+        {{- if .Values.config.sampling.rules }}
+        rules:
+          {{- toYaml .Values.config.sampling.rules | nindent 10 }}
+        {{- end }}
 
+      {{- if .Values.config.circuitBreaker.enabled }}
       circuit_breaker:
-        failure_threshold: 5
+        failure_threshold: {{ .Values.config.circuitBreaker.failureThreshold }}
         success_threshold: 2
-        timeout: 30s
+        timeout: {{ .Values.config.circuitBreaker.timeout }}
         half_open_max_requests: 3
         backoff_multiplier: 2.0
         max_backoff: 5m
@@ -121,6 +189,7 @@ data:
           max_unique_queries: 10000
           max_unique_users: 1000
           window_duration: 5m
+      {{- end }}
 
       batch:
         send_batch_size: 500
@@ -144,7 +213,7 @@ data:
 
       verification:
         pii_detection:
-          enabled: true
+          enabled: {{ .Values.config.piiDetection.enabled }}
           patterns:
             credit_card: '\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'
             ssn: '\b\d{3}-\d{2}-\d{4}\b'
@@ -152,7 +221,7 @@ data:
             phone: '\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'
           scan_query_text: true
           scan_plan_json: true
-          action_on_detection: redact
+          action_on_detection: {{ .Values.config.piiDetection.action }}
         data_quality:
           enabled: true
           required_attributes:
@@ -177,7 +246,7 @@ data:
             value: ${ENVIRONMENT}
             action: upsert
           - key: service.name
-            value: postgresql-database-intelligence
+            value: {{ printf "%s-database-intelligence" (include "database-intelligence.fullname" .) }}
             action: upsert
           - key: service.version
             value: ${VERSION}
@@ -185,12 +254,26 @@ data:
           - key: collector.name
             value: database-intelligence-collector
             action: insert
+          - key: k8s.node.name
+            value: ${NODE_NAME}
+            action: insert
+          - key: k8s.pod.name
+            value: ${POD_NAME}
+            action: insert
+          - key: k8s.namespace.name
+            value: ${POD_NAMESPACE}
+            action: insert
 
       transform:
         metric_statements:
           - context: metric
             statements:
-              - set(attributes["db.system"], "postgresql")
+              {{- if .Values.config.postgres.enabled }}
+              - set(attributes["db.system"], "postgresql") where IsMatch(name, "^postgresql\\.")
+              {{- end }}
+              {{- if .Values.config.mysql.enabled }}
+              - set(attributes["db.system"], "mysql") where IsMatch(name, "^mysql\\.")
+              {{- end }}
               - set(attributes["db.deployment.environment"], "${ENVIRONMENT}")
 
     exporters:
@@ -210,6 +293,7 @@ data:
         namespace: dbintel
         const_labels:
           environment: ${ENVIRONMENT}
+          service: {{ include "database-intelligence.fullname" . }}
 
       debug:
         verbosity: detailed
@@ -233,8 +317,26 @@ data:
       extensions: [health_check, pprof, zpages]
       pipelines:
         metrics:
-          receivers: [postgresql, sqlquery]
-          processors: [memory_limiter, adaptive_sampler, circuit_breaker, batch, plan_attribute_extractor, verification, resource, transform]
+          receivers: 
+            {{- $receivers := list }}
+            {{- if .Values.config.postgres.enabled }}
+              {{- $receivers = append $receivers "postgresql" "sqlquery/postgresql" }}
+            {{- end }}
+            {{- if .Values.config.mysql.enabled }}
+              {{- $receivers = append $receivers "mysql" "sqlquery/mysql" }}
+            {{- end }}
+            {{ toJson $receivers }}
+          processors: 
+            - memory_limiter
+            - adaptive_sampler
+            {{- if .Values.config.circuitBreaker.enabled }}
+            - circuit_breaker
+            {{- end }}
+            - batch
+            - plan_attribute_extractor
+            - verification
+            - resource
+            - transform
           exporters: [otlp, prometheus]
       telemetry:
         logs:

@@ -827,6 +827,7 @@ func (vp *VerificationProcessor) detectAndSanitizePII(lr plog.LogRecord) {
 	
 	// Check attributes for PII
 	attrs.Range(func(k string, v pcommon.Value) bool {
+		// Check if field name contains PII keywords
 		for _, piiField := range vp.piiDetector.commonPIIFields {
 			if strings.Contains(strings.ToLower(k), piiField) {
 				vp.piiDetector.violations++
@@ -845,6 +846,32 @@ func (vp *VerificationProcessor) detectAndSanitizePII(lr plog.LogRecord) {
 				}
 			}
 		}
+		
+		// Also check attribute values for PII patterns
+		if v.Type() == pcommon.ValueTypeStr {
+			valueStr := v.Str()
+			for _, pattern := range vp.piiDetector.patterns {
+				if pattern.MatchString(valueStr) {
+					vp.piiDetector.violations++
+					vp.sendFeedback(FeedbackEvent{
+						Timestamp:   time.Now(),
+						Level:       "CRITICAL",
+						Category:    "pii_detection",
+						Message:     fmt.Sprintf("Potential PII detected in attribute '%s'", k),
+						Remediation: "Review and sanitize sensitive data",
+						Severity:    9,
+					})
+					
+					if vp.config.PIIDetection.AutoSanitize {
+						sanitizedValue := pattern.ReplaceAllString(valueStr, "[REDACTED]")
+						attrs.PutStr(k, sanitizedValue)
+						vp.piiDetector.sanitizedFields++
+					}
+					break // Stop after first match to avoid multiple replacements
+				}
+			}
+		}
+		
 		return true
 	})
 }
