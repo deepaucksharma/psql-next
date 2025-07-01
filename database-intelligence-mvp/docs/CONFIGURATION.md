@@ -1,6 +1,6 @@
-# Configuration Reference - Build Status
+# Configuration Reference - v2.0.0
 
-🔧 **BUILD SUCCESSFUL** - This document provides configuration guidance for the Database Intelligence Collector. Core OTEL components work, with working build pipeline and first custom processor.
+🔧 **BUILD SUCCESSFUL** - This document provides configuration guidance for the Database Intelligence Collector. All custom processors integrated, OHI migration support complete, enterprise features enabled.
 
 ## ✅ Working Build Configuration
 
@@ -52,8 +52,14 @@ processors:
   - go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.127.0
   - github.com/open-telemetry/opentelemetry-collector-contrib/processor/attributesprocessor v0.127.0
   
-  # Custom processors (1 working, 3 disabled)
+  # Custom processors (all working in v2.0.0)
   - github.com/database-intelligence-mvp/processors/planattributeextractor v0.1.0  # ✅ Working
+  - github.com/database-intelligence-mvp/processors/adaptivesampler v0.1.0  # ✅ Working
+  - github.com/database-intelligence-mvp/processors/circuitbreaker v0.1.0  # ✅ Working
+  - github.com/database-intelligence-mvp/processors/verification v0.1.0  # ✅ Working
+  - github.com/database-intelligence-mvp/processors/costcontrol v0.1.0  # ✅ Working (NEW)
+  - github.com/database-intelligence-mvp/processors/nrerrormonitor v0.1.0  # ✅ Working (NEW)
+  - github.com/database-intelligence-mvp/processors/querycorrelator v0.1.0  # ✅ Working (NEW)
 
 exporters:
   - go.opentelemetry.io/collector/exporter/otlpexporter v0.127.0
@@ -449,6 +455,69 @@ service:
       processors: [memory_limiter, resource, transform, batch]
       exporters: [otlp/newrelic]
 ```
+
+## OHI Migration Configuration
+
+The v2.0.0 release includes full OHI (On-Host Integration) compatibility:
+
+### OHI-Compatible Pipeline
+```yaml
+# config/collector-ohi-migration.yaml
+receivers:
+  postgresql:
+    endpoint: ${POSTGRES_HOST}:${POSTGRES_PORT}
+    collection_interval: 15s  # Match OHI interval
+    
+  sqlquery/postgresql_queries:
+    driver: postgres
+    datasource: "host=${POSTGRES_HOST}..."
+    collection_interval: 60s
+    queries:
+      # pg_stat_statements with OHI thresholds
+      - sql: |
+          SELECT ... FROM pg_stat_statements
+          WHERE calls > 20  # OHI threshold
+            AND mean_exec_time > 500  # OHI threshold
+
+processors:
+  # OHI metric transformations
+  metricstransform/ohi_compatibility:
+    transforms:
+      - include: postgresql.commits
+        action: update
+        new_name: db.commitsPerSecond
+        
+  # Query correlation for OHI parity
+  querycorrelator:
+    retention_period: 24h
+    enable_table_correlation: true
+    
+  # Enterprise features
+  costcontrol:
+    monthly_budget_usd: 5000
+    metric_cardinality_limit: 10000
+    
+  nrerrormonitor:
+    max_attribute_length: 4095
+    cardinality_warning_threshold: 10000
+```
+
+### Key OHI Features Supported
+
+1. **Metric Name Compatibility**
+   - All OHI metric names preserved
+   - Automatic transformation from OTEL names
+   - Backward compatible dashboards
+
+2. **Query Performance Monitoring**
+   - pg_stat_statements collection
+   - Query anonymization and fingerprinting
+   - Correlation with table statistics
+
+3. **Entity Synthesis**
+   - Required attributes for New Relic entities
+   - Proper service.name and host.id mapping
+   - Integration metadata
 
 ## Complete Examples
 

@@ -1,0 +1,372 @@
+{
+  "name": "PostgreSQL Database Monitoring (OHI Compatible)",
+  "description": "PostgreSQL monitoring dashboard with OHI metric compatibility",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Overview",
+      "description": "Database health and performance overview",
+      "guid": "postgresql-overview",
+      "widgets": [
+        {
+          "title": "Database Connection Status",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.connections.active) as 'Active', latest(db.connections.max) as 'Max Allowed' FROM Metric WHERE db.system = 'postgresql' FACET database_name TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Query Performance by Type",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(db.query.mean_time) FROM Metric WHERE db.system = 'postgresql' FACET statement_type TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Database Size Growth",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.database.sizeInBytes) / 1e9 as 'Size (GB)' FROM Metric WHERE db.system = 'postgresql' FACET database_name TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Cache Hit Ratio",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT (sum(db.reads.blocksPerSecond) / (sum(db.reads.blocksPerSecond) + sum(db.writes.blocksPerSecond))) * 100 as 'Cache Hit %' FROM Metric WHERE db.system = 'postgresql' FACET database_name TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Transaction Rate",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(db.commitsPerSecond), 1 minute) as 'Commits', rate(sum(db.rollbacksPerSecond), 1 minute) as 'Rollbacks' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Checkpoint Activity",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(db.bgwriter.checkpointsScheduledPerSecond), 1 minute) as 'Checkpoints', average(db.bgwriter.checkpointWriteTimeInMillisecondsPerSecond) as 'Avg Write Time (ms)' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        }
+      ]
+    },
+    {
+      "name": "Query Performance",
+      "description": "Detailed query performance analysis",
+      "guid": "postgresql-queries",
+      "widgets": [
+        {
+          "title": "Top Slow Queries",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(db.query.mean_duration) as 'Avg Duration (ms)', sum(db.query.count) as 'Executions' FROM Metric WHERE db.system = 'postgresql' AND db.query.mean_duration > 500 FACET query_text LIMIT 20"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Query Load Distribution",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.query.duration) FROM Metric WHERE db.system = 'postgresql' FACET statement_type TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "AREA"
+        },
+        {
+          "title": "Query Cache Performance",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(db.query.cache_hit_ratio) as 'Cache Hit %' FROM Metric WHERE db.system = 'postgresql' FACET database_name, statement_type TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "I/O Impact by Query",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.io.disk_reads) as 'Disk Reads', sum(db.io.disk_writes) as 'Disk Writes' FROM Metric WHERE db.system = 'postgresql' FACET queryid, statement_type LIMIT 20"
+              }
+            ]
+          },
+          "visualization": "BAR"
+        },
+        {
+          "title": "Temp File Usage",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.query.temp_blocks) as 'Temp Blocks' FROM Metric WHERE db.system = 'postgresql' AND db.query.temp_blocks > 0 FACET query_text LIMIT 10"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Query Execution Trends",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT histogram(db.query.mean_duration, 10, 20) FROM Metric WHERE db.system = 'postgresql' FACET performance.category"
+              }
+            ]
+          },
+          "visualization": "HISTOGRAM"
+        }
+      ]
+    },
+    {
+      "name": "Database Resources",
+      "description": "Resource utilization and capacity",
+      "guid": "postgresql-resources",
+      "widgets": [
+        {
+          "title": "Table Sizes",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.table.sizeInBytes) / 1e6 as 'Size (MB)' FROM Metric WHERE db.system = 'postgresql' FACET schemaname, tablename LIMIT 50"
+              }
+            ]
+          },
+          "visualization": "BAR"
+        },
+        {
+          "title": "Dead Tuples",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.table.dead_tuples) FROM Metric WHERE db.system = 'postgresql' AND db.table.dead_tuples > 1000 FACET schemaname, tablename LIMIT 20"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Index Usage",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.index.unused_size) / 1e6 as 'Unused Index Size (MB)' FROM Metric WHERE db.system = 'postgresql' FACET schemaname, tablename, indexname LIMIT 20"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "WAL Activity",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.wal.age) as 'WAL Age', latest(db.wal.lag) as 'WAL Lag' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Background Writer Stats",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(db.bgwriter.buffersWrittenByBackgroundWriterPerSecond), 1 minute) as 'Buffers Written' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        }
+      ]
+    },
+    {
+      "name": "Replication & HA",
+      "description": "Replication lag and high availability metrics",
+      "guid": "postgresql-replication",
+      "widgets": [
+        {
+          "title": "Replication Lag",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.replication.lagInBytes) / 1e6 as 'Lag (MB)' FROM Metric WHERE db.system = 'postgresql' FACET replica_name TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Replica Status",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.replication.lag_time) as 'Time Lag (ms)' FROM Metric WHERE db.system = 'postgresql' FACET replica_name"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        }
+      ]
+    },
+    {
+      "name": "Alerts & Issues",
+      "description": "Active issues and performance alerts",
+      "guid": "postgresql-alerts",
+      "widgets": [
+        {
+          "title": "Blocked Sessions",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.connections.blocked) as 'Blocked', latest(db.connections.blocking) as 'Blocking' FROM Metric WHERE db.system = 'postgresql' FACET database_name TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Wait Events",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.wait_events) FROM Metric WHERE db.system = 'postgresql' FACET wait_event_type, wait_event, database_name LIMIT 20"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Tables Needing Maintenance",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.table.dead_tuples) as 'Dead Tuples', latest(db.table.modifications) as 'Modifications' FROM Metric WHERE db.system = 'postgresql' AND attributes.table.needs_vacuum = true FACET schemaname, tablename"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        }
+      ]
+    }
+  ]
+}

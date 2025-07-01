@@ -5,6 +5,7 @@
 .PHONY: all build test clean run install-tools help docker-up docker-down lint fmt vet deps
 .PHONY: verify quickstart docker-simple docker-prod k8s-minimal k8s-prod test-integration
 .PHONY: build-image push-image generate-config validate-config collector-debug
+.PHONY: test-unit test-e2e test-benchmark test-ohi-validation migrate-ohi
 
 # Variables
 BINARY_NAME := otelcol-db-intelligence
@@ -33,13 +34,32 @@ build: ## Build the OTEL-first collector
 		exit 1; \
 	fi
 
-test: test-e2e ## Run all tests (e2e only)
+test: test-unit test-integration test-e2e ## Run all tests
 
-test-e2e: ## Run end-to-end tests (NRDB validation)
+test-unit: ## Run unit tests
+	@echo "🧪 Running unit tests..."
+	@go test -v -race -coverprofile=coverage.out ./...
+	@echo "✅ Unit tests completed"
+
+test-integration: ## Run integration tests
+	@echo "🧪 Running integration tests..."
+	@go test -v -tags=integration ./tests/integration/...
+	@echo "✅ Integration tests completed"
+
+test-e2e: ## Run end-to-end tests (database to NRDB)
 	@echo "🧪 Running E2E tests..."
-	@chmod +x tests/e2e/run-e2e-tests.sh
-	@./tests/e2e/run-e2e-tests.sh
+	@go test -v -timeout 10m ./tests/e2e/...
 	@echo "✅ E2E tests completed"
+
+test-benchmark: ## Run performance benchmarks
+	@echo "📏 Running performance benchmarks..."
+	@go test -bench=. -benchmem ./tests/benchmark/...
+	@echo "✅ Benchmarks completed"
+
+test-ohi-validation: ## Run OHI compatibility validation
+	@echo "🔍 Running OHI validation..."
+	@cd validation && go run ohi-compatibility-validator.go
+	@echo "✅ OHI validation completed"
 
 clean: ## Clean build artifacts
 	@echo "🧹 Cleaning build artifacts..."
@@ -185,10 +205,20 @@ health: ## Check collector health
 	@echo "🏥 Checking collector health..."
 	@curl -s http://localhost:13133/ | jq '.' || echo "Collector not running"
 
+## OHI Migration targets
+
+migrate-ohi: build ## Run OHI migration collector
+	@echo "🔄 Starting OHI migration collector..."
+	@$(DIST_DIR)/$(BINARY_NAME) --config=config/collector-ohi-migration.yaml
+
+validate-ohi: build ## Validate OHI compatibility configuration
+	@echo "✔️ Validating OHI configuration..."
+	@$(DIST_DIR)/$(BINARY_NAME) validate --config=config/collector-ohi-migration.yaml
+
 ## Help
 
 help: ## Display this help message
-	@echo "Database Intelligence MVP - OTEL-First Build System"
+	@echo "Database Intelligence MVP - v2.0.0 with OHI Migration Support"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""

@@ -3,7 +3,6 @@ package queryselector
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sort"
 	"sync"

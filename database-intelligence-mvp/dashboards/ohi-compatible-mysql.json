@@ -1,0 +1,372 @@
+{
+  "name": "MySQL Database Monitoring (OHI Compatible)",
+  "description": "MySQL monitoring dashboard with OHI metric compatibility",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Overview",
+      "description": "Database health and performance overview",
+      "guid": "mysql-overview",
+      "widgets": [
+        {
+          "title": "Connection Usage",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.connections.active) as 'Active', latest(db.connections.max) as 'Max Allowed' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Query Performance Overview",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(db.query.mean_duration) FROM Metric WHERE db.system = 'mysql' FACET statement_type TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "InnoDB Buffer Pool Efficiency",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT (latest(db.innodb.bufferPoolDataPages) / latest(db.innodb.bufferPoolTotalPages)) * 100 as 'Buffer Pool Usage %' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Query Cache Hit Rate",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT (rate(sum(db.queryCacheHitsPerSecond), 1 minute) / (rate(sum(db.queryCacheHitsPerSecond), 1 minute) + rate(sum(db.handler.readRndNextPerSecond), 1 minute))) * 100 as 'Cache Hit %' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Handler Operations",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(db.handler.writePerSecond), 1 minute) as 'Writes', rate(sum(db.handler.readRndNextPerSecond), 1 minute) as 'Reads' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "InnoDB Page Flushes",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(db.innodb.bufferPoolPagesFlushedPerSecond), 1 minute) as 'Pages Flushed' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        }
+      ]
+    },
+    {
+      "name": "Query Analysis",
+      "description": "Detailed query performance metrics",
+      "guid": "mysql-queries",
+      "widgets": [
+        {
+          "title": "Slowest Queries",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(db.query.mean_duration) as 'Avg Duration (ms)', sum(db.query.count) as 'Executions' FROM Metric WHERE db.system = 'mysql' AND db.query.mean_duration > 500 FACET query_text, database_name LIMIT 20"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Query Types Distribution",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.query.count) FROM Metric WHERE db.system = 'mysql' FACET statement_type"
+              }
+            ]
+          },
+          "visualization": "PIE"
+        },
+        {
+          "title": "Query Row Analysis",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(db.query.rows_sent) as 'Rows Sent', average(db.query.rows_examined) as 'Rows Examined' FROM Metric WHERE db.system = 'mysql' FACET statement_type TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Full Table Scans",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.query.full_scans) as 'Full Scans', sum(db.query.full_joins) as 'Full Joins' FROM Metric WHERE db.system = 'mysql' FACET database_name, query_text LIMIT 20"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Temporary Table Usage",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.query.tmp_tables) as 'Tmp Tables', sum(db.query.tmp_disk_tables) as 'Tmp Disk Tables' FROM Metric WHERE db.system = 'mysql' FACET query_text LIMIT 10"
+              }
+            ]
+          },
+          "visualization": "BAR"
+        }
+      ]
+    },
+    {
+      "name": "InnoDB Engine",
+      "description": "InnoDB storage engine metrics",
+      "guid": "mysql-innodb",
+      "widgets": [
+        {
+          "title": "Buffer Pool Pages",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.innodb.bufferPoolDataPages) as 'Data Pages', latest(db.innodb.bufferPoolDirtyPages) as 'Dirty Pages', latest(db.innodb.bufferPoolFreePages) as 'Free Pages' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "AREA"
+        },
+        {
+          "title": "Buffer Pool Hit Rate",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT ((latest(db.innodb.bufferPoolDataPages) - latest(db.innodb.bufferPoolFreePages)) / latest(db.innodb.bufferPoolTotalPages)) * 100 as 'Hit Rate %' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "BILLBOARD"
+        },
+        {
+          "title": "InnoDB Row Operations",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(db.innodb.rows.inserted), 1 minute) as 'Inserts', rate(sum(db.innodb.rows.updated), 1 minute) as 'Updates', rate(sum(db.innodb.rows.deleted), 1 minute) as 'Deletes', rate(sum(db.innodb.rows.read), 1 minute) as 'Reads' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "InnoDB Log Writes",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(db.innodb.log.writes), 1 minute) as 'Log Writes', rate(sum(db.innodb.log.write_requests), 1 minute) as 'Write Requests' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        }
+      ]
+    },
+    {
+      "name": "Replication",
+      "description": "MySQL replication status and lag",
+      "guid": "mysql-replication",
+      "widgets": [
+        {
+          "title": "Replication Lag",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.replication.secondsBehindMaster) as 'Seconds Behind Master' FROM Metric WHERE db.system = 'mysql' FACET replica_name TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Replication Status",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.replication.lagInMilliseconds) as 'Lag (ms)', latest(db.replication.io_running) as 'IO Running', latest(db.replication.sql_running) as 'SQL Running' FROM Metric WHERE db.system = 'mysql' FACET replica_name"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        },
+        {
+          "title": "Binlog Position",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.replication.master_log_file) as 'Master Log File', latest(db.replication.read_master_log_pos) as 'Read Position', latest(db.replication.exec_master_log_pos) as 'Exec Position' FROM Metric WHERE db.system = 'mysql' FACET replica_name"
+              }
+            ]
+          },
+          "visualization": "TABLE"
+        }
+      ]
+    },
+    {
+      "name": "Resource Usage",
+      "description": "Table and index resource utilization",
+      "guid": "mysql-resources",
+      "widgets": [
+        {
+          "title": "Table Sizes",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.table.size) / 1e6 as 'Size (MB)' FROM Metric WHERE db.system = 'mysql' FACET database_name, table_name LIMIT 50"
+              }
+            ]
+          },
+          "visualization": "BAR"
+        },
+        {
+          "title": "Query Cache Usage",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.queryCacheSizeInBytes) / 1e6 as 'Cache Size (MB)', latest(db.query_cache.free_memory) / 1e6 as 'Free Memory (MB)' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Thread Usage",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.threads.connected) as 'Connected', latest(db.threads.running) as 'Running', latest(db.threads.cached) as 'Cached' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        },
+        {
+          "title": "Table Lock Waits",
+          "configuration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(db.table.locks.waited), 1 minute) as 'Lock Waits', rate(sum(db.table.locks.immediate), 1 minute) as 'Immediate Locks' FROM Metric WHERE db.system = 'mysql' TIMESERIES AUTO"
+              }
+            ]
+          },
+          "visualization": "LINE"
+        }
+      ]
+    }
+  ]
+}

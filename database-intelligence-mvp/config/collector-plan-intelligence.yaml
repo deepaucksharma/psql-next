@@ -1,0 +1,270 @@
+# Plan Intelligence Collector Configuration
+# This configuration enables plan collection and regression detection
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  # Standard PostgreSQL receiver for metrics
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER:-postgres}
+    password: ${env:POSTGRES_PASSWORD:-postgres}
+    databases:
+      - ${env:POSTGRES_DB:-postgres}
+    tls:
+      insecure: true
+    collection_interval: 60s
+
+  # Auto-explain receiver for plan collection
+  autoexplain:
+    log_path: ${env:POSTGRES_LOG_PATH:-/var/log/postgresql/postgresql.log}
+    log_format: json  # json, csv, or text
+    
+    # Database connection for enrichment
+    database:
+      endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+      username: ${env:POSTGRES_USER:-postgres}
+      password: ${env:POSTGRES_PASSWORD:-postgres}
+      database: ${env:POSTGRES_DB:-postgres}
+    
+    # Plan collection settings
+    plan_collection:
+      enabled: true
+      min_duration: 100ms           # Only collect plans for queries > 100ms
+      max_plans_per_query: 10       # Keep last 10 plans per query
+      retention_duration: 24h       # Keep plans for 24 hours
+      
+      # Regression detection
+      regression_detection:
+        enabled: true
+        performance_degradation_threshold: 0.2  # Alert on 20% slowdown
+        cost_increase_threshold: 0.5           # Alert on 50% cost increase
+        min_executions: 10                     # Need 10 executions for comparison
+        statistical_confidence: 0.95           # 95% confidence level
+    
+    # Plan anonymization
+    plan_anonymization:
+      enabled: true
+      anonymize_filters: true
+      anonymize_join_conditions: true
+      remove_cost_estimates: false
+      sensitive_node_types:
+        - Filter
+        - Index Cond
+        - Recheck Cond
+        - Function Scan
+
+  # Enhanced SQL receiver with plan-aware queries
+  enhancedsql/postgresql:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-postgres} sslmode=disable"
+    
+    collection_interval: 300s
+    
+    # Query for current plans from pg_stat_statements
+    queries:
+      - sql: |
+          SELECT 
+            s.queryid::text as query_id,
+            s.query,
+            s.plans as plan_count,
+            s.total_plan_time as total_plan_time_ms,
+            s.mean_plan_time as mean_plan_time_ms,
+            s.total_exec_time as total_exec_time_ms,
+            s.mean_exec_time as mean_exec_time_ms,
+            s.calls,
+            s.rows,
+            (s.shared_blks_hit::float / NULLIF(s.shared_blks_hit + s.shared_blks_read, 0)) as cache_hit_ratio,
+            pg_size_pretty(s.temp_blks_written * current_setting('block_size')::int) as temp_usage
+          FROM pg_stat_statements s
+          WHERE s.mean_exec_time > 50  -- Only queries > 50ms
+            AND s.calls > 5             -- Called at least 5 times
+          ORDER BY s.mean_exec_time DESC
+          LIMIT 100
+        metrics:
+          - metric_name: db.postgresql.query.plan_time
+            value_column: mean_plan_time_ms
+            value_type: gauge
+            attribute_columns: [query_id]
+          - metric_name: db.postgresql.query.exec_time
+            value_column: mean_exec_time_ms
+            value_type: gauge
+            attribute_columns: [query_id]
+          - metric_name: db.postgresql.query.cache_hit_ratio
+            value_column: cache_hit_ratio
+            value_type: gauge
+            attribute_columns: [query_id]
+        logs:
+          - body_column: query
+            attributes:
+              query_id: query_id
+              plan_count: plan_count
+              calls: calls
+              rows: rows
+              temp_usage: temp_usage
+
+processors:
+  # Memory limiter
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  # Add standard attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT:-development}
+        action: upsert
+
+  # Plan attribute extractor with enhanced anonymization
+  planattributeextractor:
+    enabled: true
+    safe_mode: true
+    plan_sources:
+      - auto_explain
+      - pg_stat_statements
+    
+    anonymization:
+      enabled: true
+      sensitive_patterns:
+        - email
+        - ssn
+        - credit_card
+        - phone
+        - ip_address
+    
+    plan_analysis:
+      enabled: true
+      detect_issues: true
+      generate_recommendations: true
+    
+    regression_tracking:
+      enabled: true
+      store_duration: 7d
+      alert_on_regression: true
+
+  # Circuit breaker with plan-aware protection
+  circuitbreaker:
+    failure_threshold: 5
+    timeout: 30s
+    
+    # Plan-specific error patterns
+    error_patterns:
+      - pattern: "statement timeout"
+        action: reduce_collection_frequency
+        backoff: 5m
+        
+      - pattern: "auto_explain.*not loaded"
+        action: disable_plan_collection
+        backoff: 1h
+        alert: true
+        
+      - pattern: "permission denied.*pg_stat_statements"
+        action: disable_query
+        backoff: 24h
+        alert: true
+
+  # Adaptive sampling with plan awareness
+  adaptivesampler:
+    in_memory_only: true
+    default_sampling_rate: 0.1
+    
+    rules:
+      # Always collect plan regressions
+      - name: plan_regressions
+        conditions:
+          - attribute: event_type
+            operator: eq
+            value: plan_regression
+        sample_rate: 1.0
+        
+      # High sampling for queries with plan changes
+      - name: plan_changes
+        conditions:
+          - attribute: plan_count
+            operator: gt
+            value: 1
+        sample_rate: 0.8
+        
+      # Sample slow queries more
+      - name: slow_queries
+        conditions:
+          - attribute: mean_exec_time_ms
+            operator: gt
+            value: 1000
+        sample_rate: 1.0
+
+  # Batch processor
+  batch:
+    timeout: 30s
+    send_batch_size: 1000
+
+exporters:
+  # OTLP exporter to New Relic
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+
+  # Prometheus for local metrics
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    namespace: dbintel
+    const_labels:
+      environment: ${env:ENVIRONMENT:-development}
+
+  # Debug exporter for development
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  extensions: [health_check, zpages]
+  
+  pipelines:
+    # Infrastructure metrics
+    metrics/infrastructure:
+      receivers: [postgresql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/newrelic, prometheus]
+    
+    # Plan metrics from auto_explain
+    metrics/plans:
+      receivers: [autoexplain]
+      processors: [memory_limiter, resource, planattributeextractor, adaptivesampler, batch]
+      exporters: [otlp/newrelic, prometheus]
+    
+    # Query performance metrics
+    metrics/queries:
+      receivers: [enhancedsql/postgresql]
+      processors: [memory_limiter, resource, circuitbreaker, batch]
+      exporters: [otlp/newrelic, prometheus]
+    
+    # Query logs with plans
+    logs/queries:
+      receivers: [enhancedsql/postgresql]
+      processors: [memory_limiter, resource, planattributeextractor, batch]
+      exporters: [otlp/newrelic, debug]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

@@ -20,14 +20,16 @@ Comprehensive architecture documentation covering system design, implementation 
 
 ## System Overview
 
-The Database Intelligence Collector is an OpenTelemetry-based monitoring solution enhanced with 4 sophisticated custom processors (3,242 lines of production code). It follows an OTEL-first architecture, using standard components where possible and custom processors only to fill database-specific gaps.
+The Database Intelligence Collector is an OpenTelemetry-based monitoring solution enhanced with 7 sophisticated custom processors (>5,000 lines of production code). It follows an OTEL-first architecture, using standard components where possible and custom processors for database-specific features, enterprise requirements, and OHI migration support.
 
 ### Key Characteristics
 - **OTEL-First**: Leverages standard OpenTelemetry components
-- **Intelligent Processing**: 4 custom processors for sampling, protection, enrichment, and compliance
+- **Intelligent Processing**: 7 custom processors for sampling, protection, enrichment, compliance, cost control, and correlation
+- **OHI Compatible**: Full metric parity with New Relic On-Host Integration
+- **Enterprise Ready**: Cost control, error monitoring, and security features
 - **Resilient Design**: Graceful degradation with circuit breakers
 - **Zero-Persistence**: In-memory state for operational simplicity
-- **Production-Ready**: Comprehensive testing and validation
+- **Production-Ready**: Comprehensive E2E testing and validation
 
 ## Architecture Principles
 
@@ -39,9 +41,10 @@ receivers: [postgresql, mysql, sqlquery]
 processors: [memory_limiter, batch, transform, resource]
 exporters: [otlp, prometheus, debug]
 
-# Custom processors only for gaps
+# Custom processors for database intelligence and enterprise features
 processors: [memory_limiter, adaptive_sampler, circuit_breaker, 
-            plan_extractor, verification, batch]
+            plan_extractor, verification, cost_control,
+            nr_error_monitor, query_correlator, metric_transform, batch]
 ```
 
 ### 2. Graceful Degradation
@@ -84,6 +87,10 @@ graph TB
             CB[Circuit Breaker]
             PE[Plan Extractor]
             VE[Verification]
+            CC[Cost Control]
+            NM[NR Error Monitor]
+            QC[Query Correlator]
+            MT[Metric Transform]
             BA[Batch]
         end
         
@@ -114,11 +121,15 @@ graph TB
     MYR --> ML
     SQLr --> ML
     
-    ML --> AS
+    ML --> MT
+    MT --> AS
     AS --> CB
     CB --> PE
     PE --> VE
-    VE --> BA
+    VE --> QC
+    QC --> CC
+    CC --> NM
+    NM --> BA
     
     BA --> OTLP
     BA --> PROM
@@ -149,7 +160,7 @@ graph TB
     classDef monitoring fill:#fce4ec,stroke:#880e4f,stroke-width:2px
     
     class PGR,MYR,SQLr receiver
-    class ML,AS,CB,PE,VE,BA processor
+    class ML,AS,CB,PE,VE,CC,NM,QC,MT,BA processor
     class OTLP,PROM,DEBUG exporter
     class HM,RL,ST,CA internal
     class HEALTH,METRICS,TRACES monitoring
@@ -167,11 +178,14 @@ Database → Receiver → Initial Metrics
 
 ### 2. Processing Phase
 ```
-Metrics → Memory Limiter → Sampling → Circuit Breaking → Enrichment → Verification → Batching
+Metrics → Memory Limiter → Metric Transform → Sampling → Circuit Breaking → 
+          Enrichment → Verification → Correlation → Cost Control → 
+          Error Monitoring → Batching
 ```
 - Each processor operates independently
 - Failures in one processor don't affect others
 - State is maintained in-memory only
+- OHI compatibility transformations applied early
 
 ### 3. Export Phase
 ```
@@ -183,7 +197,9 @@ Batched Metrics → Exporters → Destinations
 
 ## Custom Processors Implementation
 
-### 1. Adaptive Sampler (576 lines)
+### Core Database Processors
+
+#### 1. Adaptive Sampler (576 lines)
 
 **Purpose**: Intelligent sampling based on configurable rules
 
@@ -218,7 +234,7 @@ adaptive_sampler:
   default_sample_rate: 0.1
 ```
 
-### 2. Circuit Breaker (922 lines)
+#### 2. Circuit Breaker (922 lines)
 
 **Purpose**: Protect databases from overload
 
@@ -247,7 +263,7 @@ Half-Open → (success) → Closed
 Half-Open → (failure) → Open
 ```
 
-### 3. Plan Attribute Extractor (391 lines)
+#### 3. Plan Attribute Extractor (391 lines)
 
 **Purpose**: Extract and analyze query execution plans
 
@@ -274,7 +290,7 @@ type planAttributeExtractor struct {
 - Plan hash
 - Operation types
 
-### 4. Verification Processor (1,353 lines)
+#### 4. Verification Processor (1,353 lines)
 
 **Purpose**: Data quality and compliance
 
@@ -303,6 +319,74 @@ Credit Card: \b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b
 Email: \b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b
 ```
 
+### Enterprise Processors
+
+#### 5. Cost Control Processor (892 lines)
+
+**Purpose**: Manage telemetry costs through intelligent data reduction
+
+**Architecture**:
+```go
+type costControlProcessor struct {
+    config            *Config
+    logger            *zap.Logger
+    costTracker       *costTracker
+    metricCardinality map[string]*cardinalityTracker
+    nextTraces        consumer.Traces
+    nextMetrics       consumer.Metrics
+    nextLogs          consumer.Logs
+}
+```
+
+**Key Features**:
+- Monthly budget enforcement
+- Cardinality reduction
+- Aggressive mode when over budget
+- Data Plus pricing support
+
+#### 6. NR Error Monitor (654 lines)
+
+**Purpose**: Proactively detect patterns that cause NrIntegrationError
+
+**Architecture**:
+```go
+type nrErrorMonitor struct {
+    config       *Config
+    logger       *zap.Logger
+    errorCounts  map[string]*errorTracker
+    nextConsumer consumer.Metrics
+}
+```
+
+**Key Features**:
+- Attribute length validation
+- Cardinality monitoring
+- Semantic convention checks
+- Alert generation
+
+### Migration Processors
+
+#### 7. Query Correlator (450 lines)
+
+**Purpose**: Correlate queries with database and table metrics
+
+**Architecture**:
+```go
+type queryCorrelator struct {
+    config        *Config
+    logger        *zap.Logger
+    queryIndex    map[string]*queryInfo
+    tableIndex    map[string]*tableInfo
+    databaseIndex map[string]*databaseInfo
+}
+```
+
+**Key Features**:
+- Query-to-table correlation
+- Performance categorization
+- Load contribution calculation
+- Maintenance indicators
+
 ## Technical Implementation Details
 
 ### Main Entry Point
@@ -314,19 +398,30 @@ import (
     "go.opentelemetry.io/collector/component"
     "go.opentelemetry.io/collector/otelcol"
     
-    // Custom processors
+    // Core database processors
     "github.com/database-intelligence-mvp/processors/adaptivesampler"
     "github.com/database-intelligence-mvp/processors/circuitbreaker"
     "github.com/database-intelligence-mvp/processors/planattributeextractor"
     "github.com/database-intelligence-mvp/processors/verification"
+    
+    // Enterprise processors
+    "github.com/database-intelligence-mvp/processors/costcontrol"
+    "github.com/database-intelligence-mvp/processors/nrerrormonitor"
+    "github.com/database-intelligence-mvp/processors/querycorrelator"
 )
 
 func components() (otelcol.Factories, error) {
     factories.Processors, err = component.MakeProcessorFactoryMap(
+        // Core processors
         adaptivesampler.NewFactory(),
         circuitbreaker.NewFactory(),
         planattributeextractor.NewFactory(),
         verification.NewFactory(),
+        
+        // Enterprise processors
+        costcontrol.NewFactory(),
+        nrerrormonitor.NewFactory(),
+        querycorrelator.NewFactory(),
     )
     return factories, err
 }

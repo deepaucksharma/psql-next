@@ -1,0 +1,283 @@
+# Feature-aware collector configuration with automatic fallback
+# This configuration demonstrates the enhanced SQL receiver with feature detection
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  # Enhanced SQL receiver with feature detection for PostgreSQL
+  enhancedsql/postgresql:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-postgres} sslmode=disable"
+    collection_interval: 60s
+    max_open_connections: 5
+    max_idle_connections: 2
+    
+    # Feature detection configuration
+    feature_detection:
+      enabled: true
+      cache_duration: 5m
+      refresh_interval: 30m
+      timeout_per_check: 3s
+      retry_attempts: 3
+      retry_delay: 1s
+      skip_cloud_detection: false
+    
+    # Query configurations with automatic selection based on features
+    queries:
+      - name: slow_queries
+        category: slow_queries
+        timeout: 30s
+        max_rows: 100
+        parameters:
+          - name: min_duration
+            type: duration
+            default_duration: 50ms
+            unit: ms
+          - name: limit
+            type: int
+            default_int: 20
+        metrics:
+          - metric_name: db.query.duration
+            description: "Query execution duration"
+            value_column: mean_time
+            value_type: gauge
+            attribute_columns: [query_id, database_name]
+          - metric_name: db.query.calls
+            description: "Query execution count"
+            value_column: execution_count
+            value_type: sum
+            attribute_columns: [query_id, database_name]
+        logs:
+          - body_column: query_text
+            attributes:
+              query_id: query_id
+              duration_ms: mean_time
+              execution_count: execution_count
+              database: database_name
+              
+      - name: active_sessions
+        category: active_sessions
+        timeout: 5s
+        max_rows: 500
+        metrics:
+          - metric_name: db.connections.active
+            description: "Active database connections"
+            value_column: active_sessions
+            value_type: gauge
+            attribute_columns: [state, wait_event_type]
+            
+    # Custom query definitions with requirements
+    custom_queries:
+      # Advanced PostgreSQL queries requiring specific extensions
+      - name: pg_stat_monitor_advanced
+        category: slow_queries
+        priority: 100
+        description: "Advanced metrics from pg_stat_monitor"
+        sql: |
+          SELECT 
+            queryid::text as query_id,
+            query as query_text,
+            calls as execution_count,
+            total_time as total_time,
+            mean_time as mean_time,
+            p99 as p99_time,
+            rows,
+            shared_blks_hit,
+            shared_blks_read,
+            cpu_user_time,
+            cpu_sys_time,
+            wal_records,
+            wal_bytes,
+            current_database() as database_name
+          FROM pg_stat_monitor
+          WHERE mean_time > $1
+            AND query NOT LIKE '%pg_%'
+          ORDER BY mean_time DESC
+          LIMIT $2
+        requirements:
+          required_extensions: ["pg_stat_monitor"]
+          
+      - name: wait_events_detailed
+        category: wait_events
+        priority: 90
+        description: "Detailed wait event statistics"
+        sql: |
+          SELECT 
+            queryid::text as query_id,
+            event_type,
+            event,
+            sum(count) as wait_count,
+            sum(time) as wait_time_ms
+          FROM pg_wait_sampling_profile
+          WHERE queryid IS NOT NULL
+          GROUP BY queryid, event_type, event
+          ORDER BY wait_time_ms DESC
+          LIMIT 100
+        requirements:
+          required_extensions: ["pg_wait_sampling"]
+          
+  # Enhanced SQL receiver for MySQL
+  enhancedsql/mysql:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-mysql}@tcp(${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306})/${env:MYSQL_DB:-mysql}"
+    collection_interval: 60s
+    
+    feature_detection:
+      enabled: true
+      cache_duration: 5m
+      refresh_interval: 30m
+    
+    queries:
+      - name: slow_queries
+        category: slow_queries
+        timeout: 30s
+        max_rows: 100
+        parameters:
+          - name: min_duration
+            type: duration
+            default_duration: 50ms
+            unit: ms
+          - name: limit
+            type: int
+            default_int: 20
+        metrics:
+          - metric_name: db.query.duration
+            description: "Query execution duration"
+            value_column: avg_duration_ms
+            value_type: gauge
+            attribute_columns: [query_id, database_name]
+          - metric_name: db.query.calls
+            description: "Query execution count"
+            value_column: execution_count
+            value_type: sum
+            attribute_columns: [query_id, database_name]
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+    
+  # Batch processor for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    
+  # Resource processor to add standard attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: database-monitor
+        action: upsert
+      - key: environment
+        value: ${env:ENVIRONMENT:-development}
+        action: upsert
+      - key: db.system
+        from_attribute: db.system
+        action: insert
+        
+  # Transform processor to anonymize queries
+  transform/anonymize:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Anonymize query text
+          - replace_pattern(attributes["query_text"], "'[^']*'", "'?'")
+          - replace_pattern(attributes["query_text"], '"[^"]*"', '"?"')
+          - replace_pattern(attributes["query_text"], '\b\d+\b', '?')
+          
+  # Circuit breaker for protection
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 3
+    timeout: 30s
+    half_open_requests: 3
+    error_patterns:
+      # Database extension not found
+      - pattern: "relation.*does not exist"
+        action: disable_query
+        backoff: 5m
+      - pattern: "permission denied"
+        action: disable_query
+        backoff: 30m
+      - pattern: "extension.*not installed"
+        action: use_fallback
+        backoff: 1m
+      # Connection errors
+      - pattern: "connection refused"
+        action: circuit_break
+        backoff: 30s
+      - pattern: "too many connections"
+        action: circuit_break
+        backoff: 1m
+        
+  # Adaptive sampler for high cardinality
+  adaptivesampler:
+    in_memory_only: true
+    rules:
+      - name: "slow_queries"
+        expression: 'attributes["duration_ms"] > 1000'
+        sampling_rate: 1.0
+      - name: "normal_queries"
+        expression: 'attributes["duration_ms"] <= 1000'
+        sampling_rate: 0.1
+    default_sampling_rate: 0.05
+    
+  # Verification processor for data quality
+  verification:
+    enabled: true
+    pii_detection:
+      enabled: true
+      sensitivity_level: high
+    quality_checks:
+      check_required_fields: true
+      validate_data_types: true
+      
+exporters:
+  # OTLP exporter to New Relic
+  otlp:
+    endpoint: otlp.nr-data.net:4317
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 1
+
+service:
+  pipelines:
+    metrics/postgresql:
+      receivers: [enhancedsql/postgresql]
+      processors: [memory_limiter, circuitbreaker, resource, adaptivesampler, batch]
+      exporters: [otlp, prometheus]
+      
+    metrics/mysql:
+      receivers: [enhancedsql/mysql]
+      processors: [memory_limiter, circuitbreaker, resource, adaptivesampler, batch]
+      exporters: [otlp, prometheus]
+      
+    logs/queries:
+      receivers: [enhancedsql/postgresql, enhancedsql/mysql]
+      processors: [memory_limiter, transform/anonymize, verification, batch]
+      exporters: [otlp]
+      
+  extensions: [health_check]
+  
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["stdout"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

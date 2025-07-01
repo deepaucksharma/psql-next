@@ -1,0 +1,215 @@
+# Enterprise Pipeline Integration Test Configuration
+# This validates the complete enterprise architecture works end-to-end
+
+# Test 1: Agent → Gateway → New Relic Pipeline
+receivers:
+  # Simulate application telemetry
+  otlp:
+    protocols:
+      grpc:
+        endpoint: localhost:4317
+      http:
+        endpoint: localhost:4318
+
+  # Generate test data
+  synthetic:
+    traces:
+      enabled: true
+      rate: 100  # 100 traces/sec
+      error_rate: 0.1  # 10% errors
+      
+    metrics:
+      enabled: true
+      metrics:
+        - name: "db.client.connections.usage"
+          type: gauge
+          attributes:
+            db.system: "postgresql"
+            db.name: "production"
+            pool.name: "primary"
+          value_range: [0, 100]
+          
+        - name: "http.server.duration"
+          type: histogram
+          attributes:
+            service.name: "payment-service"
+            http.method: "POST"
+            http.route: "/api/v1/payment"
+          value_range: [10, 5000]
+          cardinality_test: true  # Add user.id for cardinality testing
+          
+    logs:
+      enabled: true
+      rate: 1000  # 1000 logs/sec
+      severity_distribution:
+        debug: 0.6
+        info: 0.3
+        warn: 0.08
+        error: 0.02
+      pii_injection: true  # Inject PII patterns for testing
+
+processors:
+  # Test semantic convention validation
+  resource:
+    attributes:
+      - key: service.name
+        value: "integration-test"
+        action: upsert
+      - key: environment
+        value: "test"
+        action: upsert
+      # Intentionally missing host.id to test validation
+  
+  # Test cost control processor
+  costcontrol:
+    monthly_budget_usd: 10.0  # Low budget to trigger controls
+    price_per_gb: 0.35
+    metric_cardinality_limit: 100  # Low limit to test reduction
+    aggressive_mode: false
+    
+  # Test NR error monitoring
+  nrerrormonitor:
+    max_attribute_length: 100  # Low limit to trigger errors
+    cardinality_warning_threshold: 50
+    alert_threshold: 10
+    
+  # Test existing processors
+  adaptivesampler:
+    in_memory_only: true
+    default_sample_rate: 0.5
+    rules:
+      - name: test_errors
+        conditions:
+          - attribute: error
+            operator: eq
+            value: true
+        sample_rate: 1.0
+        
+  circuitbreaker:
+    failure_threshold: 5
+    timeout_duration: 10s
+    
+  planattributeextractor:
+    safe_mode: true
+    query_anonymization:
+      enabled: true
+      generate_fingerprint: true
+      
+  verification:
+    pii_detection:
+      enabled: true
+      sensitivity: high
+
+  # Test batch processor
+  batch:
+    send_batch_size: 100
+    timeout: 1s
+
+exporters:
+  # Test exporter that validates output
+  validation:
+    expected:
+      # Validate semantic conventions
+      resource_attributes:
+        - service.name
+        - environment
+      
+      # Validate PII was redacted
+      no_patterns:
+        - '\b\d{3}-\d{2}-\d{4}\b'  # SSN
+        - '\b(?:\d{4}[\s-]?){3}\d{4}\b'  # Credit card
+        
+      # Validate cost control worked
+      metric_cardinality:
+        max: 100
+        no_attributes: ["user.id", "session.id"]
+        
+      # Validate sampling worked
+      trace_sample_rate:
+        min: 0.4
+        max: 0.6
+        error_traces: 1.0
+        
+  # Debug output for troubleshooting
+  debug:
+    verbosity: detailed
+    
+  # File output for analysis
+  file:
+    path: ./test-output.json
+
+service:
+  pipelines:
+    traces:
+      receivers: [synthetic, otlp]
+      processors: [resource, adaptivesampler, circuitbreaker, verification, batch]
+      exporters: [validation, debug, file]
+      
+    metrics:
+      receivers: [synthetic, otlp]
+      processors: [resource, nrerrormonitor, costcontrol, batch]
+      exporters: [validation, debug, file]
+      
+    logs:
+      receivers: [synthetic, otlp]
+      processors: [resource, planattributeextractor, verification, batch]
+      exporters: [validation, debug, file]
+
+  telemetry:
+    logs:
+      level: debug
+    metrics:
+      address: localhost:8888
+
+---
+# Test Scenarios
+
+test_scenarios:
+  - name: "High Cardinality Metric Test"
+    description: "Verify cardinality reduction works"
+    steps:
+      - generate_metrics:
+          metric: "http.server.duration"
+          cardinality: 10000  # Generate high cardinality
+      - wait: 5s
+      - validate:
+          metric_cardinality: "<= 100"
+          
+  - name: "PII Detection Test"
+    description: "Verify PII is detected and redacted"
+    steps:
+      - generate_logs:
+          count: 100
+          content: "User SSN: 123-45-6789, CC: 4111-1111-1111-1111"
+      - wait: 2s
+      - validate:
+          no_pii_in_output: true
+          verification_detections: "> 0"
+          
+  - name: "Circuit Breaker Test"
+    description: "Verify circuit breaker protects databases"
+    steps:
+      - generate_errors:
+          rate: 100/sec
+          duration: 10s
+      - validate:
+          circuit_state: "open"
+          dropped_spans: "> 0"
+          
+  - name: "Cost Control Budget Test"
+    description: "Verify aggressive mode activates"
+    steps:
+      - generate_high_volume:
+          duration: 30s
+      - validate:
+          cost_control_active: true
+          reduced_volume: true
+          
+  - name: "Semantic Convention Validation"
+    description: "Verify missing attributes are detected"
+    steps:
+      - send_telemetry:
+          missing: ["host.id", "service.version"]
+      - validate:
+          warnings_generated: true
+          attributes_enriched: ["service.name"]

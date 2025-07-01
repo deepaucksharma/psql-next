@@ -5,7 +5,6 @@ go 1.23.0
 toolchain go1.24.3
 
 require (
-	github.com/database-intelligence-mvp/common/featuredetector v0.0.0-00010101000000-000000000000
 	github.com/database-intelligence-mvp/processors/adaptivesampler v0.0.0-00010101000000-000000000000
 	github.com/database-intelligence-mvp/processors/circuitbreaker v0.0.0-00010101000000-000000000000
 	github.com/database-intelligence-mvp/processors/costcontrol v0.0.0-00010101000000-000000000000
@@ -24,11 +23,13 @@ require (
 	go.opentelemetry.io/collector/component v1.35.0
 	go.opentelemetry.io/collector/confmap v1.34.0
 	go.opentelemetry.io/collector/connector v0.128.0
+	go.opentelemetry.io/collector/consumer v1.35.0
 	go.opentelemetry.io/collector/exporter v0.128.0
 	go.opentelemetry.io/collector/extension v1.34.0
 	go.opentelemetry.io/collector/otelcol v0.128.0
 	go.opentelemetry.io/collector/pdata v1.35.0
 	go.opentelemetry.io/collector/processor v1.35.0
+	go.opentelemetry.io/collector/processor/processorhelper v0.129.0
 	go.opentelemetry.io/collector/receiver v1.34.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8
@@ -46,6 +47,7 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
+	github.com/database-intelligence-mvp/common/featuredetector v0.0.0-00010101000000-000000000000 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/distribution/reference v0.6.0 // indirect
@@ -116,7 +118,6 @@ require (
 	go.opentelemetry.io/collector/confmap/xconfmap v0.128.0 // indirect
 	go.opentelemetry.io/collector/connector/connectortest v0.128.0 // indirect
 	go.opentelemetry.io/collector/connector/xconnector v0.128.0 // indirect
-	go.opentelemetry.io/collector/consumer v1.35.0 // indirect
 	go.opentelemetry.io/collector/consumer/consumererror v0.128.0 // indirect
 	go.opentelemetry.io/collector/consumer/consumertest v0.129.0 // indirect
 	go.opentelemetry.io/collector/consumer/xconsumer v0.129.0 // indirect
@@ -131,7 +132,6 @@ require (
 	go.opentelemetry.io/collector/pdata/testdata v0.129.0 // indirect
 	go.opentelemetry.io/collector/pipeline v0.129.0 // indirect
 	go.opentelemetry.io/collector/pipeline/xpipeline v0.128.0 // indirect
-	go.opentelemetry.io/collector/processor/processorhelper v0.128.0 // indirect
 	go.opentelemetry.io/collector/processor/processortest v0.129.0 // indirect
 	go.opentelemetry.io/collector/processor/xprocessor v0.129.0 // indirect
 	go.opentelemetry.io/collector/receiver/receivertest v0.128.0 // indirect
@@ -179,6 +179,7 @@ require (
 // Replace directives for local development
 replace (
 	github.com/database-intelligence-mvp/common/featuredetector => ./common/featuredetector
+	github.com/database-intelligence-mvp/common/queryselector => ./common/queryselector
 	github.com/database-intelligence-mvp/processors/adaptivesampler => ./processors/adaptivesampler
 	github.com/database-intelligence-mvp/processors/circuitbreaker => ./processors/circuitbreaker
 	github.com/database-intelligence-mvp/processors/costcontrol => ./processors/costcontrol

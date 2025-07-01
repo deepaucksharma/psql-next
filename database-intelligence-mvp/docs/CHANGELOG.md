@@ -1,100 +1,120 @@
 # Changelog
 
-All notable changes to the Database Intelligence Collector project will be documented in this file.
+All notable changes to the Database Intelligence Collector MVP will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2025-06-30
+## [Unreleased]
 
 ### Added
-- Production-ready single-instance deployment architecture
-- In-memory state management for all processors
-- Comprehensive PII detection patterns (SSN, credit cards, emails, phones)
-- Environment-aware configuration system
-- Health monitoring endpoints (`:13133/health`)
-- Prometheus metrics endpoint (`:8888/metrics`)
-- Rate limiting with per-database controls
-- Circuit breaker with automatic recovery
-- Plan attribute extraction for PostgreSQL and MySQL
-- Verification processor with data quality checks
-- Complete operations runbook
-- Configuration generator script
-- Automated deployment procedures
 
-### Changed
-- Removed Redis dependency completely
-- Converted all processors to in-memory state
-- Enhanced PII detection with more patterns
-- Improved configuration with environment overrides
-- Optimized memory usage (200-300MB typical)
-- Reduced startup time to 2-3 seconds
-- Updated all documentation to reflect production status
+#### Phase 2: Plan Intelligence Implementation
+- **AutoExplain Receiver**: Safe execution plan collection from PostgreSQL logs
+  - Multi-format support (JSON, CSV, text)
+  - Non-blocking log file monitoring with fsnotify
+  - Graceful log rotation handling
+  
+- **Plan Anonymization**: Multi-layer PII protection
+  - Pattern-based detection (email, SSN, credit card, phone, IP)
+  - Context-aware anonymization preserving plan structure
+  - Configurable sensitive node types
+  
+- **Plan Storage**: Efficient plan history management
+  - LRU cache with configurable size limits
+  - Plan versioning and deduplication
+  - TTL-based automatic cleanup
+  
+- **Regression Detection**: Statistical plan analysis
+  - Welch's t-test for performance comparison
+  - Node-specific analyzers (Seq Scan, Nested Loop)
+  - Configurable thresholds and confidence levels
+  
+- **Configuration**: Comprehensive plan intelligence settings
+  - `collector-plan-intelligence.yaml` example configuration
+  - Integration with existing PostgreSQL receiver
+  - Circuit breaker patterns for auto_explain errors
 
-### Fixed
-- Module path inconsistencies in build configuration
-- Unsafe pg_querylens dependency removed
-- Processor pipeline coupling issues
-- Memory leaks in cache management
-- Circuit breaker state persistence
-- Export failures with high cardinality data
+#### Phase 3: Active Session History (ASH) Implementation
+- **ASH Receiver**: High-frequency session sampling
+  - 1-second collection interval (configurable)
+  - Comprehensive session snapshot collection
+  - Blocking chain detection with lock analysis
+  
+- **Adaptive Sampling**: Intelligent load-based sampling
+  - Always samples critical sessions (blocked, long-running)
+  - Dynamic rate adjustment based on session count
+  - Session-type specific sampling rates
+  
+- **Storage System**: Multi-resolution data management
+  - Circular buffer for raw snapshots
+  - Time-window aggregations (1m, 5m, 15m, 1h)
+  - Optional compression support
+  
+- **Feature Detection**: Automatic capability discovery
+  - Detects pg_stat_statements availability
+  - Checks for pg_wait_sampling extension
+  - Graceful degradation for missing features
+  
+- **Wait Analysis Processor**: Wait event categorization
+  - Groups events into logical categories (Lock, IO, CPU, Network)
+  - Pattern-based severity assignment
+  - Alert rule engine with configurable thresholds
+  
+- **Metrics**: Comprehensive ASH metrics
+  - Session distribution by state
+  - Wait event analysis with categories
+  - Blocking relationship tracking
+  - Query activity monitoring
+
+### Documentation
+- **Receiver Documentation**:
+  - Comprehensive AutoExplain receiver guide
+  - Detailed ASH receiver documentation
+  - Configuration examples and best practices
+  
+- **Processor Documentation**:
+  - Wait Analysis processor guide
+  - Pattern configuration examples
+  - Alert rule syntax and examples
+  
+- **Architecture Documentation**:
+  - Plan Intelligence architecture overview
+  - ASH implementation details
+  - Data flow diagrams
+  - Performance considerations
+  
+- **Main README**: Complete project documentation
+  - Quick start guide
+  - Configuration examples
+  - Deployment options
+  - Troubleshooting guide
 
 ### Security
-- Enhanced PII detection and sanitization
-- Removed all file-based state storage
-- Added resource limits and bounds
-- Implemented secure defaults
+- PII protection in execution plans
+- Query parameter anonymization
+- Configurable sensitive data patterns
+- Read-only database access enforcement
 
-## [0.9.0] - 2025-06-15 (Pre-release)
+### Performance
+- Adaptive sampling reduces overhead under load
+- LRU caching prevents memory bloat
+- Efficient circular buffer implementation
+- Non-blocking log file monitoring
+
+## [0.1.0] - Previous Release
 
 ### Added
-- Initial implementation of 4 custom processors
-- Basic PostgreSQL and MySQL receivers
-- OTLP export to New Relic
-- Docker Compose deployment
-- Basic documentation
+- Phase 1: Critical Security and Robustness
+  - PII detection and scrubbing
+  - Circuit breaker implementation
+  - Feature detection system
+  - Graceful degradation
 
-### Known Issues
-- Required Redis for state management
-- File-based persistence caused I/O bottlenecks
-- Limited PII detection patterns
-- No production hardening
+### Changed
+- Enhanced error handling across all components
+- Improved configuration validation
 
-## Migration Guide
-
-### From 0.9.0 to 1.0.0
-
-1. **Remove Redis Dependencies**
-   - Remove Redis from docker-compose.yaml
-   - Remove Redis connection configs
-   - Update processor configurations
-
-2. **Update Processor Configs**
-   ```yaml
-   # Old
-   adaptive_sampler:
-     state_file: /var/lib/sampler.state
-   
-   # New
-   adaptive_sampler:
-     in_memory_only: true  # Always true
-   ```
-
-3. **Update Environment Variables**
-   - Add `ENVIRONMENT` variable
-   - Update sampling thresholds
-   - Configure rate limits
-
-4. **Deploy New Version**
-   ```bash
-   # Pull new image
-   docker pull database-intelligence/collector:1.0.0
-   
-   # Update and restart
-   docker-compose down
-   docker-compose up -d
-   ```
-
----
-
-**Note**: For detailed upgrade procedures, see [Operations Runbook](./operations/RUNBOOK.md)
+### Fixed
+- Memory leaks in long-running collectors
+- Race conditions in concurrent processing

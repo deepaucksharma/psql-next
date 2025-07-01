@@ -1,0 +1,219 @@
+version: '3.9'
+
+x-common-variables: &common-variables
+  NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+
+services:
+  # ============================================
+  # OHI Migration Collector
+  # ============================================
+  
+  collector-ohi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: database-intelligence:${VERSION:-2.0.0}
+    container_name: db-intelligence-ohi-migration
+    environment:
+      <<: *common-variables
+      # PostgreSQL Configuration
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-monitoring_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-monitoring}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      # MySQL Configuration
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-monitoring_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-monitoring}
+      MYSQL_DB: ${MYSQL_DB:-mysql}
+      # OTLP Configuration
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-https://otlp.nr-data.net:4318}
+      # Cost Control
+      MONTHLY_BUDGET_USD: ${MONTHLY_BUDGET_USD:-5000}
+      PRICE_PER_GB: ${PRICE_PER_GB:-0.35}
+      # Feature Flags - All enabled for OHI migration
+      ENABLE_ADAPTIVE_SAMPLING: "true"
+      ENABLE_CIRCUIT_BREAKER: "true"
+      ENABLE_PLAN_EXTRACTOR: "true"
+      ENABLE_VERIFICATION: "true"
+      ENABLE_COST_CONTROL: "true"
+      ENABLE_NR_ERROR_MONITOR: "true"
+      ENABLE_QUERY_CORRELATOR: "true"
+      ENABLE_OHI_TRANSFORMATIONS: "true"
+    command: ["--config=/etc/otel/collector-ohi-migration.yaml"]
+    ports:
+      - "13133:13133"  # Health check endpoint
+      - "8888:8888"    # Internal metrics
+      - "8889:8889"    # Prometheus metrics
+      - "55679:55679"  # zPages (debug)
+      - "1777:1777"    # pprof endpoint
+    volumes:
+      - ./config/collector-ohi-migration.yaml:/etc/otel/collector-ohi-migration.yaml:ro
+      - ./config/processor-ohi-compatibility.yaml:/etc/otel/processor-ohi-compatibility.yaml:ro
+      - ./config/receiver-sqlquery-ohi.yaml:/etc/otel/receiver-sqlquery-ohi.yaml:ro
+      - ./config/postgresql-detailed-monitoring.yaml:/etc/otel/postgresql-detailed-monitoring.yaml:ro
+      - ./config/mysql-detailed-monitoring.yaml:/etc/otel/mysql-detailed-monitoring.yaml:ro
+      - collector-state:/var/lib/otel
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:13133/health"]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - monitoring
+
+  # ============================================
+  # Database Services with OHI Extensions
+  # ============================================
+  
+  postgres:
+    image: postgres:15
+    container_name: postgres-ohi
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - ./scripts/sql/postgres-init-ohi.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./scripts/sql/postgres-pg-stat-statements.sql:/docker-entrypoint-initdb.d/02-pgss.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_EXTERNAL_PORT:-5432}:5432"
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+    restart: unless-stopped
+    networks:
+      - monitoring
+    command: >
+      postgres
+      -c shared_preload_libraries='pg_stat_statements'
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.max=10000
+      -c track_io_timing=on
+      -c track_functions=all
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-ohi
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: mysql
+      MYSQL_USER: monitoring_user
+      MYSQL_PASSWORD: monitoring
+    volumes:
+      - ./scripts/sql/mysql-init-ohi.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./scripts/sql/mysql-performance-schema.sql:/docker-entrypoint-initdb.d/02-perf.sql:ro
+      - mysql-data:/var/lib/mysql
+    ports:
+      - "${MYSQL_EXTERNAL_PORT:-3306}:3306"
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+    restart: unless-stopped
+    networks:
+      - monitoring
+    command: >
+      --performance_schema=ON
+      --performance_schema_consumer_events_statements_history=ON
+      --performance_schema_consumer_events_statements_history_long=ON
+      --performance_schema_consumer_statements_digest=ON
+
+  # ============================================
+  # OHI Validation Tools
+  # ============================================
+  
+  validator:
+    build:
+      context: ./validation
+      dockerfile: Dockerfile
+    image: ohi-validator:latest
+    container_name: ohi-validator
+    environment:
+      POSTGRES_URL: "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable"
+      MYSQL_URL: "root:root@tcp(mysql:3306)/mysql"
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+    volumes:
+      - ./validation:/app
+      - validation-reports:/app/reports
+    depends_on:
+      - collector-ohi
+      - postgres
+      - mysql
+    profiles: ["validation"]
+    networks:
+      - monitoring
+
+  # ============================================
+  # Monitoring Stack (Optional)
+  # ============================================
+  
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-ohi
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    volumes:
+      - ./deploy/prometheus/prometheus-ohi.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - collector-ohi
+    profiles: ["monitoring"]
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-ohi
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./dashboards:/var/lib/grafana/dashboards:ro
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    profiles: ["monitoring"]
+    networks:
+      - monitoring
+
+volumes:
+  collector-state:
+  postgres-data:
+  mysql-data:
+  validation-reports:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  monitoring:
+    driver: bridge

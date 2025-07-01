@@ -1,5 +1,5 @@
-// Database Intelligence Collector - OTEL-First Implementation
-// This collector uses standard OpenTelemetry components with minimal custom processors
+// Database Intelligence Collector - Enterprise OTEL Implementation
+// Enhanced with enterprise-grade processors for cost control, monitoring, and security
 package main
 
 import (
@@ -13,16 +13,21 @@ import (
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/connector"
 	
-	// Import custom processors
+	// Import custom processors - Database specific
 	"github.com/database-intelligence-mvp/processors/adaptivesampler"
 	"github.com/database-intelligence-mvp/processors/circuitbreaker"
 	"github.com/database-intelligence-mvp/processors/planattributeextractor"
 	"github.com/database-intelligence-mvp/processors/verification"
+	
+	// Import enterprise processors - New for 2025 patterns
+	"github.com/database-intelligence-mvp/processors/nrerrormonitor"
+	"github.com/database-intelligence-mvp/processors/costcontrol"
+	"github.com/database-intelligence-mvp/processors/querycorrelator"
 )
 
 func main() {
 	// Create factories map
-		factories, err := Components()
+	factories, err := Components()
 	if err != nil {
 		log.Fatalf("failed to build components: %v", err)
 	}
@@ -30,8 +35,8 @@ func main() {
 	// Build collector info
 	info := component.BuildInfo{
 		Command:     "database-intelligence-collector",
-		Description: "Database Intelligence Collector - OTEL-First Implementation",
-		Version:     "1.0.0",
+		Description: "Database Intelligence Collector - Enterprise Edition with Advanced Cost Control and Monitoring",
+		Version:     "2.0.0", // Bumped for enterprise features
 	}
 
 	// Create and run the collector
@@ -47,8 +52,8 @@ func main() {
 	}
 }
 
-// components returns the set of components for the collector
-// This is a minimal set - mostly standard OTEL components
+// Components returns the set of components for the collector
+// Enhanced with enterprise-grade processors for production deployments
 func Components() (otelcol.Factories, error) {
 	factories := otelcol.Factories{}
 
@@ -59,12 +64,20 @@ func Components() (otelcol.Factories, error) {
 	factories.Exporters = make(map[component.Type]exporter.Factory)
 	factories.Connectors = make(map[component.Type]connector.Factory)
 
-	// Add our custom processors for gaps
-	// Only including processors that are actually built in ocb-config.yaml
+	// Database-specific processors
+	// These fill gaps in standard OTEL for database monitoring
 	factories.Processors[planattributeextractor.GetType()] = planattributeextractor.NewFactory()
 	factories.Processors[adaptivesampler.GetType()] = adaptivesampler.NewFactory()
 	factories.Processors[circuitbreaker.GetType()] = circuitbreaker.NewFactory()
 	factories.Processors[verification.GetType()] = verification.NewFactory()
+	
+	// Enterprise processors for production deployments
+	// These implement the 2025 patterns for cost control and monitoring
+	factories.Processors[nrerrormonitor.TypeStr] = nrerrormonitor.NewFactory()
+	factories.Processors[costcontrol.TypeStr] = costcontrol.NewFactory()
+	
+	// OHI migration processor for query correlation
+	factories.Processors[querycorrelator.TypeStr] = querycorrelator.NewFactory()
 
 	return factories, nil
 }

@@ -1,0 +1,251 @@
+# Routing Tier Configuration for Load Balancing to Stateful Processors
+# This tier ensures traces are routed consistently for tail sampling
+
+receivers:
+  # Receive from agent collectors
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Memory limiter for protection
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 50
+    spike_limit_percentage: 15
+
+  # Minimal processing - just add routing metadata
+  resource:
+    attributes:
+      - key: collector.tier
+        value: "routing"
+        action: upsert
+
+  # Small batches for quick forwarding
+  batch:
+    send_batch_size: 128
+    timeout: 50ms
+
+exporters:
+  # Load balancing exporter for traces (routes by trace ID)
+  loadbalancing/traces:
+    protocol:
+      otlp:
+        # These configs are the same as would be used for otlp exporter
+        compression: gzip
+        tls:
+          insecure: true  # Internal communication
+    resolver:
+      # Use DNS to discover processing tier pods
+      dns:
+        hostname: otel-processing-tier-headless.otel.svc.cluster.local
+        port: 4317
+        # Re-resolve DNS periodically to handle pod changes
+        interval: 30s
+    routing_key: "traceID"  # Ensures all spans of a trace go to same processor
+
+  # Standard OTLP for metrics and logs (no state required)
+  otlp/gateway:
+    endpoint: otel-gateway:4317
+    compression: gzip
+    tls:
+      insecure: true  # Internal communication
+
+  # Debug exporter
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 1000
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, zpages]
+  
+  pipelines:
+    # Traces use load balancing to stateful tier
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [loadbalancing/traces, debug]
+    
+    # Metrics and logs go directly to gateway
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/gateway]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/gateway]
+  
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888
+
+---
+# Processing Tier Configuration (StatefulSet)
+# Receives consistently routed traces for tail sampling
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-processing-tier-headless
+  namespace: otel
+spec:
+  clusterIP: None  # Headless service
+  selector:
+    app: otel-processing-tier
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: otel-processing-tier
+  namespace: otel
+spec:
+  serviceName: otel-processing-tier-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: otel-processing-tier
+  template:
+    metadata:
+      labels:
+        app: otel-processing-tier
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:latest
+          args:
+            - "--config=/conf/processing-tier-config.yaml"
+          ports:
+            - containerPort: 4317
+              name: otlp-grpc
+            - containerPort: 8888
+              name: metrics
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+          resources:
+            limits:
+              memory: 2Gi
+              cpu: 1000m
+            requests:
+              memory: 1Gi
+              cpu: 500m
+          env:
+            - name: GOGC
+              value: "80"  # More aggressive GC for tail sampling memory
+      volumes:
+        - name: config
+          configMap:
+            name: otel-processing-tier-config
+
+---
+# Processing Tier Collector Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-processing-tier-config
+  namespace: otel
+data:
+  processing-tier-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+
+      # Tail sampling with sophisticated policies
+      tail_sampling:
+        decision_wait: 15s
+        num_traces: 100000
+        expected_new_traces_per_sec: 2000
+        policies:
+          # Always keep errors
+          - name: error-sampling
+            type: status_code
+            status_code: {status_codes: [ERROR]}
+          
+          # Keep slow traces
+          - name: latency-sampling
+            type: latency
+            latency: {threshold_ms: 2000}
+          
+          # Database-specific sampling
+          - name: database-errors
+            type: and
+            and:
+              and_sub_policy:
+                - name: db-operation
+                  type: string_attribute
+                  string_attribute:
+                    key: db.system
+                    values: ["postgresql", "mysql"]
+                - name: has-error
+                  type: status_code
+                  status_code: {status_codes: [ERROR]}
+          
+          # Critical services at higher rate
+          - name: critical-services
+            type: and
+            and:
+              and_sub_policy:
+                - name: service-filter
+                  type: string_attribute
+                  string_attribute:
+                    key: service.name
+                    values: ["payment-service", "auth-service", "order-service"]
+                - name: probabilistic-50
+                  type: probabilistic
+                  probabilistic: {sampling_percentage: 50}
+          
+          # Default sampling for everything else
+          - name: default-sampling
+            type: probabilistic
+            probabilistic: {sampling_percentage: 10}
+      
+      batch:
+        send_batch_size: 1024
+        timeout: 200ms
+
+    exporters:
+      otlp/gateway:
+        endpoint: otel-gateway:4317
+        compression: gzip
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, tail_sampling, batch]
+          exporters: [otlp/gateway]
+      
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          address: 0.0.0.0:8888

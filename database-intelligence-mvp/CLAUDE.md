@@ -35,6 +35,14 @@ The critical issues identified have been resolved:
 ### OTLP Exporter Status
 **✅ RESOLVED**: Using standard OTLP exporter from OpenTelemetry. No custom OTLP exporter needed.
 
+### Enterprise Features (v2.0.0)
+**✅ INTEGRATED**: Enterprise processors for cost control and integration monitoring
+- ✅ **Cost Control Processor**: Budget enforcement with intelligent data reduction
+- ✅ **NR Error Monitor**: Proactive NrIntegrationError detection
+- ✅ **Layered Architecture**: Agent → Gateway → New Relic pipeline
+- ✅ **mTLS Security**: Certificate-based internal communication
+- ✅ **Enterprise Documentation**: Comprehensive guides and runbooks
+
 ## Build Commands
 
 ```bash
@@ -81,6 +89,8 @@ make docker-prod          # Start production setup
 
 ### Custom Processors (Production Ready)
 
+#### Core Processors
+
 1. **Adaptive Sampler** (`processors/adaptivesampler/` - 576 lines) ✅ **FIXED**
    - Rule-based sampling with expression evaluation
    - **✅ In-memory state management only** (no file persistence)
@@ -107,6 +117,22 @@ make docker-prod          # Start production setup
    - Data quality validation and cardinality protection
    - Auto-tuning and self-healing capabilities
    - Configuration: `pii_detection`, `quality_checks`, `auto_tuning`
+
+#### Enterprise Processors (NEW - v2.0.0)
+
+5. **Cost Control** (`processors/costcontrol/` - 892 lines) ✅ **ENTERPRISE**
+   - Monthly budget enforcement with automatic throttling
+   - Intelligent cardinality reduction when over budget
+   - Supports standard ($0.35/GB) and Data Plus ($0.55/GB) pricing
+   - **✅ In-memory cost tracking and cardinality management**
+   - Configuration: `monthly_budget_usd`, `metric_cardinality_limit`, `aggressive_mode`
+
+6. **NR Error Monitor** (`processors/nrerrormonitor/` - 654 lines) ✅ **ENTERPRISE**
+   - Proactive detection of patterns causing NrIntegrationError
+   - Validates semantic conventions and attribute limits
+   - Generates alerts before data rejection occurs
+   - **✅ Real-time monitoring with configurable thresholds**
+   - Configuration: `max_attribute_length`, `cardinality_warning_threshold`, `alert_threshold`
 
 ### Standard OTEL Components
 
@@ -161,6 +187,9 @@ Required for runtime:
 - `docs/CONFIGURATION.md` - Working configuration examples
 - `docs/DEPLOYMENT.md` - Deployment blockers and fixes
 - `docs/TECHNICAL_IMPLEMENTATION_DEEPDIVE.md` - Detailed code analysis
+- `docs/architecture/PROCESSORS.md` - Comprehensive processor documentation
+- `docs/ENTERPRISE_ARCHITECTURE.md` - Enterprise deployment patterns
+- `README_ENTERPRISE.md` - Enterprise quick start guide
 
 ## Common Issues
 
