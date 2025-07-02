@@ -1,0 +1,178 @@
+# Docker-specific configuration for Database Intelligence Collector
+# This configuration is optimized for running in Docker containers
+
+receivers:
+  # OTLP receiver for testing
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        
+  # PostgreSQL receiver
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    transport: tcp
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB}
+    collection_interval: 30s
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+      
+  # MySQL receiver 
+  mysql:
+    endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DB}
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+processors:
+  # Memory limiter prevents OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Batch for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  # Database Intelligence processors for logs
+  # Circuit breaker for resilience
+  circuitbreaker/logs:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 30s
+    max_concurrent_requests: 100
+
+  # Plan attribute extraction for logs
+  planattributeextractor:
+    safe_mode: true
+    error_mode: ignore
+
+  # PII verification for logs
+  verification:
+    pii_detection:
+      enabled: true
+      action_on_detection: redact
+    enable_periodic_verification: true
+    verification_interval: 60s
+
+  # Adaptive sampling for logs
+  adaptivesampler:
+    in_memory_only: true
+    default_sample_rate: 1.0
+    deduplication:
+      enabled: true
+      window_seconds: 60
+      cache_size: 1000
+      hash_attribute: "db.query.plan.hash"
+    
+  # Database Intelligence processors for metrics
+  # Query correlation for metrics
+  querycorrelator:
+    enable_table_correlation: true
+    enable_database_correlation: true
+    correlation_attributes:
+      add_query_category: true
+      add_table_stats: true
+
+  # NR error monitoring for metrics
+  nrerrormonitor:
+    max_attribute_length: 1000
+    cardinality_warning_threshold: 1000
+    alert_threshold: 10
+
+  # Cost control for all signals
+  costcontrol:
+    monthly_budget_usd: 1000.0
+    metric_cardinality_limit: 10000
+    aggressive_mode: false
+
+exporters:
+  # Debug exporter for testing
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # File exporter for debugging
+  file:
+    path: /var/lib/otel/collector-output.json
+    format: json
+
+  # OTLP exporter for production
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT:-localhost:4317}
+    tls:
+      insecure: true
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, zpages]
+  
+  pipelines:
+    # Logs pipeline - processes database query logs
+    logs:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - circuitbreaker/logs
+        - planattributeextractor
+        - verification
+        - adaptivesampler
+        - costcontrol
+        - batch
+      exporters: [debug, file]
+      
+    # Metrics pipeline - processes database performance metrics
+    metrics/database:
+      receivers: [postgresql, mysql]
+      processors: 
+        - memory_limiter
+        - querycorrelator
+        - nrerrormonitor
+        - costcontrol
+        - batch
+      exporters: [prometheus, debug]
+      
+    # General metrics pipeline
+    metrics:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - nrerrormonitor
+        - costcontrol
+        - batch
+      exporters: [prometheus, debug]
+
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      development: false
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8889

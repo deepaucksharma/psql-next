@@ -1,0 +1,257 @@
+{
+  "name": "PostgreSQL Query Intelligence with pg_querylens",
+  "description": "Advanced query performance monitoring and plan regression detection using pg_querylens extension",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Query Performance Overview",
+      "description": "Overall query performance metrics and trends",
+      "widgets": [
+        {
+          "title": "Query Execution Time Trend",
+          "configuration": {
+            "type": "line",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(db.querylens.query.execution_time_mean) as 'Avg Time', percentile(db.querylens.query.execution_time_mean, 95) as 'P95', max(db.querylens.query.execution_time_max) as 'Max Time' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Top Queries by Execution Time",
+          "configuration": {
+            "type": "bar",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.querylens.top_queries.total_time) as 'Total Time (ms)' FROM Metric WHERE metricName LIKE 'db.querylens.top_queries%' FACET db.querylens.query_text LIMIT 10"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Volume",
+          "configuration": {
+            "type": "billboard",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.querylens.query.calls) as 'Total Queries', uniqueCount(db.querylens.queryid) as 'Unique Queries', average(db.querylens.query.calls) as 'Avg Calls per Query' FROM Metric WHERE db.system = 'postgresql' SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "I/O Impact by Query",
+          "configuration": {
+            "type": "pie",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.querylens.query.blocks_read) as 'Disk Blocks Read' FROM Metric WHERE db.system = 'postgresql' FACET db.querylens.query_text LIMIT 10"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plan Intelligence",
+      "description": "Query plan analysis and regression detection",
+      "widgets": [
+        {
+          "title": "Plan Changes Detected",
+          "configuration": {
+            "type": "line",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) as 'Plan Changes' FROM Metric WHERE db.plan.changed = true TIMESERIES 5 minutes"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Plan Regression Severity",
+          "configuration": {
+            "type": "pie",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) FROM Metric WHERE db.plan.has_regression = true FACET db.querylens.regression_severity SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Performance Impact Distribution",
+          "configuration": {
+            "type": "histogram",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT histogram(db.plan.time_change_ratio, 10, 20) as 'Performance Change Ratio' FROM Metric WHERE db.plan.changed = true SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Queries with Plan Regressions",
+          "configuration": {
+            "type": "table",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.querylens.query_text) as 'Query', latest(db.plan.regression_type) as 'Regression Type', latest(db.plan.change_severity) as 'Severity', latest(db.plan.time_change_ratio) as 'Performance Impact' FROM Metric WHERE db.plan.has_regression = true FACET db.querylens.queryid LIMIT 20"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Optimization Opportunities",
+      "description": "Queries that need optimization based on performance patterns",
+      "widgets": [
+        {
+          "title": "Optimization Candidates",
+          "configuration": {
+            "type": "table",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.querylens.query_text) as 'Query', average(db.querylens.query.execution_time_mean) as 'Avg Time', sum(db.querylens.query.blocks_read) as 'Disk Reads', latest(db.plan.recommendations) as 'Recommendations' FROM Metric WHERE db.query.needs_optimization = true FACET db.querylens.queryid LIMIT 20"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Efficiency Score Distribution",
+          "configuration": {
+            "type": "histogram",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT histogram(db.query.efficiency_score, 20, 10) as 'Efficiency Score' FROM Metric WHERE db.query.efficiency_score IS NOT NULL"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Plan Type Distribution",
+          "configuration": {
+            "type": "bar",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) FROM Metric WHERE db.plan.type IS NOT NULL FACET db.plan.type"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Queries Using Sequential Scans",
+          "configuration": {
+            "type": "table",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.querylens.query_text) as 'Query', average(db.querylens.query.execution_time_mean) as 'Avg Time', latest(db.plan.estimated_cost) as 'Est. Cost' FROM Metric WHERE db.plan.type = 'Seq Scan' FACET db.querylens.queryid LIMIT 10"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resource Utilization",
+      "description": "Query resource consumption patterns",
+      "widgets": [
+        {
+          "title": "Buffer Cache Efficiency",
+          "configuration": {
+            "type": "line",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.querylens.query.blocks_hit) / (sum(db.querylens.query.blocks_hit) + sum(db.querylens.query.blocks_read)) * 100 as 'Cache Hit Ratio %' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "I/O Operations Trend",
+          "configuration": {
+            "type": "area",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(db.querylens.query.blocks_read) as 'Blocks Read', sum(db.querylens.query.blocks_hit) as 'Blocks Hit' FROM Metric WHERE db.system = 'postgresql' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Planning Time vs Execution Time",
+          "configuration": {
+            "type": "scatter",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(db.querylens.query.planning_time) as 'Planning Time', average(db.querylens.query.execution_time_mean) as 'Execution Time' FROM Metric WHERE db.system = 'postgresql' FACET db.querylens.queryid"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Queries by Total Resource Consumption",
+          "configuration": {
+            "type": "table",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(db.querylens.query_text) as 'Query', sum(db.querylens.top_queries.total_time) as 'Total Time', sum(db.querylens.top_queries.io_blocks) as 'Total I/O', sum(db.querylens.query.calls) as 'Executions' FROM Metric FACET db.querylens.queryid ORDER BY sum(db.querylens.top_queries.total_time) DESC LIMIT 15"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alerts Configuration",
+      "description": "Recommended alert conditions for pg_querylens metrics",
+      "widgets": [
+        {
+          "title": "Alert Recommendations",
+          "configuration": {
+            "type": "markdown",
+            "text": "## Recommended Alert Conditions\n\n### Critical Alerts\n\n1. **Critical Plan Regression**\n   - Condition: `db.plan.has_regression = true AND db.querylens.regression_severity = 'critical'`\n   - Threshold: Any occurrence\n   - Action: Immediate investigation required\n\n2. **Severe Performance Degradation**\n   - Condition: `db.plan.time_change_ratio > 3`\n   - Threshold: Any query with 3x performance degradation\n   - Action: Review query and recent changes\n\n### Warning Alerts\n\n3. **Increasing Sequential Scans**\n   - Condition: `db.plan.type = 'Seq Scan' AND db.querylens.query.execution_time_mean > 1000`\n   - Threshold: More than 10 per minute\n   - Action: Consider index optimization\n\n4. **High I/O Queries**\n   - Condition: `db.querylens.query.blocks_read > 10000`\n   - Threshold: Sustained for 5 minutes\n   - Action: Review query patterns and caching\n\n### Informational Alerts\n\n5. **Plan Changes Detected**\n   - Condition: `db.plan.changed = true`\n   - Threshold: More than 5 in 10 minutes\n   - Action: Monitor for performance impact\n\n6. **Optimization Opportunities**\n   - Condition: `db.query.needs_optimization = true`\n   - Threshold: More than 20 queries\n   - Action: Schedule optimization review"
+          }
+        },
+        {
+          "title": "Current Alert Status",
+          "configuration": {
+            "type": "billboard",
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) as 'Critical Regressions' FROM Metric WHERE db.plan.has_regression = true AND db.querylens.regression_severity = 'critical' SINCE 1 hour ago"
+              },
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) as 'Plan Changes' FROM Metric WHERE db.plan.changed = true SINCE 1 hour ago"
+              },
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) as 'Optimization Needed' FROM Metric WHERE db.query.needs_optimization = true SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variables": []
+}

@@ -149,6 +149,26 @@ config:
     database: postgres
     sslmode: disable
     collectionInterval: 10s
+  
+  ## @param config.querylens.enabled Enable pg_querylens integration
+  ## @param config.querylens.collectionInterval Collection interval for pg_querylens metrics
+  ## @param config.querylens.planHistoryHours Hours of plan history to retain
+  ## @param config.querylens.regressionDetection.enabled Enable regression detection
+  ## @param config.querylens.regressionDetection.timeIncrease Time increase threshold for regression
+  ## @param config.querylens.regressionDetection.ioIncrease I/O increase threshold for regression
+  ## @param config.querylens.regressionDetection.costIncrease Cost increase threshold for regression
+  ## @param config.querylens.alertOnRegression Alert when regression detected
+  ##
+  querylens:
+    enabled: false
+    collectionInterval: 30s
+    planHistoryHours: 24
+    regressionDetection:
+      enabled: true
+      timeIncrease: 1.5
+      ioIncrease: 2.0
+      costIncrease: 2.0
+    alertOnRegression: true
 
   ## @param config.mysql.enabled Enable MySQL monitoring
   ## @param config.mysql.endpoint MySQL endpoint

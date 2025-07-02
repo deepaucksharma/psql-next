@@ -36,6 +36,9 @@ type Config struct {
 
 	// QueryAnonymization configures query text anonymization
 	QueryAnonymization QueryAnonymizationConfig `mapstructure:"query_anonymization"`
+
+	// QueryLens configures pg_querylens integration
+	QueryLens QueryLensConfig `mapstructure:"querylens"`
 }
 
 // PostgreSQLExtractionRules defines how to extract attributes from PostgreSQL JSON plans
@@ -179,6 +182,18 @@ func createDefaultConfig() component.Config {
 			AttributesToAnonymize: []string{"query_text", "db.statement", "db.query"},
 			GenerateFingerprint:   true,
 			FingerprintAttribute:  "db.query.fingerprint",
+		},
+		QueryLens: QueryLensConfig{
+			Enabled:              false, // Disabled by default, enable when pg_querylens is available
+			PlanHistoryHours:     24,
+			RegressionThreshold:  1.5,
+			RegressionDetection: RegressionDetectionConfig{
+				Enabled:      true,
+				TimeIncrease: 1.5,
+				IOIncrease:   2.0,
+				CostIncrease: 2.0,
+			},
+			AlertOnRegression: false,
 		},
 	}
 }

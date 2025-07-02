@@ -86,10 +86,13 @@ func TestAdaptiveSampler_ProcessLogs(t *testing.T) {
 func TestAdaptiveSampler_Deduplication(t *testing.T) {
 	cfg := createDefaultConfig().(*Config)
 	cfg.InMemoryOnly = true
+	cfg.DefaultSampleRate = 1.0 // Ensure we sample all logs
+	cfg.SamplingRules = []SamplingRule{} // Clear all sampling rules
 	cfg.Deduplication = DeduplicationConfig{
 		Enabled:       true,
 		WindowSeconds: 60,
 		CacheSize:     1000,
+		HashAttribute: "db.query.plan.hash",
 	}
 	
 	logger := zap.NewNop()

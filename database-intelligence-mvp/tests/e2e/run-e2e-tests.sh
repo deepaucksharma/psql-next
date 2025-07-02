@@ -1,171 +1,160 @@
 #!/bin/bash
+# Run comprehensive E2E tests for Database Intelligence Collector
+
 set -e
 
-# E2E Test Runner for Database Intelligence Collector
-# This script runs end-to-end tests that validate data flow from databases to New Relic
-
-echo "=== Database Intelligence Collector E2E Tests ==="
-
-# Check prerequisites
-if [ -z "$NEW_RELIC_LICENSE_KEY" ]; then
-    echo "WARNING: NEW_RELIC_LICENSE_KEY not set - using local file export only"
-    export USE_LOCAL_EXPORT=true
-else
-    export USE_LOCAL_EXPORT=false
-fi
-
-if [ -z "$NEW_RELIC_ACCOUNT_ID" ]; then
-    echo "WARNING: NEW_RELIC_ACCOUNT_ID not set - NRDB queries will be skipped"
-fi
-
-# Set test environment
-export E2E_TESTS=true
-export TEST_RUN_ID=$(date +%s)
-export TEST_TIMEOUT=${TEST_TIMEOUT:-30m}
-
-# Set database connection defaults
-export POSTGRES_HOST=${POSTGRES_HOST:-localhost}
-export POSTGRES_PORT=${POSTGRES_PORT:-5432}
-export POSTGRES_USER=${POSTGRES_USER:-postgres}
-export POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-export MYSQL_HOST=${MYSQL_HOST:-localhost}
-export MYSQL_PORT=${MYSQL_PORT:-3306}
-export MYSQL_USER=${MYSQL_USER:-root}
-export MYSQL_PASSWORD=${MYSQL_PASSWORD:-mysql}
-
 # Colors for output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-echo "Test Configuration:"
-echo "  Run ID: $TEST_RUN_ID"
-echo "  Timeout: $TEST_TIMEOUT"
-echo "  PostgreSQL: ${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}"
-echo "  MySQL: ${MYSQL_HOST:-localhost}:${MYSQL_PORT:-3306}"
-echo "  New Relic Account: $NEW_RELIC_ACCOUNT_ID"
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}Database Intelligence E2E Test Suite${NC}"
+echo -e "${GREEN}========================================${NC}"
 
-# Function to cleanup resources
-cleanup() {
-    echo -e "\n${YELLOW}Cleaning up test resources...${NC}"
-    
-    # Stop collector if running
-    if [ -n "$COLLECTOR_PID" ]; then
-        echo "Stopping collector (PID: $COLLECTOR_PID)"
-        kill $COLLECTOR_PID 2>/dev/null || true
-    fi
-    
-    # Stop test databases if we started them
-    if [ "$START_DATABASES" = "true" ]; then
-        echo "Stopping test databases"
-        docker-compose -f tests/e2e/docker-compose-test.yaml down -v
-    fi
-    
-    # Collect logs
-    if [ -f "/tmp/e2e-collector.log" ]; then
-        echo "Collector logs saved to: tests/e2e/reports/collector-$TEST_RUN_ID.log"
-        mkdir -p tests/e2e/reports
-        cp /tmp/e2e-collector.log tests/e2e/reports/collector-$TEST_RUN_ID.log
-    fi
-    
-    # Collect metrics
-    if [ -f "/tmp/e2e-metrics.json" ]; then
-        echo "Metrics saved to: tests/e2e/reports/metrics-$TEST_RUN_ID.json"
-        cp /tmp/e2e-metrics.json tests/e2e/reports/metrics-$TEST_RUN_ID.json
-    fi
-}
+# Check prerequisites
+echo -e "\n${YELLOW}Checking prerequisites...${NC}"
 
-# Set trap for cleanup
-trap cleanup EXIT
-
-# Check if databases are available
-echo -e "\n${YELLOW}Checking database connectivity...${NC}"
-if ! nc -z ${POSTGRES_HOST:-localhost} ${POSTGRES_PORT:-5432} 2>/dev/null; then
-    echo "PostgreSQL not available, starting test databases..."
-    START_DATABASES=true
-    docker-compose -f tests/e2e/docker-compose-test.yaml up -d
-    echo "Waiting for databases to be ready..."
-    sleep 30
+if ! command -v docker &> /dev/null; then
+    echo -e "${RED}Docker is not installed${NC}"
+    exit 1
 fi
 
-# Build collector if needed
-COLLECTOR_BINARY="${PROJECT_ROOT:-$(pwd)}/dist/database-intelligence-collector"
-if [ ! -f "$COLLECTOR_BINARY" ]; then
-    echo -e "\n${YELLOW}Building collector...${NC}"
-    make build
-    
-    if [ ! -f "$COLLECTOR_BINARY" ]; then
-        echo -e "${RED}Failed to build collector${NC}"
-        exit 1
-    fi
+if ! command -v go &> /dev/null; then
+    echo -e "${RED}Go is not installed${NC}"
+    exit 1
 fi
 
-# Start collector
-echo -e "\n${YELLOW}Starting collector with e2e configuration...${NC}"
+# Clean up any previous test runs
+echo -e "\n${YELLOW}Cleaning up previous test runs...${NC}"
+docker-compose -f docker-compose.e2e.yml down -v 2>/dev/null || true
+rm -rf output/*
 
-# Use simple config for local testing
-if [ "$USE_LOCAL_EXPORT" = "true" ]; then
-    CONFIG_FILE="tests/e2e/config/e2e-test-collector-local.yaml"
-else
-    CONFIG_FILE="tests/e2e/config/e2e-test-collector-simple.yaml"
-fi
+# Build the collector
+echo -e "\n${YELLOW}Building Database Intelligence Collector...${NC}"
+cd ../..
+make build
+cd tests/e2e
 
-"$COLLECTOR_BINARY" \
-    --config="$CONFIG_FILE" \
-    --set=service.telemetry.logs.level=debug \
-    > /tmp/e2e-collector.log 2>&1 &
+# Start E2E test environment
+echo -e "\n${YELLOW}Starting E2E test environment...${NC}"
+docker-compose -f docker-compose.e2e.yml up -d
 
-COLLECTOR_PID=$!
-echo "Collector started with PID: $COLLECTOR_PID"
+# Wait for services to be healthy
+echo -e "\n${YELLOW}Waiting for services to be ready...${NC}"
+MAX_RETRIES=60
+RETRY_COUNT=0
 
-# Wait for collector to be healthy
-echo "Waiting for collector to be healthy..."
-HEALTH_CHECK_ATTEMPTS=30
-for i in $(seq 1 $HEALTH_CHECK_ATTEMPTS); do
-    if curl -sf http://localhost:13133/health > /dev/null 2>&1; then
-        echo -e "${GREEN}Collector is healthy${NC}"
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if docker-compose -f docker-compose.e2e.yml ps | grep -q "healthy"; then
+        echo -e "${GREEN}✓ All services are healthy${NC}"
         break
     fi
-    if [ $i -eq $HEALTH_CHECK_ATTEMPTS ]; then
-        echo -e "${RED}Collector failed to become healthy${NC}"
-        exit 1
-    fi
+    
+    echo -n "."
     sleep 2
+    RETRY_COUNT=$((RETRY_COUNT + 1))
 done
 
-# Run the tests
-echo -e "\n${YELLOW}Running E2E tests...${NC}"
-go test -v -timeout=$TEST_TIMEOUT ./tests/e2e/... -run TestEndToEndDataFlow
-
-TEST_EXIT_CODE=$?
-
-# Generate test report
-echo -e "\n${YELLOW}Generating test report...${NC}"
-cat > tests/e2e/reports/summary-$TEST_RUN_ID.txt <<EOF
-E2E Test Summary
-================
-Run ID: $TEST_RUN_ID
-Date: $(date)
-Exit Code: $TEST_EXIT_CODE
-
-Environment:
-- PostgreSQL: ${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}
-- MySQL: ${MYSQL_HOST:-localhost}:${MYSQL_PORT:-3306}
-- New Relic Account: $NEW_RELIC_ACCOUNT_ID
-
-Test Results:
-EOF
-
-if [ $TEST_EXIT_CODE -eq 0 ]; then
-    echo -e "${GREEN}✓ All E2E tests passed${NC}" | tee -a tests/e2e/reports/summary-$TEST_RUN_ID.txt
-else
-    echo -e "${RED}✗ E2E tests failed${NC}" | tee -a tests/e2e/reports/summary-$TEST_RUN_ID.txt
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo -e "\n${RED}Services failed to become healthy${NC}"
+    docker-compose -f docker-compose.e2e.yml logs
+    exit 1
 fi
 
-# Query NRDB for validation metrics
-echo -e "\n${YELLOW}Querying NRDB for validation metrics...${NC}"
-NRQL_QUERY="SELECT count(*) FROM Metric WHERE test.run_id = '$TEST_RUN_ID' SINCE 10 minutes ago"
-echo "NRQL Query: $NRQL_QUERY" >> tests/e2e/reports/summary-$TEST_RUN_ID.txt
+# Run the E2E tests
+echo -e "\n${YELLOW}Running E2E tests...${NC}"
+mkdir -p output
 
-exit $TEST_EXIT_CODE
+# Set test environment variables
+export E2E_TEST=true
+export TEST_POSTGRES_HOST=localhost
+export TEST_POSTGRES_PORT=5433
+export TEST_MYSQL_HOST=localhost
+export TEST_MYSQL_PORT=3307
+
+# Run Go tests
+if go test -v -timeout 10m ./... -tags=e2e; then
+    TEST_RESULT=0
+    echo -e "\n${GREEN}✓ All E2E tests passed${NC}"
+else
+    TEST_RESULT=1
+    echo -e "\n${RED}✗ E2E tests failed${NC}"
+fi
+
+# Collect test artifacts
+echo -e "\n${YELLOW}Collecting test artifacts...${NC}"
+mkdir -p test-results
+
+# Copy collector logs
+docker-compose -f docker-compose.e2e.yml logs otel-collector-e2e > test-results/collector.log 2>&1
+
+# Copy output files
+cp -r output/* test-results/ 2>/dev/null || true
+
+# Get metrics snapshot
+curl -s http://localhost:8890/metrics > test-results/metrics.txt 2>/dev/null || true
+
+# Get mock server requests
+curl -s http://localhost:4319/mockserver/retrieve?type=REQUESTS > test-results/nrdb-requests.json 2>/dev/null || true
+
+# Print summary
+echo -e "\n${YELLOW}========================================${NC}"
+echo -e "${YELLOW}E2E Test Summary${NC}"
+echo -e "${YELLOW}========================================${NC}"
+
+# Check key validations
+echo -e "\n${YELLOW}Key Validations:${NC}"
+
+# 1. Check if metrics were collected
+if grep -q "postgresql_backends" test-results/metrics.txt 2>/dev/null; then
+    echo -e "${GREEN}✓ PostgreSQL metrics collected${NC}"
+else
+    echo -e "${RED}✗ PostgreSQL metrics missing${NC}"
+fi
+
+if grep -q "mysql_buffer_pool" test-results/metrics.txt 2>/dev/null; then
+    echo -e "${GREEN}✓ MySQL metrics collected${NC}"
+else
+    echo -e "${RED}✗ MySQL metrics missing${NC}"
+fi
+
+# 2. Check if PII was sanitized
+if [ -f test-results/e2e-output.json ]; then
+    if grep -q "REDACTED" test-results/e2e-output.json; then
+        echo -e "${GREEN}✓ PII sanitization working${NC}"
+    else
+        echo -e "${YELLOW}⚠ PII sanitization not verified${NC}"
+    fi
+fi
+
+# 3. Check if data was sent to NRDB
+if [ -f test-results/nrdb-requests.json ]; then
+    REQUEST_COUNT=$(jq length test-results/nrdb-requests.json 2>/dev/null || echo "0")
+    if [ "$REQUEST_COUNT" -gt "0" ]; then
+        echo -e "${GREEN}✓ Data sent to NRDB: $REQUEST_COUNT requests${NC}"
+    else
+        echo -e "${RED}✗ No data sent to NRDB${NC}"
+    fi
+fi
+
+# 4. Check processor health
+if grep -q "otelcol_processor_accepted_metric_points" test-results/metrics.txt 2>/dev/null; then
+    echo -e "${GREEN}✓ Processors are processing data${NC}"
+else
+    echo -e "${RED}✗ Processor metrics missing${NC}"
+fi
+
+# Clean up if requested
+if [ "$1" != "--keep" ]; then
+    echo -e "\n${YELLOW}Cleaning up test environment...${NC}"
+    docker-compose -f docker-compose.e2e.yml down -v
+else
+    echo -e "\n${YELLOW}Test environment kept running. To stop:${NC}"
+    echo "  docker-compose -f docker-compose.e2e.yml down -v"
+fi
+
+echo -e "\n${YELLOW}Test artifacts saved in: ./test-results/${NC}"
+
+exit $TEST_RESULT

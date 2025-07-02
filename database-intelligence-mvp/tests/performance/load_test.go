@@ -11,7 +11,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/consumer/consumertest"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/processor"
 	"go.uber.org/zap"
 
 	"github.com/database-intelligence-mvp/processors/adaptivesampler"
@@ -305,36 +310,50 @@ done:
 // Helper functions
 
 type testPipeline struct {
-	sampler   *adaptivesampler.AdaptiveSampler
-	breaker   *circuitbreaker.CircuitBreaker
-	extractor *planattributeextractor.PlanAttributeExtractor
-	verifier  *verification.VerificationProcessor
+	sampler   consumer.Logs
+	breaker   consumer.Metrics
+	extractor consumer.Metrics
+	verifier  consumer.Metrics
 }
 
 func createTestPipeline(t *testing.T) *testPipeline {
-	sampler, err := adaptivesampler.NewAdaptiveSampler(&adaptivesampler.Config{
-		DefaultSamplingRate: 0.5,
-		InMemoryOnly:       true,
-	}, zap.NewNop())
-	require.NoError(t, err)
-	
-	breaker, err := circuitbreaker.NewCircuitBreaker(&circuitbreaker.Config{
-		FailureThreshold: 10,
-		Timeout:         30 * time.Second,
-	}, zap.NewNop())
-	require.NoError(t, err)
-	
-	extractor, err := planattributeextractor.NewPlanAttributeExtractor(&planattributeextractor.Config{
-		SafeMode: true,
-		Timeout:  50 * time.Millisecond,
-	}, zap.NewNop())
-	require.NoError(t, err)
-	
-	verifier, err := verification.NewVerificationProcessor(&verification.Config{
-		PIIDetection: verification.PIIDetectionConfig{
-			Enabled: false, // Disable for performance tests
+	// Create factory settings
+	settings := processor.Settings{
+		ID:                component.MustNewID("test"),
+		TelemetrySettings: component.TelemetrySettings{
+			Logger: zap.NewNop(),
 		},
-	}, zap.NewNop())
+	}
+	
+	// Create adaptive sampler
+	samplerFactory := adaptivesampler.NewFactory()
+	samplerCfg := samplerFactory.CreateDefaultConfig().(*adaptivesampler.Config)
+	samplerCfg.DefaultSampleRate = 0.5
+	samplerCfg.InMemoryOnly = true
+	sampler, err := samplerFactory.CreateLogs(context.Background(), settings, samplerCfg, consumertest.NewNop())
+	require.NoError(t, err)
+	
+	// Create circuit breaker
+	breakerFactory := circuitbreaker.NewFactory()
+	breakerCfg := breakerFactory.CreateDefaultConfig().(*circuitbreaker.Config)
+	breakerCfg.FailureThreshold = 10
+	breakerCfg.Timeout = 30 * time.Second
+	breaker, err := breakerFactory.CreateMetrics(context.Background(), settings, breakerCfg, consumertest.NewNop())
+	require.NoError(t, err)
+	
+	// Create plan extractor
+	extractorFactory := planattributeextractor.NewFactory()
+	extractorCfg := extractorFactory.CreateDefaultConfig().(*planattributeextractor.Config)
+	extractorCfg.SafeMode = true
+	extractorCfg.ErrorMode = "ignore"
+	extractor, err := extractorFactory.CreateMetrics(context.Background(), settings, extractorCfg, consumertest.NewNop())
+	require.NoError(t, err)
+	
+	// Create verification processor
+	verifierFactory := verification.NewFactory()
+	verifierCfg := verifierFactory.CreateDefaultConfig().(*verification.Config)
+	verifierCfg.PIIDetection.Enabled = false // Disable for performance tests
+	verifier, err := verifierFactory.CreateMetrics(context.Background(), settings, verifierCfg, consumertest.NewNop())
 	require.NoError(t, err)
 	
 	return &testPipeline{
@@ -346,34 +365,29 @@ func createTestPipeline(t *testing.T) *testPipeline {
 }
 
 func processMetricsThroughPipeline(ctx context.Context, pipeline *testPipeline, metrics pmetric.Metrics) (int, error) {
-	m := metrics
-	var err error
+	// Note: Adaptive sampler works with logs, not metrics
+	// For this test, we'll skip it and focus on metric processors
 	
-	// Process through pipeline
-	m, err = pipeline.sampler.ProcessMetrics(ctx, m)
+	// Process through metric processors
+	err := pipeline.breaker.ConsumeMetrics(ctx, metrics)
 	if err != nil {
 		return 0, err
 	}
 	
-	m, err = pipeline.breaker.ProcessMetrics(ctx, m)
+	err = pipeline.extractor.ConsumeMetrics(ctx, metrics)
 	if err != nil {
 		return 0, err
 	}
 	
-	m, err = pipeline.extractor.ProcessMetrics(ctx, m)
+	err = pipeline.verifier.ConsumeMetrics(ctx, metrics)
 	if err != nil {
 		return 0, err
 	}
 	
-	m, err = pipeline.verifier.ProcessMetrics(ctx, m)
-	if err != nil {
-		return 0, err
-	}
-	
-	// Count remaining metrics
+	// Count metrics
 	count := 0
-	for i := 0; i < m.ResourceMetrics().Len(); i++ {
-		rm := m.ResourceMetrics().At(i)
+	for i := 0; i < metrics.ResourceMetrics().Len(); i++ {
+		rm := metrics.ResourceMetrics().At(i)
 		for j := 0; j < rm.ScopeMetrics().Len(); j++ {
 			sm := rm.ScopeMetrics().At(j)
 			count += sm.Metrics().Len()
@@ -397,7 +411,7 @@ func generateLoadTestMetrics(count, senderID int, errorRate, slowQueryRate float
 		
 		gauge := metric.SetEmptyGauge()
 		dp := gauge.DataPoints().AppendEmpty()
-		dp.SetTimestamp(pmetric.NewTimestampFromTime(time.Now()))
+		dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
 		
 		// Normal query duration 10-100ms
 		duration := float64(10 + (i%90))

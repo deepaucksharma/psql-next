@@ -51,6 +51,7 @@ data:
         datasource: "host=${POSTGRES_HOST} port=${POSTGRES_PORT} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB} sslmode=disable"
         collection_interval: 10s
         queries:
+          # pg_stat_statements query
           - query: |
               SELECT 
                 query,
@@ -81,6 +82,68 @@ data:
                 value_type: double
                 attribute_columns:
                   - query
+          
+          # pg_querylens current plans
+          - query: |
+              SELECT 
+                queryid,
+                plan_id,
+                plan_text,
+                mean_exec_time_ms,
+                calls,
+                rows,
+                shared_blks_hit,
+                shared_blks_read,
+                planning_time_ms,
+                last_execution
+              FROM pg_querylens.current_plans
+              WHERE last_execution > NOW() - INTERVAL '5 minutes'
+            metrics:
+              - metric_name: db.querylens.query.execution_time_mean
+                value_column: mean_exec_time_ms
+                value_type: double
+                attribute_columns:
+                  - queryid
+                  - plan_id
+              - metric_name: db.querylens.query.calls
+                value_column: calls
+                value_type: int
+                attribute_columns:
+                  - queryid
+                  - plan_id
+              - metric_name: db.querylens.query.blocks_hit
+                value_column: shared_blks_hit
+                value_type: int
+                attribute_columns:
+                  - queryid
+                  - plan_id
+              - metric_name: db.querylens.query.blocks_read
+                value_column: shared_blks_read
+                value_type: int
+                attribute_columns:
+                  - queryid
+                  - plan_id
+          
+          # pg_querylens plan changes
+          - query: |
+              SELECT 
+                queryid,
+                plan_id,
+                previous_plan_id,
+                change_timestamp,
+                mean_exec_time_ms,
+                previous_mean_exec_time_ms,
+                mean_exec_time_ms / NULLIF(previous_mean_exec_time_ms, 0) as time_change_ratio
+              FROM pg_querylens.plan_history
+              WHERE change_timestamp > NOW() - INTERVAL '1 hour'
+            metrics:
+              - metric_name: db.querylens.plan.change_detected
+                value_column: time_change_ratio
+                value_type: double
+                attribute_columns:
+                  - queryid
+                  - plan_id
+                  - previous_plan_id
 
     processors:
       memory_limiter:
@@ -141,6 +204,15 @@ data:
             - "Function Scan"
             - "CTE Scan"
         error_mode: ignore
+        querylens:
+          enabled: true
+          plan_history_hours: 24
+          regression_detection:
+            enabled: true
+            time_increase: 1.5      # 50% slower
+            io_increase: 2.0        # 100% more I/O
+            cost_increase: 2.0      # 100% higher cost
+          alert_on_regression: true
 
       verification:
         pii_detection:
