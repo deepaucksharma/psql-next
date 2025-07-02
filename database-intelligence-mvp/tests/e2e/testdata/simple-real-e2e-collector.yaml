@@ -1,0 +1,103 @@
+# Simplified E2E Test Configuration for real database testing
+# This configuration uses only standard components to ensure it works
+
+receivers:
+  # PostgreSQL receiver
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    transport: tcp
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB}
+    collection_interval: 10s
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+
+  # MySQL receiver  
+  mysql:
+    endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DB}
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  # OTLP receiver for application data
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4320
+      http:
+        endpoint: 0.0.0.0:4321
+
+processors:
+  # Standard processors
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence-e2e
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+exporters:
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # File output for validation
+  file:
+    path: /var/lib/otel/e2e-output.json
+    flush_interval: 5s
+
+  # Prometheus metrics
+  prometheus:
+    endpoint: 0.0.0.0:8890
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # OTLP to Jaeger
+  otlp/jaeger:
+    endpoint: e2e-jaeger:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, file, otlp/jaeger, debug]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [file, otlp/jaeger, debug]
+    
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/jaeger, debug]
+
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}
+      development: true
+      encoding: console
+    metrics:
+      level: detailed

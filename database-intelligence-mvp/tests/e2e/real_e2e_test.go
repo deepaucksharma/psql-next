@@ -1,7 +1,7 @@
 package e2e
 
 import (
-	"context"
+	// "context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -23,8 +23,8 @@ func TestRealE2EPipeline(t *testing.T) {
 		t.Skip("Skipping E2E test in short mode")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
+	// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// defer cancel()
 
 	// Wait for services to be ready
 	t.Log("Waiting for services to be ready...")

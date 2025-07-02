@@ -312,6 +312,11 @@ func (v *Validator) compareMetrics(name string, ohiValue, otelValue float64) {
 
 	status := v.getStatus(ohiValue, otelValue)
 	
+	// Log significant differences
+	if status != StatusMatch && percentDiff > v.config.Tolerance {
+		v.logger.Warn(fmt.Sprintf("Metric %s differs by %.2f%%", name, percentDiff))
+	}
+	
 	v.addResult(name, ohiValue, otelValue, status, "")
 }
 

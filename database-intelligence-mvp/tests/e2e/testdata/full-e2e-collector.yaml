@@ -19,8 +19,8 @@ receivers:
         enabled: true
       postgresql.commits:
         enabled: true
-      postgresql.database.size:
-        enabled: true
+      # postgresql.database.size:
+      #   enabled: true
       postgresql.rollbacks:
         enabled: true
       postgresql.blocks_read:
@@ -54,8 +54,6 @@ receivers:
         enabled: true
       mysql.operations:
         enabled: true
-      mysql.table.io.wait:
-        enabled: true
       mysql.threads:
         enabled: true
       mysql.uptime:
@@ -82,17 +80,8 @@ receivers:
           WHERE query NOT LIKE '%pg_stat_statements%'
           ORDER BY total_exec_time DESC
           LIMIT 100
-        collection_interval: 30s
         logs:
           - body_column: query
-            tracking_start_value: "2000-01-01T00:00:00Z"
-            tracking_column: "query_id"
-            attributes:
-              - attribute_column: "query_id"
-              - attribute_column: "calls"
-              - attribute_column: "total_exec_time"
-              - attribute_column: "mean_exec_time"
-              - attribute_column: "rows"
 
   # OTLP receiver for application logs/traces
   otlp:
@@ -166,24 +155,28 @@ processors:
   verification:
     pii_detection:
       enabled: true
-      action_on_detection: redact
-      patterns:
-        - email
-        - ssn
-        - credit_card
-        - phone
+      auto_sanitize: true
+      sensitivity_level: "high"
       custom_patterns:
-        - name: "api_key"
-          pattern: "(?i)(api[_-]?key|apikey)\\s*[:=]\\s*['\"]?([a-zA-Z0-9-_]{20,})['\"\\s]?"
-          replacement: "API_KEY=[REDACTED]"
-    quality_checks:
-      enabled: true
-      max_attribute_length: 4096
-      max_attribute_count: 100
-    cardinality_control:
-      enabled: true
-      max_cardinality_per_metric: 10000
-      enforcement_action: drop_label
+        - "(?i)(api[_-]?key|apikey)\\s*[:=]\\s*['\"]?([a-zA-Z0-9-_]{20,})['\"\\s]?"
+      exclude_fields:
+        - query_hash
+        - plan_hash
+        - database_name
+    quality_rules:
+      required_fields:
+        - database_name
+        - query_id
+        - duration_ms
+      enable_schema_validation: true
+      cardinality_limits:
+        query_id: 10000
+        database_name: 100
+        table_name: 1000
+    enable_periodic_verification: true
+    verification_interval: 5m
+    enable_self_healing: true
+    enable_auto_tuning: true
 
   # Adaptive sampler for intelligent data reduction
   adaptivesampler:
@@ -210,15 +203,16 @@ processors:
 
   # Query correlator for transaction tracking
   querycorrelator:
-    session_timeout: 300s
-    transaction_timeout: 60s
-    correlation_attributes:
-      - "application_name"
-      - "client_addr"
-      - "database"
+    retention_period: 24h
+    cleanup_interval: 1h
     enable_table_correlation: true
     enable_database_correlation: true
-    enable_temporal_correlation: true
+    max_queries_tracked: 10000
+    correlation_attributes:
+      add_query_category: true
+      add_table_stats: true
+      add_load_contribution: true
+      add_maintenance_indicators: true
 
   # NR error monitor for proactive issue detection
   nrerrormonitor:
@@ -228,31 +222,17 @@ processors:
     alert_threshold: 10
     reporting_interval: 60s
     enable_proactive_validation: true
-    validation_rules:
-      - metric_name_pattern: "^[a-zA-Z][a-zA-Z0-9._]*$"
-      - attribute_key_pattern: "^[a-zA-Z][a-zA-Z0-9._]*$"
 
   # Cost control for budget management
   costcontrol:
     monthly_budget_usd: 1000.0
+    price_per_gb: 0.35
     metric_cardinality_limit: 50000
-    cost_per_gb_usd: 0.35
+    slow_span_threshold_ms: 2000
+    max_log_body_size: 10240
+    reporting_interval: 60s
     aggressive_mode: false
-    cardinality_reduction:
-      enabled: true
-      target_reduction_percent: 30
-      preserve_attributes:
-        - "db.system"
-        - "db.name"
-        - "service.name"
-        - "environment"
-    alerting:
-      enabled: true
-      thresholds:
-        - percent: 80
-          action: warn
-        - percent: 95
-          action: throttle
+    data_plus_enabled: false
 
 exporters:
   # Debug exporter for troubleshooting
@@ -266,11 +246,11 @@ exporters:
     path: /var/lib/otel/e2e-output.json
     flush_interval: 5s
 
-  # Real OTLP export to New Relic
+  # Real OTLP export to New Relic (or local for testing)
   otlp/newrelic:
     endpoint: ${env:OTLP_ENDPOINT}
     tls:
-      insecure: false
+      insecure: true  # For local testing
     headers:
       api-key: ${env:NEW_RELIC_LICENSE_KEY}
     compression: gzip

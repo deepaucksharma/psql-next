@@ -1,0 +1,269 @@
+# E2E Test Configuration with Custom Database Intelligence Processors
+# This configuration uses the correct format for each processor
+
+receivers:
+  # PostgreSQL receiver
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    transport: tcp
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB}
+    collection_interval: 10s
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+
+  # MySQL receiver  
+  mysql:
+    endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DB}
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  # SQL Query receiver for pg_stat_statements
+  sqlquery:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST} port=${env:POSTGRES_PORT} user=${env:POSTGRES_USER} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DB} sslmode=disable"
+    queries:
+      - sql: |
+          SELECT 
+            queryid::text as query_id,
+            query,
+            calls,
+            total_exec_time,
+            mean_exec_time,
+            rows
+          FROM pg_stat_statements
+          WHERE query NOT LIKE '%pg_stat_statements%'
+          ORDER BY total_exec_time DESC
+          LIMIT 100
+        logs:
+          - body_column: query
+
+  # OTLP receiver
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4320
+      http:
+        endpoint: 0.0.0.0:4321
+
+processors:
+  # Standard processors
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence-e2e
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  # Circuit breaker processor
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 30s
+    max_concurrent_requests: 100
+    error_patterns:
+      - "connection refused"
+      - "timeout"
+      - "too many connections"
+    per_database_limits:
+      enabled: true
+      default_limit: 50
+
+  # Plan attribute extractor
+  planattributeextractor:
+    safe_mode: true
+    error_mode: ignore
+    timeout: 500ms
+    query_anonymization:
+      enabled: true
+      preserve_structure: true
+    plan_extraction:
+      extract_costs: true
+      extract_operations: true
+      extract_indexes: true
+
+  # Verification processor with correct structure
+  verification:
+    pii_detection:
+      enabled: true
+      auto_sanitize: true
+      sensitivity_level: "high"
+      custom_patterns:
+        - "(?i)(api[_-]?key|apikey)\\s*[:=]\\s*['\"]?([a-zA-Z0-9-_]{20,})['\"]?"
+        - "(?i)\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+        - "(?i)\\b\\d{3}-\\d{2}-\\d{4}\\b"
+        - "(?i)\\b\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}\\b"
+      exclude_fields:
+        - query_hash
+        - plan_hash
+        - database_name
+    quality_rules:
+      required_fields:
+        - database_name
+        - query_id
+      enable_schema_validation: true
+      cardinality_limits:
+        query_id: 10000
+        database_name: 100
+    enable_periodic_verification: true
+    verification_interval: 5m
+    enable_self_healing: true
+    enable_auto_tuning: true
+
+  # Adaptive sampler with correct structure
+  adaptivesampler:
+    in_memory_only: true
+    default_sample_rate: 1.0
+    rules:
+      - name: "expensive_queries"
+        condition: 'double(attributes["mean_exec_time"]) > 100'
+        sample_rate: 1.0
+        priority: 100
+      - name: "high_frequency"
+        condition: 'int(attributes["calls"]) > 1000'
+        sample_rate: 0.1
+        priority: 90
+      - name: "system_queries"
+        condition: 'IsMatch(attributes["query"], "pg_.*")'
+        sample_rate: 0.01
+        priority: 80
+    deduplication:
+      enabled: true
+      window_seconds: 300
+      cache_size: 10000
+      hash_attribute: "query_id"
+
+  # Query correlator with correct structure
+  querycorrelator:
+    retention_period: 24h
+    cleanup_interval: 1h
+    enable_table_correlation: true
+    enable_database_correlation: true
+    max_queries_tracked: 10000
+    correlation_attributes:
+      add_query_category: true
+      add_table_stats: true
+      add_load_contribution: true
+      add_maintenance_indicators: true
+
+  # NR error monitor
+  nrerrormonitor:
+    max_attribute_length: 4096
+    max_metric_name_length: 255
+    cardinality_warning_threshold: 5000
+    alert_threshold: 10
+    reporting_interval: 60s
+    enable_proactive_validation: true
+
+  # Cost control with correct structure
+  costcontrol:
+    monthly_budget_usd: 1000.0
+    price_per_gb: 0.35
+    metric_cardinality_limit: 50000
+    slow_span_threshold_ms: 2000
+    max_log_body_size: 10240
+    reporting_interval: 60s
+    aggressive_mode: false
+    data_plus_enabled: false
+
+exporters:
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # File output
+  file:
+    path: /var/lib/otel/e2e-output.json
+    flush_interval: 5s
+
+  # Prometheus metrics
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # OTLP to Jaeger (using IP to avoid DNS issues)
+  otlp/jaeger:
+    endpoint: 172.19.0.5:4317
+    tls:
+      insecure: true
+
+  # OTLP to New Relic (when ready)
+  otlp/newrelic:
+    endpoint: ${env:OTLP_ENDPOINT}
+    tls:
+      insecure: true
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+
+service:
+  pipelines:
+    # Metrics pipeline with custom processors
+    metrics/databases:
+      receivers: [postgresql, mysql]
+      processors: 
+        - memory_limiter
+        - resource
+        - querycorrelator
+        - nrerrormonitor
+        - costcontrol
+        - batch
+      exporters: [prometheus, file, debug]
+    
+    # Logs pipeline for query logs with all processors
+    logs/queries:
+      receivers: [sqlquery, otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - circuitbreaker
+        - planattributeextractor
+        - verification
+        - adaptivesampler
+        - costcontrol
+        - batch
+      exporters: [file, debug]
+    
+    # Traces pipeline
+    traces:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - batch
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}
+      development: true
+      encoding: console
+    metrics:
+      level: detailed
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8889

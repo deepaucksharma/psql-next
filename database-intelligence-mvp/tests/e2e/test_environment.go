@@ -117,8 +117,8 @@ func (env *TestEnvironment) startPostgreSQL(t *testing.T) {
 			"POSTGRES_PASSWORD": "test_password",
 			"POSTGRES_DB":       "test_db",
 		},
-		WaitingFor: wait.ForSQL("5432/tcp", "postgres", func(port nat.Port) string {
-			return fmt.Sprintf("postgres://test_user:test_password@localhost:%s/test_db?sslmode=disable", port.Port())
+		WaitingFor: wait.ForSQL("5432/tcp", "postgres", func(host string, port nat.Port) string {
+			return fmt.Sprintf("postgres://test_user:test_password@%s:%s/test_db?sslmode=disable", host, port.Port())
 		}).WithStartupTimeout(60 * time.Second),
 		Mounts: testcontainers.Mounts(
 			testcontainers.BindMount("/tmp/test-logs", "/var/log/postgresql"),
@@ -329,7 +329,8 @@ func (env *TestEnvironment) RestoreAutoExplain() {
 // SimulateDatabaseOutage simulates a database outage
 func (env *TestEnvironment) SimulateDatabaseOutage(duration time.Duration) {
 	go func() {
-		env.PostgresContainer.Stop(context.Background())
+		timeout := 30 * time.Second
+		env.PostgresContainer.Stop(context.Background(), &timeout)
 		time.Sleep(duration)
 		env.PostgresContainer.Start(context.Background())
 	}()

@@ -61,7 +61,7 @@ services:
     container_name: e2e-collector
     command: ["--config=/etc/otel/config.yaml"]
     volumes:
-      - ./testdata/full-e2e-collector.yaml:/etc/otel/config.yaml
+      - ./testdata/custom-processors-e2e.yaml:/etc/otel/config.yaml
       - ./output:/var/lib/otel
     ports:
       - "4320:4317"   # OTLP gRPC
@@ -80,7 +80,7 @@ services:
       - MYSQL_PASSWORD=mysql
       - MYSQL_DB=e2e_test
       - NEW_RELIC_LICENSE_KEY=test_license_key
-      - OTLP_ENDPOINT=otlp.nr-data.net:4317
+      - OTLP_ENDPOINT=jaeger:4317
       - ENVIRONMENT=e2e-test
       - LOG_LEVEL=debug
     depends_on:

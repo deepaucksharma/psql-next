@@ -2,9 +2,6 @@ package e2e
 
 import (
 	"database/sql"
-	"fmt"
-	"os/exec"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
