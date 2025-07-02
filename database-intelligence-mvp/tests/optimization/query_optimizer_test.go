@@ -1,7 +1,6 @@
 package optimization
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"strings"

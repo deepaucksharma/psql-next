@@ -124,14 +124,14 @@ exporters:
       api-key: ${env:NEW_RELIC_LICENSE_KEY}
 
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     
   zpages:
     endpoint: 0.0.0.0:55679
 
 service:
-  extensions: [health_check, zpages]
+  extensions: [healthcheck, zpages]
   
   pipelines:
     # Logs pipeline - processes database query logs

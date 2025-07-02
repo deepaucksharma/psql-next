@@ -204,7 +204,7 @@ exporters:
 
 extensions:
   # Health check endpoint
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     path: "/health"
     check_collector_pipeline:
@@ -229,7 +229,7 @@ extensions:
     endpoint: 0.0.0.0:1777
 
 service:
-  extensions: [health_check, bearertokenauth, memory_ballast, zpages, pprof]
+  extensions: [healthcheck, bearertokenauth, memory_ballast, zpages, pprof]
   
   pipelines:
     # Trace pipeline with tail sampling

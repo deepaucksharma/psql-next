@@ -45,6 +45,9 @@ import (
 	"github.com/database-intelligence-mvp/processors/nrerrormonitor"
 	"github.com/database-intelligence-mvp/processors/costcontrol"
 	"github.com/database-intelligence-mvp/processors/querycorrelator"
+	
+	// Import extensions
+	"github.com/database-intelligence-mvp/extensions/healthcheck"
 )
 
 func main() {
@@ -98,6 +101,9 @@ func Components() (otelcol.Factories, error) {
 	factories.Processors = make(map[component.Type]processor.Factory)
 	factories.Exporters = make(map[component.Type]exporter.Factory)
 	factories.Connectors = make(map[component.Type]connector.Factory)
+	
+	// Add extensions
+	factories.Extensions[healthcheck.NewFactory().Type()] = healthcheck.NewFactory()
 
 	// Add standard receivers
 	factories.Receivers[otlpreceiver.NewFactory().Type()] = otlpreceiver.NewFactory()

@@ -118,7 +118,7 @@ func (env *TestEnvironment) startPostgreSQL(t *testing.T) {
 			"POSTGRES_DB":       "test_db",
 		},
 		WaitingFor: wait.ForSQL("5432/tcp", "postgres", func(host string, port nat.Port) string {
-			return fmt.Sprintf("postgres://test_user:test_password@%s:%s/test_db?sslmode=disable", host, port.Port())
+			return fmt.Sprintf("host=%s port=%s user=test_user password=test_password dbname=test_db sslmode=disable", host, port.Port())
 		}).WithStartupTimeout(60 * time.Second),
 		Mounts: testcontainers.Mounts(
 			testcontainers.BindMount("/tmp/test-logs", "/var/log/postgresql"),

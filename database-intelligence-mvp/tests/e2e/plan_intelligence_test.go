@@ -205,7 +205,7 @@ func TestPlanIntelligenceE2E(t *testing.T) {
 
 // Helper functions
 
-func setupTestSchema(t *testing.T, db *sql.DB) {
+func setupTestSchemaPlanIntelligence(t *testing.T, db *sql.DB) {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			id SERIAL PRIMARY KEY,
@@ -243,7 +243,7 @@ func setupTestSchema(t *testing.T, db *sql.DB) {
 	}
 }
 
-func generateSlowQueries(t *testing.T, db *sql.DB) {
+func generateSlowQueriesPlanIntelligence(t *testing.T, db *sql.DB) {
 	queries := []string{
 		// Query that will trigger auto_explain
 		`SELECT u.*, COUNT(o.id) as order_count, SUM(o.amount) as total_amount
@@ -285,7 +285,7 @@ func generateSlowQueries(t *testing.T, db *sql.DB) {
 }
 
 // Test configuration
-const testPlanIntelligenceConfig = `
+const planIntelligenceTestConfigData = `
 receivers:
   autoexplain:
     log_path: /tmp/test-postgresql.log

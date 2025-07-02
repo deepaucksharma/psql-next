@@ -3,7 +3,7 @@
 
 # Extensions for debugging and health monitoring
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     
   zpages:
@@ -308,7 +308,7 @@ exporters:
 # Service configuration with pipelines
 service:
   # Enable extensions
-  extensions: [health_check, zpages, pprof]
+  extensions: [healthcheck, zpages, pprof]
   
   # Telemetry for the collector itself
   telemetry:

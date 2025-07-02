@@ -305,7 +305,7 @@ exporters:
 
 extensions:
   # Health check extension
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     path: "/health"
     check_collector_pipeline:
@@ -318,7 +318,7 @@ extensions:
     size_mib: 64
 
 service:
-  extensions: [health_check, memory_ballast]
+  extensions: [healthcheck, memory_ballast]
   pipelines:
     metrics:
       receivers: [postgresql, sqlquery]

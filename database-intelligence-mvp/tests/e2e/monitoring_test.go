@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -394,7 +395,7 @@ func generateDatabaseLoad(t *testing.T, db *sql.DB) {
 	}
 }
 
-func generateASHActivity(t *testing.T, db *sql.DB) {
+func generateASHActivityMonitoring(t *testing.T, db *sql.DB) {
 	// Create various session states
 	for i := 0; i < 20; i++ {
 		go func(id int) {
@@ -420,7 +421,7 @@ func generateASHActivity(t *testing.T, db *sql.DB) {
 	}
 }
 
-func generateHighCardinalityQueries(t *testing.T, db *sql.DB, count int) {
+func generateHighCardinalityQueriesMonitoring(t *testing.T, db *sql.DB, count int) {
 	for i := 0; i < count; i++ {
 		go func(id int) {
 			conn := getNewConnection(t, testEnv)
@@ -433,7 +434,7 @@ func generateHighCardinalityQueries(t *testing.T, db *sql.DB, count int) {
 	}
 }
 
-func causePlanRegression(t *testing.T, db *sql.DB) {
+func causePlanRegressionMonitoring(t *testing.T, db *sql.DB) {
 	// Create and drop index
 	db.Exec("CREATE INDEX idx_test_regression ON users(email)")
 	
@@ -451,7 +452,7 @@ func causePlanRegression(t *testing.T, db *sql.DB) {
 	}
 }
 
-func createLockContention(t *testing.T, db *sql.DB) {
+func createLockContentionMonitoring(t *testing.T, db *sql.DB) {
 	// Hold lock
 	lockConn := getNewConnection(t, testEnv)
 	tx, _ := lockConn.Begin()
@@ -541,7 +542,7 @@ func validateDashboardQueries(t *testing.T, dashboard map[string]interface{}) {
 	}
 }
 
-func generateRandomString(length int) string {
+func generateRandomStringMonitoring(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
 	for i := range b {

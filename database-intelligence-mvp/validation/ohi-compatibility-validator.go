@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -43,12 +42,17 @@ type ValidationResult struct {
 	FailureReason string
 }
 
+const (
+	StatusMatch = "MATCH"
+)
+
 // Validator performs side-by-side validation
 type Validator struct {
 	db       *sql.DB
 	nrClient *newrelic.NewRelic
 	config   Config
 	results  []ValidationResult
+	logger   *log.Logger
 }
 
 // Config holds validation configuration
@@ -102,6 +106,7 @@ func NewValidator(config Config) (*Validator, error) {
 		nrClient: nrClient,
 		config:   config,
 		results:  []ValidationResult{},
+		logger:   log.New(os.Stdout, "[validator] ", log.LstdFlags),
 	}, nil
 }
 
@@ -276,7 +281,12 @@ func (v *Validator) getOHITopQueries() ([]map[string]interface{}, error) {
 		return nil, err
 	}
 
-	return result.Results, nil
+	results := make([]map[string]interface{}, len(result.Results))
+	for i, r := range result.Results {
+		results[i] = r
+	}
+
+	return results, nil
 }
 
 // getOTELTopQueries gets top queries from OTEL
@@ -299,7 +309,12 @@ func (v *Validator) getOTELTopQueries() ([]map[string]interface{}, error) {
 		return nil, err
 	}
 
-	return result.Results, nil
+	results := make([]map[string]interface{}, len(result.Results))
+	for i, r := range result.Results {
+		results[i] = r
+	}
+
+	return results, nil
 }
 
 // compareMetrics compares two metric values
@@ -314,7 +329,7 @@ func (v *Validator) compareMetrics(name string, ohiValue, otelValue float64) {
 	
 	// Log significant differences
 	if status != StatusMatch && percentDiff > v.config.Tolerance {
-		v.logger.Warn(fmt.Sprintf("Metric %s differs by %.2f%%", name, percentDiff))
+		v.logger.Printf("WARNING: Metric %s differs by %.2f%%", name, percentDiff)
 	}
 	
 	v.addResult(name, ohiValue, otelValue, status, "")

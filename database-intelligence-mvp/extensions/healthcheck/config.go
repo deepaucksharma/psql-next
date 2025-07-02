@@ -6,6 +6,8 @@ package healthcheck
 import (
 	"errors"
 	"time"
+
+	"go.opentelemetry.io/collector/component"
 )
 
 // Config defines the configuration for the health check extension
@@ -112,7 +114,7 @@ func (cfg *Config) Validate() error {
 }
 
 // createDefaultConfig creates the default configuration
-func createDefaultConfig() *Config {
+func createDefaultConfig() component.Config {
 	return &Config{
 		Endpoint: "0.0.0.0:13133",
 		Path:     "/health",

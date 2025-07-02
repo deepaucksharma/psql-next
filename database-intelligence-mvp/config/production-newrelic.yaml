@@ -137,12 +137,8 @@ service:
         service: "database-intelligence-collector"
         version: "${env:SERVICE_VERSION}"
     metrics:
-      readers:
-        - pull:
-            exporter:
-              prometheus:
-                host: 0.0.0.0
-                port: 8888
+      level: detailed
+      address: 0.0.0.0:8888
       
   pipelines:
     # Metrics pipeline for database metrics

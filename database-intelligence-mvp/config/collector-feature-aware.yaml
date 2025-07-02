@@ -2,7 +2,7 @@
 # This configuration demonstrates the enhanced SQL receiver with feature detection
 
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
 
 receivers:
@@ -272,7 +272,7 @@ service:
       processors: [memory_limiter, transform/anonymize, verification, batch]
       exporters: [otlp]
       
-  extensions: [health_check]
+  extensions: [healthcheck]
   
   telemetry:
     logs:

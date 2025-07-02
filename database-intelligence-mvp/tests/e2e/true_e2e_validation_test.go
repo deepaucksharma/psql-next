@@ -1257,7 +1257,7 @@ func TestRecentFeaturesValidation(t *testing.T) {
 }
 
 // generateRandomString generates a random string for testing
-func generateRandomString(length int) string {
+func generateRandomStringValidation(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
 	for i := range b {

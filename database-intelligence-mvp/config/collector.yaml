@@ -1,5 +1,5 @@
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     
   zpages:
@@ -206,7 +206,7 @@ exporters:
       queue_size: 256
 
 service:
-  extensions: [health_check, zpages]
+  extensions: [healthcheck, zpages]
   pipelines:
     metrics/databases:
       receivers: [postgresql, mysql]

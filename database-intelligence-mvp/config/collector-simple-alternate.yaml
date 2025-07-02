@@ -150,7 +150,7 @@ exporters:
 
 extensions:
   # Health check
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     path: "/health"
 
@@ -159,7 +159,7 @@ extensions:
     endpoint: 0.0.0.0:1777
 
 service:
-  extensions: [health_check, pprof]
+  extensions: [healthcheck, pprof]
   
   pipelines:
     # Metrics pipeline

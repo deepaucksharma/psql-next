@@ -2,7 +2,7 @@
 # This is the foundation configuration that all environments build upon
 
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     path: /
     check_collector_pipeline:

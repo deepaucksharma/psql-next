@@ -317,9 +317,27 @@ type testPipeline struct {
 }
 
 func createTestPipeline(t *testing.T) *testPipeline {
-	// Create factory settings
-	settings := processor.Settings{
-		ID:                component.MustNewID("test"),
+	// Create factory settings with proper component types
+	samplerSettings := processor.Settings{
+		ID:                component.MustNewIDWithName("adaptivesampler", "test"),
+		TelemetrySettings: component.TelemetrySettings{
+			Logger: zap.NewNop(),
+		},
+	}
+	breakerSettings := processor.Settings{
+		ID:                component.MustNewIDWithName("circuitbreaker", "test"),
+		TelemetrySettings: component.TelemetrySettings{
+			Logger: zap.NewNop(),
+		},
+	}
+	extractorSettings := processor.Settings{
+		ID:                component.MustNewIDWithName("planattributeextractor", "test"),
+		TelemetrySettings: component.TelemetrySettings{
+			Logger: zap.NewNop(),
+		},
+	}
+	verifierSettings := processor.Settings{
+		ID:                component.MustNewIDWithName("verification", "test"),
 		TelemetrySettings: component.TelemetrySettings{
 			Logger: zap.NewNop(),
 		},
@@ -330,7 +348,7 @@ func createTestPipeline(t *testing.T) *testPipeline {
 	samplerCfg := samplerFactory.CreateDefaultConfig().(*adaptivesampler.Config)
 	samplerCfg.DefaultSampleRate = 0.5
 	samplerCfg.InMemoryOnly = true
-	sampler, err := samplerFactory.CreateLogs(context.Background(), settings, samplerCfg, consumertest.NewNop())
+	sampler, err := samplerFactory.CreateLogsProcessor(context.Background(), samplerSettings, samplerCfg, consumertest.NewNop())
 	require.NoError(t, err)
 	
 	// Create circuit breaker
@@ -338,7 +356,7 @@ func createTestPipeline(t *testing.T) *testPipeline {
 	breakerCfg := breakerFactory.CreateDefaultConfig().(*circuitbreaker.Config)
 	breakerCfg.FailureThreshold = 10
 	breakerCfg.Timeout = 30 * time.Second
-	breaker, err := breakerFactory.CreateMetrics(context.Background(), settings, breakerCfg, consumertest.NewNop())
+	breaker, err := breakerFactory.CreateMetricsProcessor(context.Background(), breakerSettings, breakerCfg, consumertest.NewNop())
 	require.NoError(t, err)
 	
 	// Create plan extractor
@@ -346,14 +364,14 @@ func createTestPipeline(t *testing.T) *testPipeline {
 	extractorCfg := extractorFactory.CreateDefaultConfig().(*planattributeextractor.Config)
 	extractorCfg.SafeMode = true
 	extractorCfg.ErrorMode = "ignore"
-	extractor, err := extractorFactory.CreateMetrics(context.Background(), settings, extractorCfg, consumertest.NewNop())
+	extractor, err := extractorFactory.CreateMetricsProcessor(context.Background(), extractorSettings, extractorCfg, consumertest.NewNop())
 	require.NoError(t, err)
 	
 	// Create verification processor
 	verifierFactory := verification.NewFactory()
 	verifierCfg := verifierFactory.CreateDefaultConfig().(*verification.Config)
 	verifierCfg.PIIDetection.Enabled = false // Disable for performance tests
-	verifier, err := verifierFactory.CreateMetrics(context.Background(), settings, verifierCfg, consumertest.NewNop())
+	verifier, err := verifierFactory.CreateMetricsProcessor(context.Background(), verifierSettings, verifierCfg, consumertest.NewNop())
 	require.NoError(t, err)
 	
 	return &testPipeline{

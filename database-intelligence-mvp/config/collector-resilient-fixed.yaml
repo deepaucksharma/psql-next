@@ -2,7 +2,7 @@
 # This configuration maximizes reliability with graceful degradation
 
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     
   zpages:
@@ -199,7 +199,7 @@ exporters:
       max_backups: 2
 
 service:
-  extensions: [health_check, zpages]
+  extensions: [healthcheck, zpages]
   
   pipelines:
     # Database metrics pipeline

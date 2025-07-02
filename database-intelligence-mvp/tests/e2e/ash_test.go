@@ -20,7 +20,6 @@ func TestASHE2E(t *testing.T) {
 		t.Skip("Skipping E2E test in short mode")
 	}
 
-	ctx := context.Background()
 	testEnv := setupTestEnvironment(t)
 	defer testEnv.Cleanup()
 
@@ -45,7 +44,7 @@ func TestASHE2E(t *testing.T) {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				conn := getNewConnection(t, testEnv)
+				conn := getNewConnectionASH(t, testEnv)
 				defer conn.Close()
 
 				// Execute queries with different patterns
@@ -91,7 +90,7 @@ func TestASHE2E(t *testing.T) {
 
 	t.Run("WaitEventAnalysis", func(t *testing.T) {
 		// Generate different wait events
-		generateWaitEvents(t, db)
+		generateWaitEvents(t, db, testEnv)
 
 		// Wait for collection
 		time.Sleep(3 * time.Second)
@@ -181,7 +180,7 @@ func TestASHE2E(t *testing.T) {
 
 		// Create sessions gradually
 		for i := 0; i < sessionTarget; i++ {
-			conn := getNewConnection(t, testEnv)
+			conn := getNewConnectionASH(t, testEnv)
 			connections = append(connections, conn)
 			
 			// Execute light query
@@ -210,7 +209,7 @@ func TestASHE2E(t *testing.T) {
 
 	t.Run("QueryActivityTracking", func(t *testing.T) {
 		// Execute same query from multiple sessions
-		queryID := executeTrackedQuery(t, db, 5)
+		queryID := executeTrackedQuery(t, db, 5, testEnv)
 
 		// Wait for collection
 		time.Sleep(3 * time.Second)
@@ -241,26 +240,38 @@ func TestASHE2E(t *testing.T) {
 	t.Run("TimeWindowAggregation", func(t *testing.T) {
 		// Generate activity over time
 		for i := 0; i < 10; i++ {
-			generateBurstActivity(t, db, 10)
+			generateBurstActivity(t, db, 10, testEnv)
 			time.Sleep(30 * time.Second)
 		}
 
 		// Check aggregated metrics
-		metrics := testEnv.GetCollectedMetrics()
+		metricsData := testEnv.GetCollectedMetrics()
 
 		// Look for aggregation window indicators
-		for _, metric := range metrics {
-			attrs := getMetricAttributes(metric)
-			if window, ok := attrs["aggregation_window"]; ok {
-				// Verify different windows exist
-				assert.Contains(t, []string{"1m", "5m", "15m", "1h"}, window)
+		for _, md := range metricsData {
+			resourceMetrics := md.ResourceMetrics()
+			for i := 0; i < resourceMetrics.Len(); i++ {
+				rm := resourceMetrics.At(i)
+				scopeMetrics := rm.ScopeMetrics()
+				for j := 0; j < scopeMetrics.Len(); j++ {
+					sm := scopeMetrics.At(j)
+					metrics := sm.Metrics()
+					for k := 0; k < metrics.Len(); k++ {
+						metric := metrics.At(k)
+						attrs := getMetricAttributes(metric)
+						if window, ok := attrs["aggregation_window"]; ok {
+							// Verify different windows exist
+							assert.Contains(t, []string{"1m", "5m", "15m", "1h"}, window)
+						}
+					}
+				}
 			}
 		}
 	})
 
 	t.Run("NRDBExportWithASH", func(t *testing.T) {
 		// Generate comprehensive activity
-		generateComprehensiveActivity(t, db)
+		generateComprehensiveActivity(t, db, testEnv)
 
 		// Wait for export
 		time.Sleep(5 * time.Second)
@@ -292,7 +303,7 @@ func TestASHE2E(t *testing.T) {
 
 	t.Run("WaitEventAlerts", func(t *testing.T) {
 		// Generate excessive lock waits
-		generateExcessiveLockWaits(t, db, 20)
+		generateExcessiveLockWaits(t, db, 20, testEnv)
 
 		// Wait for alert processing
 		time.Sleep(5 * time.Second)
@@ -333,7 +344,7 @@ func setupASHTestSchema(t *testing.T, db *sql.DB) {
 	}
 }
 
-func getNewConnection(t *testing.T, env *TestEnvironment) *sql.DB {
+func getNewConnectionASH(t *testing.T, env *TestEnvironment) *sql.DB {
 	conn, err := sql.Open("postgres", env.PostgresDSN)
 	require.NoError(t, err)
 	return conn
@@ -355,30 +366,30 @@ func simulateBlockedSession(t *testing.T, conn *sql.DB, id int) {
 	}
 }
 
-func generateWaitEvents(t *testing.T, db *sql.DB) {
+func generateWaitEvents(t *testing.T, db *sql.DB, testEnv *TestEnvironment) {
 	// IO waits
 	go func() {
-		conn := getNewConnection(t, testEnv)
+		conn := getNewConnectionASH(t, testEnv)
 		defer conn.Close()
 		_, _ = conn.Exec("SELECT * FROM ash_test_table ORDER BY random()")
 	}()
 
 	// Lock waits
 	go func() {
-		conn := getNewConnection(t, testEnv)
+		conn := getNewConnectionASH(t, testEnv)
 		defer conn.Close()
 		_, _ = conn.Exec("SELECT * FROM ash_test_table FOR UPDATE")
 	}()
 
 	// Client waits
 	go func() {
-		conn := getNewConnection(t, testEnv)
+		conn := getNewConnectionASH(t, testEnv)
 		defer conn.Close()
 		_, _ = conn.Exec("COPY ash_test_table TO STDOUT")
 	}()
 }
 
-func executeTrackedQuery(t *testing.T, db *sql.DB, concurrency int) string {
+func executeTrackedQuery(t *testing.T, db *sql.DB, concurrency int, testEnv *TestEnvironment) string {
 	query := `
 		SELECT t1.*, t2.value as related_value
 		FROM ash_test_table t1
@@ -392,7 +403,7 @@ func executeTrackedQuery(t *testing.T, db *sql.DB, concurrency int) string {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			conn := getNewConnection(t, testEnv)
+			conn := getNewConnectionASH(t, testEnv)
 			defer conn.Close()
 			_, _ = conn.Exec(query)
 			time.Sleep(2 * time.Second) // Keep query active
@@ -415,13 +426,13 @@ func executeTrackedQuery(t *testing.T, db *sql.DB, concurrency int) string {
 	return queryID
 }
 
-func generateBurstActivity(t *testing.T, db *sql.DB, sessionCount int) {
+func generateBurstActivity(t *testing.T, db *sql.DB, sessionCount int, testEnv *TestEnvironment) {
 	var wg sync.WaitGroup
 	for i := 0; i < sessionCount; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			conn := getNewConnection(t, testEnv)
+			conn := getNewConnectionASH(t, testEnv)
 			defer conn.Close()
 			
 			// Random activity
@@ -439,22 +450,22 @@ func generateBurstActivity(t *testing.T, db *sql.DB, sessionCount int) {
 	wg.Wait()
 }
 
-func generateComprehensiveActivity(t *testing.T, db *sql.DB) {
+func generateComprehensiveActivity(t *testing.T, db *sql.DB, testEnv *TestEnvironment) {
 	// Mix of different activities
 	activities := []func(){
 		// Long running queries
 		func() {
-			conn := getNewConnection(t, testEnv)
+			conn := getNewConnectionASH(t, testEnv)
 			defer conn.Close()
 			_, _ = conn.Exec("SELECT pg_sleep(3)")
 		},
 		// Blocking chains
 		func() {
-			simulateBlockingChain(t, db)
+			simulateBlockingChain(t, db, testEnv)
 		},
 		// High frequency short queries
 		func() {
-			conn := getNewConnection(t, testEnv)
+			conn := getNewConnectionASH(t, testEnv)
 			defer conn.Close()
 			for i := 0; i < 50; i++ {
 				_, _ = conn.Exec("SELECT 1")
@@ -463,7 +474,7 @@ func generateComprehensiveActivity(t *testing.T, db *sql.DB) {
 		},
 		// DDL operations
 		func() {
-			conn := getNewConnection(t, testEnv)
+			conn := getNewConnectionASH(t, testEnv)
 			defer conn.Close()
 			_, _ = conn.Exec("CREATE TEMP TABLE ash_temp AS SELECT * FROM ash_test_table LIMIT 10")
 			_, _ = conn.Exec("DROP TABLE ash_temp")
@@ -481,11 +492,11 @@ func generateComprehensiveActivity(t *testing.T, db *sql.DB) {
 	wg.Wait()
 }
 
-func simulateBlockingChain(t *testing.T, db *sql.DB) {
+func simulateBlockingChain(t *testing.T, db *sql.DB, testEnv *TestEnvironment) {
 	// Create a chain: conn1 blocks conn2, conn2 blocks conn3
-	conn1 := getNewConnection(t, testEnv)
-	conn2 := getNewConnection(t, testEnv)
-	conn3 := getNewConnection(t, testEnv)
+	conn1 := getNewConnectionASH(t, testEnv)
+	conn2 := getNewConnectionASH(t, testEnv)
+	conn3 := getNewConnectionASH(t, testEnv)
 	defer conn1.Close()
 	defer conn2.Close()
 	defer conn3.Close()
@@ -514,9 +525,9 @@ func simulateBlockingChain(t *testing.T, db *sql.DB) {
 	tx2.Rollback()
 }
 
-func generateExcessiveLockWaits(t *testing.T, db *sql.DB, sessionCount int) {
+func generateExcessiveLockWaits(t *testing.T, db *sql.DB, sessionCount int, testEnv *TestEnvironment) {
 	// Hold a lock on a popular row
-	lockConn := getNewConnection(t, testEnv)
+	lockConn := getNewConnectionASH(t, testEnv)
 	tx, _ := lockConn.Begin()
 	tx.Exec("UPDATE ash_test_table SET value = 999 WHERE id = 1")
 
@@ -526,7 +537,7 @@ func generateExcessiveLockWaits(t *testing.T, db *sql.DB, sessionCount int) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			conn := getNewConnection(t, testEnv)
+			conn := getNewConnectionASH(t, testEnv)
 			defer conn.Close()
 			
 			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
@@ -548,7 +559,7 @@ func generateExcessiveLockWaits(t *testing.T, db *sql.DB, sessionCount int) {
 }
 
 // Test configuration for ASH
-const testASHConfig = `
+const ashTestConfigData = `
 receivers:
   ash:
     endpoint: localhost:5432

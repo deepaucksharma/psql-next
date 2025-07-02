@@ -2,7 +2,7 @@
 # This configuration enables plan collection and regression detection
 
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     
   zpages:
@@ -234,7 +234,7 @@ exporters:
     sampling_thereafter: 100
 
 service:
-  extensions: [health_check, zpages]
+  extensions: [healthcheck, zpages]
   
   pipelines:
     # Infrastructure metrics

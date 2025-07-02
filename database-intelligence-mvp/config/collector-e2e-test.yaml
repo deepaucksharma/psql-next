@@ -2,7 +2,7 @@
 # This configuration is designed for end-to-end testing from database to NRDB
 
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
   
   zpages:
@@ -163,7 +163,7 @@ service:
       processors: [memory_limiter, resource, planattributeextractor, transform, batch]
       exporters: [otlp, prometheus, debug]
       
-  extensions: [health_check, zpages]
+  extensions: [healthcheck, zpages]
   
   telemetry:
     logs:

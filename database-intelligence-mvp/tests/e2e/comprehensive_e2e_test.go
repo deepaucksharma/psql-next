@@ -95,7 +95,7 @@ func testPostgreSQLMetricsFlow(t *testing.T, ctx context.Context, testEnv *TestE
 			AND db.name = $DB_NAME
 			SINCE 2 minutes ago`
 		
-		query = strings.ReplaceAll(query, "$DB_NAME", fmt.Sprintf("'%s'", testEnv.DBName))
+		query = strings.ReplaceAll(query, "$DB_NAME", fmt.Sprintf("'%s'", getEnvOrDefault("POSTGRES_DB", "testdb")))
 		
 		result, err := nrdbClient.ExecuteNRQL(ctx, query)
 		require.NoError(t, err, "Failed to query connection metrics")
@@ -125,7 +125,7 @@ func testPostgreSQLMetricsFlow(t *testing.T, ctx context.Context, testEnv *TestE
 			AND db.name = $DB_NAME
 			SINCE 2 minutes ago`
 		
-		query = strings.ReplaceAll(query, "$DB_NAME", fmt.Sprintf("'%s'", testEnv.DBName))
+		query = strings.ReplaceAll(query, "$DB_NAME", fmt.Sprintf("'%s'", getEnvOrDefault("POSTGRES_DB", "testdb")))
 		
 		result, err := nrdbClient.ExecuteNRQL(ctx, query)
 		require.NoError(t, err)
@@ -529,13 +529,14 @@ func setupRealTestEnvironment(t *testing.T) *TestEnvironment {
 	// Ensure clean state
 	setupTestDatabase(t, db)
 
-	return &TestEnvironment{
+	env := &TestEnvironment{
 		PostgresDB: db,
-		DBName:     getEnvOrDefault("POSTGRES_DB", "testdb"),
-		Cleanup: func() {
-			db.Close()
-		},
+		t:          t,
 	}
+	env.cleanupFuncs = append(env.cleanupFuncs, func() {
+		db.Close()
+	})
+	return env
 }
 
 func startRealCollector(t *testing.T, testEnv *TestEnvironment) *CollectorInstance {
@@ -710,8 +711,8 @@ func setupTestDatabase(t *testing.T, db *sql.DB) {
 	}
 }
 
-// TestEnvironment represents the test environment
-type TestEnvironment struct {
+// SimpleTestEnvironment represents a simple test environment (use TestEnvironment from test_environment.go for full features)
+type SimpleTestEnvironment struct {
 	PostgresDB *sql.DB
 	DBName     string
 	Cleanup    func()

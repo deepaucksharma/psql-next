@@ -19,24 +19,24 @@ import (
 // TestMain sets up the test environment
 func TestMain(m *testing.M) {
 	// Setup test environment
-	setupTestEnvironment()
+	setupPackageTestEnvironment()
 	
 	// Run tests
 	code := m.Run()
 	
 	// Cleanup
-	cleanupTestEnvironment()
+	cleanupPackageTestEnvironment()
 	
 	os.Exit(code)
 }
 
-func setupTestEnvironment() {
+func setupPackageTestEnvironment() {
 	// Create output directory
 	os.MkdirAll("output", 0755)
 	os.MkdirAll("test-results", 0755)
 }
 
-func cleanupTestEnvironment() {
+func cleanupPackageTestEnvironment() {
 	// Cleanup is handled by individual tests
 }
 

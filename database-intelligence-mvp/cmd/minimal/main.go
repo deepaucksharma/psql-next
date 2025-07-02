@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -325,7 +326,7 @@ func testCostControl(logger *zap.Logger) {
 		gauge := metric.SetEmptyGauge()
 		dp := gauge.DataPoints().AppendEmpty()
 		dp.SetDoubleValue(float64(i))
-		dp.Attributes().PutStr("unique_id", string(i))
+		dp.Attributes().PutStr("unique_id", strconv.Itoa(i))
 	}
 	
 	// Send metrics through cost control

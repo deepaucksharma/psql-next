@@ -66,7 +66,7 @@ func setupPostgreSQLWithQueryLens(ctx context.Context) (testcontainers.Container
 			"POSTGRES_DB":       "testdb",
 		},
 		WaitingFor: wait.ForSQL("5432/tcp", "postgres", func(host string, port nat.Port) string {
-			return fmt.Sprintf("postgres://test:test@%s:%s/testdb?sslmode=disable", host, port.Port())
+			return fmt.Sprintf("host=%s port=%s user=test password=test dbname=testdb sslmode=disable", host, port.Port())
 		}),
 	}
 
@@ -355,20 +355,20 @@ func testResourceConsumptionTracking(t *testing.T, db *sql.DB, collector *Collec
 	assert.NotEmpty(t, cacheResult.Results)
 }
 
-// CollectorInstance represents a running collector
-type CollectorInstance struct {
+// QueryLensCollectorInstance represents a running collector for QueryLens tests
+type QueryLensCollectorInstance struct {
 	// Implementation details for managing collector process
 }
 
-func (c *CollectorInstance) Stop() {
+func (c *QueryLensCollectorInstance) Stop() {
 	// Stop collector
 }
 
 // startCollectorWithQueryLens starts the collector with pg_querylens configuration
-func startCollectorWithQueryLens(t *testing.T, postgres testcontainers.Container) *CollectorInstance {
+func startCollectorWithQueryLens(t *testing.T, postgres testcontainers.Container) *QueryLensCollectorInstance {
 	// This would start the actual collector process with appropriate configuration
 	// For testing, we're returning a mock instance
-	return &CollectorInstance{}
+	return &QueryLensCollectorInstance{}
 }
 
 // TestQueryLensIntegrationScenarios tests various real-world scenarios

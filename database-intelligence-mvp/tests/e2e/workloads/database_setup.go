@@ -4,7 +4,6 @@
 package workloads
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -645,43 +644,4 @@ func (wg *WorkloadGenerator) insertMySQLSampleData() error {
 	return nil
 }
 
-// initializePostgreSQLDatabase performs PostgreSQL-specific initialization
-func (suite *E2EMetricsFlowTestSuite) initializePostgreSQLDatabase() {
-	// Enable required extensions and configure for testing
-	queries := []string{
-		"CREATE EXTENSION IF NOT EXISTS pg_stat_statements",
-		"SELECT pg_stat_statements_reset()",
-		"ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements'",
-		"ALTER SYSTEM SET pg_stat_statements.track = 'all'",
-		"ALTER SYSTEM SET log_statement = 'all'",
-		"ALTER SYSTEM SET log_min_duration_statement = 0",
-	}
-	
-	for _, query := range queries {
-		if _, err := suite.pgDB.Exec(query); err != nil {
-			suite.logger.Warn("Failed to execute PostgreSQL initialization query",
-				zap.String("query", query),
-				zap.Error(err))
-		}
-	}
-}
-
-// initializeMySQLDatabase performs MySQL-specific initialization
-func (suite *E2EMetricsFlowTestSuite) initializeMySQLDatabase() {
-	// Configure MySQL for testing
-	queries := []string{
-		"SET GLOBAL performance_schema = ON",
-		"SET GLOBAL slow_query_log = ON",
-		"SET GLOBAL long_query_time = 0",
-		"SET GLOBAL log_queries_not_using_indexes = ON",
-		"SET GLOBAL general_log = ON",
-	}
-	
-	for _, query := range queries {
-		if _, err := suite.mysqlDB.Exec(query); err != nil {
-			suite.logger.Warn("Failed to execute MySQL initialization query",
-				zap.String("query", query),
-				zap.Error(err))
-		}
-	}
-}
+// Removed duplicate initialization methods - these are handled in the main test suite

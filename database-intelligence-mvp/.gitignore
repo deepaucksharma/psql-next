@@ -207,4 +207,4 @@ processors/verification/verification
 !monitoring/newrelic/dashboards/*.json
 !deployments/helm/*/templates/*.yaml
 !.gitignore
-!.gitkeep
+!.gitkeepdatabase-intelligence-mvp

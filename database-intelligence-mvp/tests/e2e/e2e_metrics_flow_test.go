@@ -64,14 +64,7 @@ type StressTestManager struct {
 	logger *zap.Logger
 }
 
-type E2ETestConfig struct {
-	TestDuration time.Duration
-}
-
-type E2ETestResults struct {
-	TestsPassed int
-	TestsFailed int
-}
+// Removed duplicate definitions - using the more complete versions below
 
 // E2EMetricsFlowTestSuite contains comprehensive end-to-end tests for the entire metrics flow
 type E2EMetricsFlowTestSuite struct {

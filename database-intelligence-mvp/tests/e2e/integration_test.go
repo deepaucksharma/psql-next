@@ -501,7 +501,7 @@ func generateFullStackActivity(t *testing.T, db *sql.DB) {
 }
 
 // Full integration test configuration
-const testFullIntegrationConfig = `
+const integrationTestConfigData = `
 receivers:
   postgresql:
     endpoint: localhost:5432

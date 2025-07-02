@@ -1,27 +1,37 @@
+//go:build benchmark
+// +build benchmark
+
 package e2e
 
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 )
 
 // Benchmarks for critical paths
 
 func BenchmarkPlanCollection(b *testing.B) {
-	testEnv := setupTestEnvironment(b)
+	// Convert benchmark to test.T for setup
+	t := &testing.T{}
+	
+	testEnv := setupTestEnvironment(t)
 	defer testEnv.Cleanup()
 
 	db := testEnv.PostgresDB
-	setupTestSchema(b, db)
+	setupTestSchema(t, db)
 
-	collector := testEnv.StartCollector(b, "testdata/config-plan-intelligence.yaml")
+	collector := testEnv.StartCollector(t, "testdata/config-plan-intelligence.yaml")
 	defer collector.Shutdown()
 
 	// Wait for collector to be ready
@@ -29,7 +39,7 @@ func BenchmarkPlanCollection(b *testing.B) {
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		conn := getNewConnection(b, testEnv)
+		conn := getNewConnection(t, testEnv)
 		defer conn.Close()
 
 		for pb.Next() {

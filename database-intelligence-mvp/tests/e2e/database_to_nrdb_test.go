@@ -20,8 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// E2ETestConfig holds end-to-end test configuration
-type E2ETestConfig struct {
+// NRDBTestConfig holds end-to-end test configuration for NRDB tests
+type NRDBTestConfig struct {
 	// Database connections
 	PostgresURL string
 	MySQLURL    string
@@ -125,14 +125,14 @@ func TestE2EMySQLToNRDB(t *testing.T) {
 }
 
 // loadE2EConfig loads test configuration from environment
-func loadE2EConfig(t *testing.T) *E2ETestConfig {
-	return &E2ETestConfig{
-		PostgresURL:              getEnvOrDefault("POSTGRES_URL", "postgres://postgres:password@localhost:5432/testdb?sslmode=disable"),
-		MySQLURL:                 getEnvOrDefault("MYSQL_URL", "root:password@tcp(localhost:3306)/testdb"),
-		CollectorHealthEndpoint:  getEnvOrDefault("COLLECTOR_HEALTH_ENDPOINT", "http://localhost:13133/health"),
-		CollectorMetricsEndpoint: getEnvOrDefault("COLLECTOR_METRICS_ENDPOINT", "http://localhost:8888/metrics"),
+func loadE2EConfig(t *testing.T) *NRDBTestConfig {
+	return &NRDBTestConfig{
+		PostgresURL:              getEnvOrDefaultNRDB("POSTGRES_URL", "postgres://postgres:password@localhost:5432/testdb?sslmode=disable"),
+		MySQLURL:                 getEnvOrDefaultNRDB("MYSQL_URL", "root:password@tcp(localhost:3306)/testdb"),
+		CollectorHealthEndpoint:  getEnvOrDefaultNRDB("COLLECTOR_HEALTH_ENDPOINT", "http://localhost:13133/health"),
+		CollectorMetricsEndpoint: getEnvOrDefaultNRDB("COLLECTOR_METRICS_ENDPOINT", "http://localhost:8888/metrics"),
 		NewRelicAPIKey:          os.Getenv("NEW_RELIC_API_KEY"),
-		NewRelicAccount:         getEnvAsInt("NEW_RELIC_ACCOUNT_ID", 0),
+		NewRelicAccount:         getEnvAsIntNRDB("NEW_RELIC_ACCOUNT_ID", 0),
 		TestDuration:            5 * time.Minute,
 		VerifyInterval:          30 * time.Second,
 		MetricTolerance:         0.05, // 5% tolerance
@@ -140,7 +140,7 @@ func loadE2EConfig(t *testing.T) *E2ETestConfig {
 }
 
 // verifyCollectorHealth checks if the collector is running and healthy
-func verifyCollectorHealth(t *testing.T, config *E2ETestConfig) {
+func verifyCollectorHealth(t *testing.T, config *NRDBTestConfig) {
 	resp, err := http.Get(config.CollectorHealthEndpoint)
 	require.NoError(t, err, "Failed to reach collector health endpoint")
 	defer resp.Body.Close()
@@ -159,7 +159,7 @@ func verifyCollectorHealth(t *testing.T, config *E2ETestConfig) {
 }
 
 // generatePostgreSQLActivity creates database activity for testing
-func generatePostgreSQLActivity(t *testing.T, config *E2ETestConfig) {
+func generatePostgreSQLActivity(t *testing.T, config *NRDBTestConfig) {
 	db, err := sql.Open("postgres", config.PostgresURL)
 	require.NoError(t, err, "Failed to connect to PostgreSQL")
 	defer db.Close()
@@ -225,7 +225,7 @@ func generatePostgreSQLActivity(t *testing.T, config *E2ETestConfig) {
 }
 
 // generateMySQLActivity creates MySQL database activity for testing
-func generateMySQLActivity(t *testing.T, config *E2ETestConfig) {
+func generateMySQLActivity(t *testing.T, config *NRDBTestConfig) {
 	db, err := sql.Open("mysql", config.MySQLURL)
 	require.NoError(t, err, "Failed to connect to MySQL")
 	defer db.Close()
@@ -264,7 +264,7 @@ func generateMySQLActivity(t *testing.T, config *E2ETestConfig) {
 }
 
 // verifyPostgreSQLMetricsInNRDB checks if PostgreSQL metrics appear in New Relic
-func verifyPostgreSQLMetricsInNRDB(t *testing.T, config *E2ETestConfig) {
+func verifyPostgreSQLMetricsInNRDB(t *testing.T, config *NRDBTestConfig) {
 	if config.NewRelicAPIKey == "" {
 		t.Skip("NEW_RELIC_API_KEY not set, skipping NRDB verification")
 	}
@@ -309,7 +309,7 @@ func verifyPostgreSQLMetricsInNRDB(t *testing.T, config *E2ETestConfig) {
 }
 
 // verifyQueryPerformanceMetrics checks if query performance metrics are captured
-func verifyQueryPerformanceMetrics(t *testing.T, config *E2ETestConfig) {
+func verifyQueryPerformanceMetrics(t *testing.T, config *NRDBTestConfig) {
 	if config.NewRelicAPIKey == "" {
 		t.Skip("NEW_RELIC_API_KEY not set, skipping NRDB verification")
 	}
@@ -370,7 +370,7 @@ func verifyQueryPerformanceMetrics(t *testing.T, config *E2ETestConfig) {
 }
 
 // verifyOHICompatibility checks if OHI-compatible metrics are present
-func verifyOHICompatibility(t *testing.T, config *E2ETestConfig) {
+func verifyOHICompatibility(t *testing.T, config *NRDBTestConfig) {
 	if config.NewRelicAPIKey == "" {
 		t.Skip("NEW_RELIC_API_KEY not set, skipping NRDB verification")
 	}
@@ -409,7 +409,7 @@ func verifyOHICompatibility(t *testing.T, config *E2ETestConfig) {
 }
 
 // verifyMySQLMetricsInNRDB checks if MySQL metrics appear in New Relic
-func verifyMySQLMetricsInNRDB(t *testing.T, config *E2ETestConfig) {
+func verifyMySQLMetricsInNRDB(t *testing.T, config *NRDBTestConfig) {
 	if config.NewRelicAPIKey == "" {
 		t.Skip("NEW_RELIC_API_KEY not set, skipping NRDB verification")
 	}
@@ -438,7 +438,7 @@ func verifyMySQLMetricsInNRDB(t *testing.T, config *E2ETestConfig) {
 }
 
 // verifyInnoDBMetrics checks if InnoDB-specific metrics are captured
-func verifyInnoDBMetrics(t *testing.T, config *E2ETestConfig) {
+func verifyInnoDBMetrics(t *testing.T, config *NRDBTestConfig) {
 	if config.NewRelicAPIKey == "" {
 		t.Skip("NEW_RELIC_API_KEY not set, skipping NRDB verification")
 	}
@@ -506,7 +506,7 @@ func TestE2EProcessorChain(t *testing.T) {
 }
 
 // verifyPostgreSQLFeatureDetection checks if feature detection is working
-func verifyPostgreSQLFeatureDetection(t *testing.T, config *E2ETestConfig) {
+func verifyPostgreSQLFeatureDetection(t *testing.T, config *NRDBTestConfig) {
 	if config.NewRelicAPIKey == "" {
 		t.Skip("NEW_RELIC_API_KEY not set, skipping NRDB verification")
 	}
@@ -571,7 +571,7 @@ func verifyPostgreSQLFeatureDetection(t *testing.T, config *E2ETestConfig) {
 }
 
 // verifyMySQLFeatureDetection checks MySQL feature detection
-func verifyMySQLFeatureDetection(t *testing.T, config *E2ETestConfig) {
+func verifyMySQLFeatureDetection(t *testing.T, config *NRDBTestConfig) {
 	if config.NewRelicAPIKey == "" {
 		t.Skip("NEW_RELIC_API_KEY not set, skipping NRDB verification")
 	}
@@ -607,7 +607,7 @@ func verifyMySQLFeatureDetection(t *testing.T, config *E2ETestConfig) {
 }
 
 // verifyGracefulFallback tests that queries fall back gracefully when features are missing
-func verifyGracefulFallback(t *testing.T, config *E2ETestConfig) {
+func verifyGracefulFallback(t *testing.T, config *NRDBTestConfig) {
 	// Check collector metrics for fallback usage
 	resp, err := http.Get(config.CollectorMetricsEndpoint)
 	require.NoError(t, err, "Failed to get collector metrics")
@@ -657,14 +657,14 @@ func verifyGracefulFallback(t *testing.T, config *E2ETestConfig) {
 
 // Helper functions
 
-func getEnvOrDefault(key, defaultValue string) string {
+func getEnvOrDefaultNRDB(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return defaultValue
 }
 
-func getEnvAsInt(key string, defaultValue int) int {
+func getEnvAsIntNRDB(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		var intVal int
 		fmt.Sscanf(value, "%d", &intVal)

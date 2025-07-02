@@ -75,7 +75,7 @@ exporters:
       server_name_override: internal-collector.otel.svc.cluster.local
 
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
     path: "/health"
     # Health check can use TLS too
@@ -84,7 +84,7 @@ extensions:
       key_file: /etc/otel/certs/gateway-key.pem
 
 service:
-  extensions: [health_check]
+  extensions: [healthcheck]
   
   pipelines:
     traces:

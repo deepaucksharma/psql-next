@@ -2,7 +2,7 @@
 # This configuration maximizes standard OTEL components with minimal custom processors
 
 extensions:
-  health_check:
+  healthcheck:
     endpoint: 0.0.0.0:13133
 
 receivers:
@@ -21,6 +21,7 @@ receivers:
   sqlquery:
     driver: postgres
     datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-postgres} sslmode=disable"
+    collection_interval: 30s
     queries:
       # pg_stat_statements for query performance
       - sql: |
@@ -44,7 +45,6 @@ receivers:
             value_column: mean_exec_time
             attribute_columns: [query_id]
             value_type: double
-        collection_interval: 30s
 
       # Active sessions (ASH-like sampling)
       - sql: |
@@ -60,7 +60,6 @@ receivers:
             value_column: active_sessions
             attribute_columns: [state, wait_event_type]
             value_type: int
-        collection_interval: 1s
 
 processors:
   # Standard OTEL processors
@@ -101,7 +100,7 @@ processors:
           - replace_pattern(attributes["query"], "(\\d{3,})", "?") where attributes["query"] != nil
 
   # Custom processors for gaps only
-  adaptive_sampler:
+  adaptivesampler:
     rules:
       - name: "slow_queries"
         condition: "mean_exec_time > 1000"
@@ -111,7 +110,7 @@ processors:
         sampling_rate: 10
     default_sampling_rate: 10
 
-  circuit_breaker:
+  circuitbreaker:
     error_threshold_percent: 50
     volume_threshold_qps: 1000
     evaluation_interval: 30s
@@ -139,7 +138,7 @@ exporters:
     namespace: db_intelligence
 
 service:
-  extensions: [health_check]
+  extensions: [healthcheck]
   
   pipelines:
     # Standard metrics pipeline
@@ -156,8 +155,8 @@ service:
         - resource
         - attributes
         - transform
-        - adaptive_sampler
-        - circuit_breaker
+        - adaptivesampler
+        - circuitbreaker
         - batch
       exporters: [otlp]
 
