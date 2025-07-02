@@ -1,0 +1,83 @@
+# Simplified E2E Test Configuration for Database Intelligence Collector
+# This configuration tests the basic data flow with real databases
+
+receivers:
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    transport: tcp
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB}
+    collection_interval: 5s
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+
+  mysql:
+    endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DB}
+    collection_interval: 5s
+    tls:
+      insecure: true
+
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence-e2e
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  batch:
+    timeout: 5s
+    send_batch_size: 100
+
+exporters:
+  debug:
+    verbosity: detailed
+
+  file:
+    path: /var/lib/otel/e2e-output.json
+
+  otlp/newrelic:
+    endpoint: ${env:OTLP_ENDPOINT}
+    tls:
+      insecure: true
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+
+  prometheus:
+    endpoint: 0.0.0.0:8890
+
+service:
+  pipelines:
+    metrics/databases:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, file, debug]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [file, debug]
+
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}

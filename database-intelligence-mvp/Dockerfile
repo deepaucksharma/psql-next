@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for Database Intelligence OTEL Collector
 
 # Stage 1: Builder
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -16,26 +16,20 @@ WORKDIR /build
 
 # Copy go.mod and go.sum first for better caching
 COPY go.mod go.sum ./
+
+# Copy processor modules
+COPY processors/ ./processors/
+COPY common/ ./common/
+
+# Download dependencies
 RUN go mod download
 
-# Copy only necessary source files
+# Copy remaining source files
 COPY Makefile ./
 COPY main.go ./
-COPY processors/ ./processors/
-COPY receivers/ ./receivers/
-COPY exporters/ ./exporters/
-COPY extensions/ ./extensions/
-COPY internal/ ./internal/
 
-# Copy build configuration
-COPY ocb-config.yaml ./
-COPY otelcol-builder.yaml ./
-
-# Build the collector using make
-RUN make build-binary || \
-    (echo "Build failed, trying direct OCB install" && \
-     go install go.opentelemetry.io/collector/cmd/builder@v0.88.0 && \
-     builder --config=ocb-config.yaml)
+# Build the collector
+RUN make build
 
 # Stage 2: Runtime
 FROM alpine:3.19
@@ -55,13 +49,13 @@ RUN addgroup -g 1000 -S otel && \
     chown -R otel:otel /etc/otel /var/lib/otel /var/log/otel
 
 # Copy binary from builder
-COPY --from=builder /build/dist/otelcol* /usr/local/bin/otelcol
+COPY --from=builder /build/bin/otelcol-custom /usr/local/bin/otelcol
 
 # Make binary executable
 RUN chmod +x /usr/local/bin/otelcol
 
 # Copy configuration files
-COPY --chown=otel:otel configs/ /etc/otel/configs/
+COPY --chown=otel:otel config/*.yaml /etc/otel/
 
 # Set environment variables for performance tuning
 ENV GOGC=80 \
@@ -89,7 +83,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 # Entry point with signal handling
 ENTRYPOINT ["/usr/local/bin/otelcol"]
-CMD ["--config", "/etc/otel/configs/collector.yaml"]
+CMD ["--config", "/etc/otel/config.yaml"]
 
 # Metadata labels
 LABEL org.opencontainers.image.title="Database Intelligence Collector" \

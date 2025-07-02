@@ -10,6 +10,7 @@ import (
 	"hash"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/collector/component"
@@ -27,6 +28,8 @@ type planAttributeExtractor struct {
 	logger         *zap.Logger
 	consumer       consumer.Logs
 	queryAnonymizer *queryAnonymizer
+	planHistory    map[int64]string // For pg_querylens plan change detection
+	mu             sync.Mutex       // Mutex for thread-safe access to planHistory
 }
 
 // newPlanAttributeExtractor creates a new plan attribute extractor processor
@@ -36,6 +39,7 @@ func newPlanAttributeExtractor(cfg *Config, logger *zap.Logger, consumer consume
 		logger:          logger,
 		consumer:        consumer,
 		queryAnonymizer: newQueryAnonymizer(),
+		planHistory:     make(map[int64]string),
 	}
 }
 

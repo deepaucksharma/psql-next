@@ -51,6 +51,30 @@ postgresql.<category>.<specific_metric>
 
 | Metric Name | Type | Description | Key Attributes |
 |------------|------|-------------|----------------|
+| `postgresql.plan.cost` | Gauge | Estimated query cost | `db.plan.hash`, `db.plan.operation` |
+| `postgresql.plan.changes` | Counter | Number of plan changes | `db.query.fingerprint` |
+| `postgresql.plan.regression_detected` | Counter | Regressions detected | `db.plan.regression_type`, `severity` |
+
+### pg_querylens Integration Metrics
+
+| Metric Name | Type | Description | Key Attributes |
+|------------|------|-------------|----------------|
+| `db.querylens.query.execution_time_mean` | Gauge | Mean execution time (ms) | `db.querylens.queryid`, `db.querylens.plan_id` |
+| `db.querylens.query.execution_time_max` | Gauge | Max execution time (ms) | `db.querylens.queryid`, `db.querylens.plan_id` |
+| `db.querylens.query.calls` | Sum | Number of query executions | `db.querylens.queryid`, `db.querylens.plan_id` |
+| `db.querylens.query.rows` | Sum | Total rows returned | `db.querylens.queryid`, `db.querylens.plan_id` |
+| `db.querylens.query.blocks_hit` | Sum | Buffer cache hits | `db.querylens.queryid`, `db.querylens.plan_id` |
+| `db.querylens.query.blocks_read` | Sum | Disk blocks read | `db.querylens.queryid`, `db.querylens.plan_id` |
+| `db.querylens.query.planning_time` | Gauge | Query planning time (ms) | `db.querylens.queryid`, `db.querylens.plan_id` |
+| `db.querylens.plan.change_detected` | Sum | Plan changes detected | `db.querylens.queryid`, `db.querylens.regression_severity` |
+| `db.querylens.plan.performance_ratio` | Gauge | Performance change ratio | `db.querylens.queryid`, `db.querylens.plan_id` |
+| `db.querylens.top_queries.total_time` | Gauge | Total execution time | `db.querylens.queryid`, `db.querylens.query_text` |
+| `db.querylens.top_queries.io_blocks` | Gauge | Total I/O blocks | `db.querylens.queryid`, `db.querylens.query_text` |
+
+### Plan Change Events
+
+| Metric Name | Type | Description | Key Attributes |
+|------------|------|-------------|----------------|
 | `postgresql.plan.change` | Event | Plan change detected | `query.normalized`, `plan.old_hash`, `plan.new_hash`, `plan.change_type` |
 | `postgresql.plan.regression` | Event | Plan regression detected | `query.normalized`, `plan.cost_increase_ratio`, `plan.performance_impact` |
 | `postgresql.plan.node` | Event | Plan node analysis | `plan.node_type`, `plan.issue_type`, `query.normalized` |
@@ -122,6 +146,27 @@ postgresql.<category>.<specific_metric>
 | `wait.duration_ms` | Wait duration in ms | `150` |
 | `wait.severity` | Wait severity | `high`, `medium`, `low` |
 
+### pg_querylens Attributes
+
+| Attribute | Description | Example |
+|-----------|-------------|---------|
+| `db.querylens.queryid` | Query identifier from pg_querylens | `12345678` |
+| `db.querylens.plan_id` | Plan identifier | `plan_abc123` |
+| `db.querylens.plan_text` | Full execution plan text | `Seq Scan on...` |
+| `db.querylens.query_text` | Query text (anonymized) | `SELECT * FROM users WHERE...` |
+| `db.querylens.previous_plan_id` | Previous plan ID | `plan_xyz789` |
+| `db.querylens.regression_severity` | Regression severity | `critical`, `high`, `medium`, `low` |
+| `db.plan.type` | Extracted plan type | `Seq Scan`, `Index Scan`, `Hash Join` |
+| `db.plan.estimated_cost` | Estimated plan cost | `1234.56` |
+| `db.plan.has_regression` | Regression detected | `true`, `false` |
+| `db.plan.regression_type` | Type of regression | `large_sequential_scan`, `excessive_nested_loops` |
+| `db.plan.changed` | Plan change detected | `true`, `false` |
+| `db.plan.change_severity` | Change severity | `critical`, `high`, `medium`, `low` |
+| `db.plan.time_change_ratio` | Execution time change ratio | `2.5` |
+| `db.plan.recommendations` | Optimization recommendations | `Consider adding an index...` |
+| `db.query.efficiency_score` | Calculated efficiency score | `0.85` |
+| `db.query.needs_optimization` | Optimization needed flag | `true`, `false` |
+
 ## NRQL Query Patterns
 
 ### Basic Patterns
@@ -187,6 +232,69 @@ WHERE metricName = 'postgresql.ash.wait_event'
 FACET wait.event_name 
 ORDER BY sum(wait.duration_ms) DESC 
 LIMIT 10
+```
+
+### pg_querylens Query Patterns
+
+1. **Query Performance Overview**:
+```sql
+SELECT 
+  average(db.querylens.query.execution_time_mean) as 'Avg Execution Time',
+  max(db.querylens.query.execution_time_max) as 'Max Execution Time',
+  uniqueCount(db.querylens.queryid) as 'Unique Queries',
+  sum(db.querylens.query.calls) as 'Total Executions'
+FROM Metric
+WHERE db.system = 'postgresql'
+FACET db.querylens.query_text
+SINCE 1 hour ago
+```
+
+2. **Plan Change Detection**:
+```sql
+SELECT 
+  count(*) as 'Plan Changes',
+  latest(db.plan.change_severity) as 'Severity',
+  latest(db.plan.time_change_ratio) as 'Performance Impact'
+FROM Metric
+WHERE db.plan.changed = true
+FACET db.querylens.queryid, db.statement
+SINCE 1 hour ago
+```
+
+3. **Performance Regression Analysis**:
+```sql
+SELECT 
+  histogram(db.querylens.plan.performance_ratio, 10, 20) as 'Performance Change Distribution'
+FROM Metric
+WHERE db.querylens.plan.performance_ratio > 1
+  AND db.plan.has_regression = true
+SINCE 1 day ago
+```
+
+4. **Top Resource Consuming Queries**:
+```sql
+SELECT 
+  sum(db.querylens.top_queries.total_time) as 'Total Time',
+  sum(db.querylens.top_queries.io_blocks) as 'Total I/O',
+  latest(db.querylens.query_text) as 'Query'
+FROM Metric
+WHERE metricName LIKE 'db.querylens.top_queries%'
+FACET db.querylens.queryid
+ORDER BY sum(db.querylens.top_queries.total_time) DESC
+LIMIT 20
+```
+
+5. **Query Optimization Candidates**:
+```sql
+SELECT 
+  average(db.querylens.query.execution_time_mean) as 'Avg Time',
+  sum(db.querylens.query.blocks_read) as 'Disk Reads',
+  latest(db.plan.recommendations) as 'Recommendations'
+FROM Metric
+WHERE db.query.needs_optimization = true
+  AND db.querylens.query.execution_time_mean > 500
+FACET db.querylens.queryid, db.querylens.query_text
+SINCE 6 hours ago
 ```
 
 ## Data Retention and Sampling

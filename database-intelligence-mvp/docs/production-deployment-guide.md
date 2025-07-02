@@ -41,8 +41,23 @@ GRANT pg_monitor TO monitoring;
 GRANT USAGE ON SCHEMA pg_catalog TO monitoring;
 GRANT SELECT ON ALL TABLES IN SCHEMA pg_catalog TO monitoring;
 
--- For auto_explain functionality
-ALTER SYSTEM SET shared_preload_libraries = 'auto_explain';
+-- For pg_querylens functionality (REQUIRED for plan intelligence)
+-- First install pg_querylens extension
+CREATE EXTENSION IF NOT EXISTS pg_querylens;
+
+-- Grant permissions on pg_querylens schema
+GRANT USAGE ON SCHEMA pg_querylens TO monitoring;
+GRANT SELECT ON ALL TABLES IN SCHEMA pg_querylens TO monitoring;
+ALTER DEFAULT PRIVILEGES IN SCHEMA pg_querylens GRANT SELECT ON TABLES TO monitoring;
+
+-- Configure pg_querylens
+ALTER SYSTEM SET pg_querylens.enabled = 'on';
+ALTER SYSTEM SET pg_querylens.track_planning = 'on';
+ALTER SYSTEM SET pg_querylens.max_plan_length = 10000;
+ALTER SYSTEM SET pg_querylens.plan_format = 'json';
+
+-- For auto_explain functionality (optional)
+ALTER SYSTEM SET shared_preload_libraries = 'pg_querylens,auto_explain';
 ALTER SYSTEM SET auto_explain.log_min_duration = '100ms';
 ALTER SYSTEM SET auto_explain.log_analyze = 'on';
 ALTER SYSTEM SET auto_explain.log_buffers = 'on';
@@ -94,6 +109,7 @@ GRANT SELECT ON mysql.* TO 'monitoring'@'%';
 ## Pre-deployment Checklist
 
 - [ ] Database credentials prepared and tested
+- [ ] pg_querylens extension installed and configured
 - [ ] New Relic license key obtained
 - [ ] Network connectivity verified (database → collector → New Relic)
 - [ ] Kubernetes namespace created
@@ -102,6 +118,8 @@ GRANT SELECT ON mysql.* TO 'monitoring'@'%';
 - [ ] Backup and rollback procedures documented
 - [ ] Change management process followed
 - [ ] Monitoring dashboards prepared
+- [ ] pg_querylens permissions verified
+- [ ] Plan regression thresholds configured
 
 ## Deployment Methods
 
@@ -136,6 +154,18 @@ config:
     database: postgres
     sslmode: require
     collectionInterval: 30s
+    
+  # pg_querylens integration
+  querylens:
+    enabled: true
+    collectionInterval: 30s
+    planHistoryHours: 24
+    regressionDetection:
+      enabled: true
+      timeIncrease: 1.5      # 50% slower triggers detection
+      ioIncrease: 2.0        # 100% more I/O triggers detection
+      costIncrease: 2.0      # 100% higher cost triggers detection
+    alertOnRegression: true
     
   mysql:
     enabled: false  # Enable if needed
@@ -759,12 +789,14 @@ kubectl scale deployment/database-intelligence --replicas=3 -n database-intellig
 ### A. Complete Production Checklist
 
 - [ ] Database permissions verified
+- [ ] pg_querylens extension installed and configured
+- [ ] pg_querylens schema permissions granted
 - [ ] Network connectivity tested
 - [ ] Secrets management configured
 - [ ] Resource limits set appropriately
 - [ ] Autoscaling configured
 - [ ] Monitoring dashboards created
-- [ ] Alerts configured
+- [ ] Plan regression alerts configured
 - [ ] Backup procedures tested
 - [ ] Rollback procedures documented
 - [ ] Security policies applied
@@ -773,3 +805,65 @@ kubectl scale deployment/database-intelligence --replicas=3 -n database-intellig
 - [ ] Team trained on operations
 - [ ] Support contacts documented
 - [ ] Change management completed
+
+### B. pg_querylens Verification
+
+```sql
+-- Verify pg_querylens is installed
+SELECT * FROM pg_extension WHERE extname = 'pg_querylens';
+
+-- Check pg_querylens is collecting data
+SELECT COUNT(*) FROM pg_querylens.queries;
+SELECT COUNT(*) FROM pg_querylens.plans;
+
+-- Verify monitoring user can access pg_querylens
+SET ROLE monitoring;
+SELECT * FROM pg_querylens.current_plans LIMIT 1;
+
+-- Check for recent plan changes
+SELECT 
+  queryid,
+  COUNT(DISTINCT plan_id) as plan_versions,
+  MAX(last_execution) as last_seen
+FROM pg_querylens.plans
+WHERE last_execution > NOW() - INTERVAL '1 hour'
+GROUP BY queryid
+HAVING COUNT(DISTINCT plan_id) > 1;
+```
+
+### C. Troubleshooting pg_querylens
+
+#### No Data in pg_querylens Tables
+```sql
+-- Check if extension is enabled
+SHOW pg_querylens.enabled;
+
+-- Check shared_preload_libraries
+SHOW shared_preload_libraries;
+
+-- Verify track_planning is on
+SHOW pg_querylens.track_planning;
+```
+
+#### Permission Errors
+```sql
+-- Re-grant permissions
+GRANT USAGE ON SCHEMA pg_querylens TO monitoring;
+GRANT SELECT ON ALL TABLES IN SCHEMA pg_querylens TO monitoring;
+```
+
+#### High Memory Usage from pg_querylens
+```sql
+-- Check plan storage size
+SELECT 
+  schemaname,
+  tablename,
+  pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
+FROM pg_tables 
+WHERE schemaname = 'pg_querylens'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+
+-- Clean old data if needed
+DELETE FROM pg_querylens.plans 
+WHERE last_execution < NOW() - INTERVAL '30 days';
+```

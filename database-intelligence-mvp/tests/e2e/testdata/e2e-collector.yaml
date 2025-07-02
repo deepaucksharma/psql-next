@@ -1,0 +1,302 @@
+# E2E Test Configuration for Database Intelligence Collector
+# This configuration tests all processors with real databases and NRDB export
+
+receivers:
+  # PostgreSQL receiver for real database metrics
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    transport: tcp
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB}
+    collection_interval: 5s
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+    metrics:
+      postgresql.backends:
+        enabled: true
+      postgresql.commits:
+        enabled: true
+      postgresql.database.size:
+        enabled: true
+      postgresql.rollbacks:
+        enabled: true
+      postgresql.rows:
+        enabled: true
+      postgresql.table.size:
+        enabled: true
+      
+  # MySQL receiver for real database metrics
+  mysql:
+    endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DB}
+    collection_interval: 5s
+    tls:
+      insecure: true
+    metrics:
+      mysql.buffer_pool.data_pages:
+        enabled: true
+      mysql.buffer_pool.operations:
+        enabled: true
+      mysql.handlers:
+        enabled: true
+      mysql.locks:
+        enabled: true
+      mysql.operations:
+        enabled: true
+      mysql.table.io.wait:
+        enabled: true
+        
+  # SQL query receiver for custom queries and logs
+  sqlquery:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST} port=${env:POSTGRES_PORT} user=${env:POSTGRES_USER} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DB} sslmode=disable"
+    queries:
+      - sql: |
+          SELECT 
+            query,
+            calls,
+            total_exec_time,
+            mean_exec_time,
+            rows,
+            shared_blks_hit,
+            shared_blks_read
+          FROM pg_stat_statements
+          WHERE query NOT LIKE '%pg_stat_statements%'
+          ORDER BY total_exec_time DESC
+          LIMIT 100
+        collection_interval: 10s
+        metrics:
+          - metric_name: db.query.stats
+            value_column: total_exec_time
+            attribute_columns:
+              - query
+              - calls
+              - mean_exec_time
+              - rows
+            data_type: gauge
+            
+  # OTLP receiver for synthetic test data
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Memory limiter
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Resource processor to add standard attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence-e2e
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: service.version
+        value: "2.0.0"
+        action: insert
+
+  # Transform processor to convert SQL queries to logs
+  transform:
+    error_mode: ignore
+    log_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["db.statement"], attributes["query"])
+          - set(attributes["db.operation"], "SELECT")
+          - set(attributes["db.system"], "postgresql")
+
+  # Batch processor
+  batch:
+    timeout: 5s
+    send_batch_size: 100
+
+  # Database Intelligence processors for logs
+  circuitbreaker/logs:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 30s
+    max_concurrent_requests: 100
+    error_patterns:
+      - "connection refused"
+      - "timeout"
+      - "too many connections"
+
+  planattributeextractor:
+    safe_mode: true
+    error_mode: ignore
+    timeout: 500ms
+    query_anonymization:
+      enabled: true
+      preserve_structure: true
+
+  verification:
+    pii_detection:
+      enabled: true
+      action_on_detection: redact
+      patterns:
+        - email
+        - ssn
+        - credit_card
+        - phone
+    quality_checks:
+      enabled: true
+      max_attribute_length: 4096
+    enable_periodic_verification: true
+    verification_interval: 30s
+
+  adaptivesampler:
+    in_memory_only: true
+    default_sample_rate: 1.0  # 100% for E2E testing
+    deduplication:
+      enabled: true
+      window_seconds: 60
+      cache_size: 1000
+      hash_attribute: "db.query.plan.hash"
+    sampling_rules:
+      - name: "expensive_queries"
+        condition: 'attributes["mean_exec_time"] > 100'
+        sample_rate: 1.0
+      - name: "high_frequency"
+        condition: 'attributes["calls"] > 1000'
+        sample_rate: 0.5
+    
+  # Database Intelligence processors for metrics
+  querycorrelator:
+    enable_table_correlation: true
+    enable_database_correlation: true
+    correlation_attributes:
+      add_query_category: true
+      add_table_stats: true
+      add_performance_category: true
+    correlation_window: 60s
+
+  nrerrormonitor:
+    max_attribute_length: 4096
+    max_metric_name_length: 255
+    cardinality_warning_threshold: 1000
+    alert_threshold: 10
+    reporting_interval: 30s
+    enable_proactive_validation: true
+
+  costcontrol:
+    monthly_budget_usd: 10000.0  # Higher budget for E2E tests
+    metric_cardinality_limit: 50000
+    cost_per_gb_usd: 0.35
+    aggressive_mode: false
+    cardinality_reduction:
+      enabled: true
+      target_reduction_percent: 20
+
+exporters:
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 10
+
+  # File exporter for verification
+  file:
+    path: /var/lib/otel/e2e-output.json
+    format: json
+    rotation:
+      enabled: true
+      max_megabytes: 100
+      max_days: 1
+      max_backups: 3
+
+  # OTLP exporter to New Relic
+  otlp/newrelic:
+    endpoint: ${env:OTLP_ENDPOINT}
+    tls:
+      insecure: true
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, zpages]
+  
+  pipelines:
+    # Metrics pipeline for database metrics
+    metrics/databases:
+      receivers: [postgresql, mysql]
+      processors: 
+        - memory_limiter
+        - resource
+        - querycorrelator
+        - nrerrormonitor
+        - costcontrol
+        - batch
+      exporters: [prometheus, file, otlp/newrelic, debug]
+      
+    # Metrics pipeline for SQL query stats
+    metrics/queries:
+      receivers: [sqlquery]
+      processors:
+        - memory_limiter
+        - resource
+        - transform
+        - querycorrelator
+        - nrerrormonitor
+        - costcontrol
+        - batch
+      exporters: [prometheus, file, otlp/newrelic]
+    
+    # Logs pipeline for query logs
+    logs:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - resource
+        - circuitbreaker/logs
+        - planattributeextractor
+        - verification
+        - adaptivesampler
+        - costcontrol
+        - batch
+      exporters: [file, otlp/newrelic, debug]
+
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}
+      development: true
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8889

@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
 )
@@ -296,17 +299,31 @@ func (p *queryCorrelator) enrichMetric(metric pmetric.Metric) {
 		return
 	}
 	
-	var dps pmetric.NumberDataPointSlice
-	
 	switch metric.Type() {
 	case pmetric.MetricTypeGauge:
-		dps = metric.Gauge().DataPoints()
+		p.enrichDataPoints(metric.Gauge().DataPoints())
 	case pmetric.MetricTypeSum:
-		dps = metric.Sum().DataPoints()
+		p.enrichDataPoints(metric.Sum().DataPoints())
+	case pmetric.MetricTypeHistogram:
+		p.enrichHistogramDataPoints(metric.Histogram().DataPoints())
 	default:
 		return
 	}
+}
+
+// enrichDataPoints enriches number data points
+func (p *queryCorrelator) enrichDataPoints(dps pmetric.NumberDataPointSlice) {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
 	
+	for i := 0; i < dps.Len(); i++ {
+		dp := dps.At(i)
+		p.addCorrelationAttributes(dp.Attributes())
+	}
+}
+
+// enrichHistogramDataPoints enriches histogram data points
+func (p *queryCorrelator) enrichHistogramDataPoints(dps pmetric.HistogramDataPointSlice) {
 	p.mutex.RLock()
 	defer p.mutex.RUnlock()
 	
@@ -314,15 +331,53 @@ func (p *queryCorrelator) enrichMetric(metric pmetric.Metric) {
 		dp := dps.At(i)
 		attrs := dp.Attributes()
 		
+		// For histogram metrics, add the average duration as an attribute for categorization
+		if dp.Count() > 0 {
+			avgDuration := dp.Sum() / float64(dp.Count())
+			attrs.PutDouble("_avg_duration_ms", avgDuration)
+		}
+		
+		p.addCorrelationAttributes(attrs)
+	}
+}
+
+// addCorrelationAttributes adds correlation attributes to a data point
+func (p *queryCorrelator) addCorrelationAttributes(attrs pcommon.Map) {
 		queryID, _ := attrs.Get("queryid")
 		if queryID.Str() == "" {
-			continue
+			// For metrics without queryid, try to generate one from query text
+			if queryText, ok := attrs.Get("query.text"); ok && queryText.Str() != "" {
+				// Generate a simple ID from query text
+				hash := md5.Sum([]byte(queryText.Str()))
+				queryIDStr := fmt.Sprintf("%x", hash[:8])
+				attrs.PutStr("correlation.query_id", queryIDStr)
+				
+				// Check if this is a maintenance query
+				if p.isMaintenanceQuery(queryText.Str()) {
+					attrs.PutBool("query.is_maintenance", true)
+				}
+				
+				// Extract tables from query text if possible
+				tables := p.extractTablesFromQuery(queryText.Str())
+				if len(tables) > 0 {
+					attrs.PutStr("correlation.tables", tables)
+				}
+				
+				// Add performance category based on duration
+				if p.config.CorrelationAttributes.AddQueryCategory {
+					p.addPerformanceCategory(attrs)
+				}
+				
+				p.metricsEnriched++
+				return
+			}
+			return
 		}
 		
 		// Get query info
 		query, exists := p.queryIndex[queryID.Str()]
 		if !exists {
-			continue
+			return
 		}
 		
 		// Add correlation attributes
@@ -374,7 +429,6 @@ func (p *queryCorrelator) enrichMetric(metric pmetric.Metric) {
 		attrs.PutStr("correlation.id", correlationID)
 		
 		p.metricsEnriched++
-	}
 }
 
 // isQueryMetric checks if a metric is query-related
@@ -389,6 +443,7 @@ func (p *queryCorrelator) isQueryMetric(name string) bool {
 		"db.query.blocks_hit",
 		"db.query.temp_blocks",
 		"db.query.io_time",
+		"db.query.duration", // Add support for duration histogram
 	}
 	
 	for _, qm := range queryMetrics {
@@ -440,4 +495,113 @@ func (p *queryCorrelator) cleanupOldData() {
 		zap.Int("remaining_tables", len(p.tableIndex)),
 		zap.Int("remaining_databases", len(p.databaseIndex)),
 	)
+}
+
+// isMaintenanceQuery checks if a query is a maintenance operation
+func (p *queryCorrelator) isMaintenanceQuery(queryText string) bool {
+	queryUpper := strings.ToUpper(queryText)
+	maintenanceKeywords := []string{
+		"VACUUM",
+		"ANALYZE",
+		"REINDEX",
+		"CREATE INDEX",
+		"DROP INDEX",
+		"ALTER TABLE",
+		"CLUSTER",
+		"CHECKPOINT",
+	}
+	
+	for _, keyword := range maintenanceKeywords {
+		if strings.Contains(queryUpper, keyword) {
+			return true
+		}
+	}
+	
+	return false
+}
+
+// extractTablesFromQuery attempts to extract table names from a query
+func (p *queryCorrelator) extractTablesFromQuery(queryText string) string {
+	// Simple regex to find table names after FROM, JOIN, UPDATE, INSERT INTO
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)FROM\s+([a-zA-Z0-9_]+)`),
+		regexp.MustCompile(`(?i)JOIN\s+([a-zA-Z0-9_]+)`),
+		regexp.MustCompile(`(?i)UPDATE\s+([a-zA-Z0-9_]+)`),
+		regexp.MustCompile(`(?i)INSERT\s+INTO\s+([a-zA-Z0-9_]+)`),
+		regexp.MustCompile(`(?i)DELETE\s+FROM\s+([a-zA-Z0-9_]+)`),
+	}
+	
+	tables := make(map[string]bool)
+	for _, pattern := range patterns {
+		matches := pattern.FindAllStringSubmatch(queryText, -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				tables[match[1]] = true
+			}
+		}
+	}
+	
+	if len(tables) == 0 {
+		return ""
+	}
+	
+	// Convert map to comma-separated string
+	var tableList []string
+	for table := range tables {
+		tableList = append(tableList, table)
+	}
+	
+	return strings.Join(tableList, ",")
+}
+
+// addPerformanceCategory adds a performance category based on query duration
+func (p *queryCorrelator) addPerformanceCategory(attrs pcommon.Map) {
+	// Check for duration value in various possible attributes
+	var duration float64
+	var found bool
+	
+	// Try to get duration from common attribute names
+	if val, ok := attrs.Get("_avg_duration_ms"); ok {
+		switch val.Type() {
+		case pcommon.ValueTypeDouble:
+			duration = val.Double()
+			found = true
+		case pcommon.ValueTypeInt:
+			duration = float64(val.Int())
+			found = true
+		}
+	} else if val, ok := attrs.Get("duration"); ok {
+		switch val.Type() {
+		case pcommon.ValueTypeDouble:
+			duration = val.Double()
+			found = true
+		case pcommon.ValueTypeInt:
+			duration = float64(val.Int())
+			found = true
+		}
+	} else if val, ok := attrs.Get("duration_ms"); ok {
+		switch val.Type() {
+		case pcommon.ValueTypeDouble:
+			duration = val.Double()
+			found = true
+		case pcommon.ValueTypeInt:
+			duration = float64(val.Int())
+			found = true
+		}
+	}
+	
+	if !found {
+		// Default to moderate if we can't determine duration
+		attrs.PutStr("query.performance_category", "moderate")
+		return
+	}
+	
+	// Categorize based on duration in milliseconds
+	if duration > 100 {
+		attrs.PutStr("query.performance_category", "slow")
+	} else if duration > 50 {
+		attrs.PutStr("query.performance_category", "moderate")
+	} else {
+		attrs.PutStr("query.performance_category", "fast")
+	}
 }

@@ -1,0 +1,113 @@
+receivers:
+  # OTLP receiver for testing
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        
+  # PostgreSQL receiver (optional)
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    transport: tcp
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB}
+    collection_interval: 10s
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+
+processors:
+  # Memory limiter prevents OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Circuit breaker for resilience
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 30s
+    max_concurrent_requests: 100
+
+  # Plan attribute extraction
+  planattributeextractor:
+    safe_mode: true
+    error_mode: ignore
+
+  # Query correlation
+  querycorrelator:
+    enable_table_correlation: true
+    enable_database_correlation: true
+    correlation_attributes:
+      add_query_category: true
+      add_table_stats: true
+
+  # PII and data verification
+  verification:
+    pii_detection:
+      enabled: true
+      action_on_detection: redact
+    enable_periodic_verification: true
+    verification_interval: 60s
+
+  # Cost control
+  costcontrol:
+    monthly_budget_usd: 1000.0
+    metric_cardinality_limit: 10000
+    aggressive_mode: false
+
+  # NR error monitoring
+  nrerrormonitor:
+    max_attribute_length: 1000
+    cardinality_warning_threshold: 1000
+    alert_threshold: 10
+
+  # Batch for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+exporters:
+  # Debug exporter for testing
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # File exporter for validation
+  file:
+    path: /tmp/collector-output.json
+    format: json
+
+  # OTLP exporter (can be used with OTLP mock server)
+  otlp:
+    endpoint: localhost:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - circuitbreaker
+        - planattributeextractor
+        - querycorrelator
+        - verification
+        - costcontrol
+        - nrerrormonitor
+        - batch
+      exporters: [debug, file]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
