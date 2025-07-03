@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
 )
 
@@ -52,6 +53,23 @@ type rateLimiter struct {
 	count        int
 	windowStart  time.Time
 	mutex        sync.Mutex
+}
+
+// adaptiveSamplerMetrics is the metrics processor implementation
+type adaptiveSamplerMetrics struct {
+	config            *Config
+	logger            *zap.Logger
+	consumer          consumer.Metrics
+	globalRateLimiter *rateLimiter // Global rate limiter for MaxRecordsPerSecond
+	stateMutex        sync.RWMutex
+
+	// Metrics
+	sampledCount int64
+	droppedCount int64
+
+	// Shutdown signal
+	shutdownChan chan struct{}
+	wg           sync.WaitGroup
 }
 
 
