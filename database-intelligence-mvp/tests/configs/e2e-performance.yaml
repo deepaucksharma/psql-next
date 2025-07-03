@@ -1,0 +1,272 @@
+# Performance E2E Test Configuration
+# Load and performance testing with optimized settings
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    check_collector_pipeline:
+      enabled: true
+      interval: 10s
+      exporter_failure_threshold: 10
+  zpages:
+    endpoint: 0.0.0.0:55679
+  pprof:
+    endpoint: 0.0.0.0:1777
+    block_profile_fraction: 1
+    mutex_profile_fraction: 1
+  memory_ballast:
+    size_mib: 128
+
+receivers:
+  # High-throughput OTLP receivers
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 64
+        max_concurrent_streams: 32
+      http:
+        endpoint: 0.0.0.0:4318
+        max_request_body_size_mib: 64
+
+  # Performance-tuned PostgreSQL receiver
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER:-postgres}
+    password: ${env:POSTGRES_PASSWORD:-postgres}
+    databases: [${env:POSTGRES_DB:-testdb}]
+    collection_interval: 10s  # Faster collection for load testing
+    tls:
+      insecure: true
+
+  # Performance-tuned MySQL receiver
+  mysql:
+    endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-mysql}
+    database: ${env:MYSQL_DB:-testdb}
+    collection_interval: 10s
+
+  # High-frequency SQL query receiver
+  sqlquery/postgresql:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-testdb} sslmode=disable"
+    collection_interval: 5s  # High frequency for load testing
+    queries:
+      # High-volume metrics query
+      - sql: |
+          SELECT 
+            'performance_test' as test_type,
+            COUNT(*) as connection_count,
+            SUM(CASE WHEN state = 'active' THEN 1 ELSE 0 END) as active_connections,
+            AVG(EXTRACT(EPOCH FROM (clock_timestamp() - query_start))) as avg_query_duration
+          FROM pg_stat_activity 
+          WHERE state IS NOT NULL
+        metrics:
+          - metric_name: perf_test_connections
+            value_column: connection_count
+            attribute_columns: [test_type]
+          - metric_name: perf_test_active_connections
+            value_column: active_connections
+            attribute_columns: [test_type]
+          - metric_name: perf_test_avg_duration
+            value_column: avg_query_duration
+            attribute_columns: [test_type]
+
+processors:
+  # High-capacity memory limiter
+  memory_limiter:
+    limit_mib: 1024
+    spike_limit_mib: 256
+    check_interval: 500ms
+
+  # Performance-optimized adaptive sampler
+  adaptivesampler:
+    sampling_percentage: 5  # Low sampling for high volume
+    max_traces_per_second: 1000
+    decision_cache:
+      sampled_cache_size: 50000
+      nonsampled_cache_size: 100000
+    sampling_rules:
+      - service_name_pattern: ".*performance.*"
+        sampling_percentage: 1
+      - span_name_pattern: "SELECT.*"
+        sampling_percentage: 0.5
+      - span_name_pattern: "INSERT.*"
+        sampling_percentage: 2
+      - attribute_key: "test.load_level"
+        attribute_value_pattern: "high"
+        sampling_percentage: 0.1
+
+  # Performance-tuned circuit breaker
+  circuitbreaker:
+    max_failures: 20
+    failure_threshold_percentage: 75
+    timeout: 5s
+    recovery_timeout: 15s
+    per_database_circuit: true
+    health_check_interval: 5s
+
+  # Optimized plan attribute extractor
+  planattributeextractor:
+    enable_anonymization: true
+    enable_plan_analysis: false  # Disable for better performance
+    max_query_length: 1024  # Shorter queries for performance
+    plan_cache:
+      enabled: true
+      max_size: 50000
+      ttl: 300s
+
+  # Lightweight verification for performance
+  verification:
+    enable_pii_detection: false  # Disable for performance
+    enable_data_validation: true
+    sample_rate: 0.01  # Very low sampling for performance
+
+  # Performance cost tracking
+  costcontrol:
+    daily_budget_usd: 50
+    monthly_budget_usd: 1500
+    alert_threshold_percentage: 90
+    enforcement_enabled: false
+
+  # High-capacity query correlator
+  querycorrelator:
+    correlation_window: 10s  # Shorter window for performance
+    max_correlations: 5000
+    correlation_keys: ["test_id", "load_id"]
+    enable_trace_correlation: false  # Disable for performance
+
+  # Performance resource processor
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence-performance-test
+        action: upsert
+      - key: service.version
+        value: 2.0.0-perf
+        action: upsert
+      - key: test.type
+        value: e2e-performance
+        action: upsert
+      - key: test.load_level
+        value: ${env:LOAD_LEVEL:-medium}
+        action: upsert
+      - key: test.duration
+        value: ${env:TEST_DURATION:-300}
+        action: upsert
+
+  # Minimal attributes processing
+  attributes:
+    actions:
+      - key: test.processed
+        value: "true"
+        action: upsert
+      - key: db.connection_string
+        action: delete
+
+  # High-throughput batch processor
+  batch:
+    timeout: 500ms  # Faster batching
+    send_batch_size: 2048  # Larger batches
+    send_batch_max_size: 4096
+
+exporters:
+  # Minimal debug output for performance
+  debug:
+    verbosity: basic
+    sampling:
+      initial: 1
+      thereafter: 1000
+
+  # Performance-optimized logging
+  logging:
+    loglevel: info
+    sampling_initial: 1
+    sampling_thereafter: 1000
+
+  # High-performance file export
+  file:
+    path: /tmp/e2e-performance-output.json
+    rotation:
+      max_megabytes: 100
+      max_days: 1
+      max_backups: 2
+    format: json
+
+  # Performance metrics export
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: perf_test_database_intelligence
+    const_labels:
+      test_type: performance
+      load_level: ${env:LOAD_LEVEL:-medium}
+      test_run: ${env:TEST_RUN_ID:-unknown}
+    metric_expiration: 5m
+
+  # High-throughput OTLP export
+  otlphttp/performance:
+    endpoint: ${env:PERF_TEST_OTLP_ENDPOINT:-http://localhost:4318}
+    timeout: 2s
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 100ms
+      max_interval: 1s
+      max_elapsed_time: 5s
+    sending_queue:
+      enabled: true
+      num_consumers: 20
+      queue_size: 10000
+
+service:
+  extensions: [health_check, zpages, pprof, memory_ballast]
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql, sqlquery/postgresql, otlp]
+      processors: [
+        memory_limiter,
+        adaptivesampler,
+        circuitbreaker,
+        planattributeextractor,
+        verification,
+        costcontrol,
+        querycorrelator,
+        resource,
+        attributes,
+        batch
+      ]
+      exporters: [prometheus, file]
+    
+    traces:
+      receivers: [otlp]
+      processors: [
+        memory_limiter,
+        adaptivesampler,
+        circuitbreaker,
+        planattributeextractor,
+        querycorrelator,
+        resource,
+        attributes,
+        batch
+      ]
+      exporters: [file]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [file]
+
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+      disable_caller: true
+      disable_stacktrace: true
+    metrics:
+      level: basic
+      address: 0.0.0.0:8888
+    resource:
+      service.name: database-intelligence-performance-test
+      test.configuration: performance
+      test.optimization: high_throughput

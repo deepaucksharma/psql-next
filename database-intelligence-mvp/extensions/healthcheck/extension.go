@@ -144,7 +144,7 @@ func (hce *HealthCheckExtension) Start(ctx context.Context, host component.Host)
 	go func() {
 		defer hce.wg.Done()
 		if err := hce.server.ListenAndServe(); err != http.ErrServerClosed {
-							hce.logger.Error("Health check server error", zap.Error(err))
+							hce.logger.Error("Health check server error")
 
 		}
 	}()

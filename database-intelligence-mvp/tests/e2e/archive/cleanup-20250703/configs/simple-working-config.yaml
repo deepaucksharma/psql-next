@@ -1,0 +1,64 @@
+extensions:
+  healthcheck:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - testdb
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: root
+    database: testdb
+    collection_interval: 10s
+
+processors:
+  # Metrics processors only for now
+  querycorrelator:
+    retention_period: 24h
+    cleanup_interval: 1h
+    enable_table_correlation: true
+
+  nrerrormonitor:
+    max_attribute_length: 4096
+    max_metric_name_length: 255
+    cardinality_warning_threshold: 10000
+
+  costcontrol:
+    monthly_budget_usd: 1000.0
+    price_per_gb: 0.35
+    metric_cardinality_limit: 10000
+    slow_span_threshold_ms: 2000
+    max_log_body_size: 10240
+    reporting_interval: 60s
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+  prometheus:
+    endpoint: "0.0.0.0:8890"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  extensions: [healthcheck]
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql]
+      processors: [querycorrelator, nrerrormonitor, costcontrol]
+      exporters: [debug, prometheus]
+
+  telemetry:
+    logs:
+      level: info

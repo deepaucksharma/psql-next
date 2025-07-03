@@ -1,0 +1,259 @@
+# Comprehensive E2E Test Configuration
+# Full feature testing with all processors and advanced scenarios
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    check_collector_pipeline:
+      enabled: true
+      interval: 30s
+  zpages:
+    endpoint: 0.0.0.0:55679
+  pprof:
+    endpoint: 0.0.0.0:1777
+  memory_ballast:
+    size_mib: 32
+
+receivers:
+  # OTLP receivers for comprehensive test data
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+      http:
+        endpoint: 0.0.0.0:4318
+        max_request_body_size_mib: 16
+
+  # PostgreSQL receiver with comprehensive monitoring
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER:-postgres}
+    password: ${env:POSTGRES_PASSWORD:-postgres}
+    databases: [${env:POSTGRES_DB:-testdb}]
+    collection_interval: 15s
+    tls:
+      insecure: true
+
+  # MySQL receiver for multi-database testing
+  mysql:
+    endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-mysql}
+    database: ${env:MYSQL_DB:-testdb}
+    collection_interval: 15s
+
+  # Enhanced SQL receiver for plan collection testing
+  enhancedsql/postgresql:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-testdb} sslmode=disable"
+    collection_interval: 30s
+    enable_plan_collection: true
+    plan_cache_size: 100
+
+  # SQL query receivers for custom metrics testing
+  sqlquery/postgresql:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-testdb} sslmode=disable"
+    collection_interval: 60s
+    queries:
+      - sql: "SELECT 'comprehensive_test' as test_type, COUNT(*) as row_count FROM pg_stat_activity"
+        metrics:
+          - metric_name: test_row_count
+            value_column: row_count
+            attribute_columns: [test_type]
+
+processors:
+  # Memory limiter with test-appropriate limits
+  memory_limiter:
+    limit_mib: 256
+    spike_limit_mib: 64
+    check_interval: 1s
+
+  # Adaptive sampler with test rules
+  adaptivesampler:
+    sampling_percentage: 50
+    max_traces_per_second: 100
+    sampling_rules:
+      - service_name_pattern: ".*test.*"
+        sampling_percentage: 100
+      - span_name_pattern: "SELECT.*"
+        sampling_percentage: 25
+      - span_name_pattern: "INSERT.*"
+        sampling_percentage: 75
+
+  # Circuit breaker with test thresholds
+  circuitbreaker:
+    max_failures: 3
+    failure_threshold_percentage: 30
+    timeout: 10s
+    recovery_timeout: 30s
+    per_database_circuit: true
+
+  # Plan attribute extractor with full feature testing
+  planattributeextractor:
+    enable_anonymization: true
+    enable_plan_analysis: true
+    max_query_length: 2048
+    anonymization_rules:
+      - pattern: "IN \\([^)]+\\)"
+        replacement: "IN (...)"
+      - pattern: "VALUES \\([^)]+\\)"
+        replacement: "VALUES (...)"
+    plan_cache:
+      enabled: true
+      max_size: 1000
+      ttl: 1800s
+
+  # Verification processor with PII detection testing
+  verification:
+    enable_pii_detection: true
+    enable_data_validation: true
+    pii_patterns:
+      - name: "test_email"
+        pattern: "test[0-9]+@example\\.com"
+        action: "redact"
+      - name: "test_phone"
+        pattern: "\\+1-555-[0-9]{3}-[0-9]{4}"
+        action: "redact"
+    sample_rate: 1.0
+    max_field_length: 500
+
+  # Cost control processor for budget testing
+  costcontrol:
+    daily_budget_usd: 10
+    monthly_budget_usd: 300
+    alert_threshold_percentage: 50
+    enforcement_enabled: false
+
+  # Query correlator for correlation testing
+  querycorrelator:
+    correlation_window: 60s
+    max_correlations: 100
+    correlation_keys: ["test_id", "session_id", "user_id"]
+    enable_trace_correlation: true
+
+  # Resource processor with comprehensive test attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence-comprehensive-test
+        action: upsert
+      - key: service.version
+        value: 2.0.0-test
+        action: upsert
+      - key: test.type
+        value: e2e-comprehensive
+        action: upsert
+      - key: test.timestamp
+        value: ${env:TEST_TIMESTAMP}
+        action: upsert
+
+  # Attributes processor for test data manipulation
+  attributes:
+    actions:
+      - key: test.processed
+        value: "true"
+        action: upsert
+      - key: db.connection_string
+        action: delete
+      - key: test.environment
+        value: ${env:TEST_ENVIRONMENT:-local}
+        action: upsert
+
+  # Batch processor optimized for testing
+  batch:
+    timeout: 2s
+    send_batch_size: 100
+    send_batch_max_size: 500
+
+exporters:
+  # Debug exporter for detailed test output
+  debug:
+    verbosity: detailed
+    sampling:
+      initial: 100
+      thereafter: 100
+
+  # Logging exporter for test analysis
+  logging:
+    loglevel: debug
+    sampling_initial: 100
+    sampling_thereafter: 100
+
+  # File exporter for comprehensive test results
+  file:
+    path: /tmp/e2e-comprehensive-output.json
+    rotation:
+      max_megabytes: 10
+      max_days: 1
+      max_backups: 3
+
+  # Prometheus exporter for metrics validation
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: test_database_intelligence
+    const_labels:
+      test_type: comprehensive
+      test_run: ${env:TEST_RUN_ID:-unknown}
+
+  # Optional OTLP export for external validation
+  otlphttp/test:
+    endpoint: ${env:TEST_OTLP_ENDPOINT:-http://localhost:4318}
+    timeout: 5s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 5s
+
+service:
+  extensions: [health_check, zpages, pprof, memory_ballast]
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql, sqlquery/postgresql, otlp]
+      processors: [
+        memory_limiter,
+        adaptivesampler,
+        circuitbreaker,
+        planattributeextractor,
+        verification,
+        costcontrol,
+        querycorrelator,
+        resource,
+        attributes,
+        batch
+      ]
+      exporters: [debug, logging, file, prometheus]
+    
+    traces:
+      receivers: [otlp, enhancedsql/postgresql]
+      processors: [
+        memory_limiter,
+        adaptivesampler,
+        circuitbreaker,
+        planattributeextractor,
+        verification,
+        querycorrelator,
+        resource,
+        attributes,
+        batch
+      ]
+      exporters: [debug, logging, file]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, verification, resource, attributes, batch]
+      exporters: [debug, logging, file]
+
+  telemetry:
+    logs:
+      level: debug
+      encoding: json
+      disable_caller: false
+      disable_stacktrace: false
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+    resource:
+      service.name: database-intelligence-comprehensive-test
+      test.configuration: comprehensive

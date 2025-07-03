@@ -5,11 +5,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 	
 	"github.com/database-intelligence-mvp/common/featuredetector"
 	"github.com/database-intelligence-mvp/common/queryselector"
+	"github.com/database-intelligence-mvp/internal/database"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -69,27 +71,26 @@ func (r *Receiver) Start(ctx context.Context, host component.Host) error {
 		zap.String("driver", r.config.Driver),
 		zap.String("datasource", r.config.getDatasourceMasked()))
 	
-	// Connect to database
-	db, err := sql.Open(r.config.Driver, r.config.Datasource)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
+	// Create connection pool configuration
+	poolConfig := database.DefaultConnectionPoolConfig()
 	
-	// Configure connection pool
+	// Override with user-provided settings if specified
 	if r.config.MaxOpenConnections > 0 {
-		db.SetMaxOpenConns(r.config.MaxOpenConnections)
+		poolConfig.MaxOpenConnections = r.config.MaxOpenConnections
 	}
 	if r.config.MaxIdleConnections > 0 {
-		db.SetMaxIdleConns(r.config.MaxIdleConnections)
+		poolConfig.MaxIdleConnections = r.config.MaxIdleConnections
 	}
 	
-	// Test connection
-	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	// Validate pool configuration for security
+	if err := database.ValidatePoolConfig(poolConfig); err != nil {
+		return fmt.Errorf("invalid connection pool configuration: %w", err)
+	}
 	
-	if err := db.PingContext(testCtx); err != nil {
-		db.Close()
-		return fmt.Errorf("failed to ping database: %w", err)
+	// Connect to database with secure connection pooling
+	db, err := database.OpenWithSecurePool(r.config.Driver, r.config.Datasource, poolConfig, r.logger)
+	if err != nil {
+		return fmt.Errorf("failed to establish secure database connection: %w", err)
 	}
 	
 	r.db = db
@@ -345,4 +346,337 @@ func (r *Receiver) emitFeatureMetrics(ctx context.Context, features *featuredete
 			r.logger.Warn("Failed to send feature metrics", zap.Error(err))
 		}
 	}
+}
+
+// collect performs the main data collection
+func (r *Receiver) collect(ctx context.Context) {
+	startTime := time.Now()
+	
+	// Get current feature set for intelligent query selection
+	r.featureMutex.RLock()
+	features := r.featureSet
+	r.featureMutex.RUnlock()
+	
+	// Collect metrics and logs
+	if err := r.collectMetrics(ctx, features); err != nil {
+		r.errorCount++
+		r.logger.Error("Failed to collect metrics", zap.Error(err))
+	}
+	
+	if err := r.collectLogs(ctx, features); err != nil {
+		r.errorCount++
+		r.logger.Error("Failed to collect logs", zap.Error(err))
+	}
+	
+	r.successCount++
+	
+	duration := time.Since(startTime)
+	r.logger.Debug("Collection completed",
+		zap.Duration("duration", duration),
+		zap.Uint64("success_count", r.successCount),
+		zap.Uint64("error_count", r.errorCount))
+}
+
+// collectMetrics executes queries and collects metrics
+func (r *Receiver) collectMetrics(ctx context.Context, features *featuredetector.FeatureSet) error {
+	collectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	
+	// Get appropriate queries for current features
+	queries := r.selector.GetQueriesForCategory(queryselector.CategoryMetrics)
+	if len(queries) == 0 {
+		r.fallbackCount++
+		r.logger.Debug("No feature-specific queries available, using fallback")
+		queries = r.getFallbackMetricQueries()
+	}
+	
+	timestamp := time.Now()
+	metrics := pmetric.NewMetrics()
+	rm := metrics.ResourceMetrics().AppendEmpty()
+	
+	// Set resource attributes
+	resource := rm.Resource()
+	if features != nil {
+		resource.Attributes().PutStr("db.system", features.DatabaseType)
+		resource.Attributes().PutStr("db.version", features.ServerVersion)
+		if features.CloudProvider != "" {
+			resource.Attributes().PutStr("cloud.provider", features.CloudProvider)
+		}
+	}
+	resource.Attributes().PutStr("db.connection.string", r.config.getDatasourceMasked())
+	
+	sm := rm.ScopeMetrics().AppendEmpty()
+	sm.Scope().SetName("enhancedsql")
+	sm.Scope().SetVersion("1.0.0")
+	
+	// Execute queries and create metrics
+	for _, queryDef := range queries {
+		if err := r.executeMetricQuery(collectCtx, queryDef, sm, timestamp); err != nil {
+			r.logger.Warn("Failed to execute metric query",
+				zap.String("query", queryDef.Name),
+				zap.Error(err))
+			continue
+		}
+	}
+	
+	// Send metrics if we have any
+	if metrics.MetricCount() > 0 && r.metricsConsumer != nil {
+		if err := r.metricsConsumer.ConsumeMetrics(collectCtx, metrics); err != nil {
+			return fmt.Errorf("failed to send metrics: %w", err)
+		}
+	}
+	
+	return nil
+}
+
+// collectLogs collects logs including pg_querylens data if available
+func (r *Receiver) collectLogs(ctx context.Context, features *featuredetector.FeatureSet) error {
+	if r.logsConsumer == nil {
+		return nil
+	}
+	
+	collectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	
+	// Get log queries (includes pg_querylens if available)
+	queries := r.selector.GetQueriesForCategory(queryselector.CategoryLogs)
+	if len(queries) == 0 {
+		return nil // No log collection needed
+	}
+	
+	timestamp := time.Now()
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	
+	// Set resource attributes
+	resource := rl.Resource()
+	if features != nil {
+		resource.Attributes().PutStr("db.system", features.DatabaseType)
+		resource.Attributes().PutStr("db.version", features.ServerVersion)
+	}
+	
+	sl := rl.ScopeLogs().AppendEmpty()
+	sl.Scope().SetName("enhancedsql")
+	
+	// Execute log queries
+	for _, queryDef := range queries {
+		if err := r.executeLogQuery(collectCtx, queryDef, sl, timestamp); err != nil {
+			r.logger.Warn("Failed to execute log query",
+				zap.String("query", queryDef.Name),
+				zap.Error(err))
+			continue
+		}
+	}
+	
+	// Send logs if we have any
+	if logs.LogRecordCount() > 0 {
+		if err := r.logsConsumer.ConsumeLogs(collectCtx, logs); err != nil {
+			return fmt.Errorf("failed to send logs: %w", err)
+		}
+	}
+	
+	return nil
+}
+
+// executeMetricQuery executes a single metric query
+func (r *Receiver) executeMetricQuery(ctx context.Context, queryDef featuredetector.QueryDefinition, sm pmetric.ScopeMetrics, timestamp time.Time) error {
+	rows, err := r.db.QueryContext(ctx, queryDef.SQL)
+	if err != nil {
+		return fmt.Errorf("query execution failed: %w", err)
+	}
+	defer rows.Close()
+	
+	columns, err := rows.Columns()
+	if err != nil {
+		return fmt.Errorf("failed to get columns: %w", err)
+	}
+	
+	// Create metric based on query results
+	metric := sm.Metrics().AppendEmpty()
+	metric.SetName(queryDef.Name)
+	metric.SetDescription(queryDef.Description)
+	
+	gauge := metric.SetEmptyGauge()
+	
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		
+		if err := rows.Scan(valuePtrs...); err != nil {
+			r.logger.Warn("Failed to scan row", zap.Error(err))
+			continue
+		}
+		
+		dp := gauge.DataPoints().AppendEmpty()
+		dp.SetTimestamp(pmetric.NewTimestampFromTime(timestamp))
+		
+		// Process columns - first numeric column is the value, others become attributes
+		var metricValue float64
+		valueSet := false
+		
+		for i, column := range columns {
+			value := values[i]
+			
+			switch v := value.(type) {
+			case int64:
+				if !valueSet {
+					metricValue = float64(v)
+					valueSet = true
+				} else {
+					dp.Attributes().PutInt(column, v)
+				}
+			case float64:
+				if !valueSet {
+					metricValue = v
+					valueSet = true
+				} else {
+					dp.Attributes().PutDouble(column, v)
+				}
+			case string:
+				dp.Attributes().PutStr(column, v)
+			case []byte:
+				dp.Attributes().PutStr(column, string(v))
+			case bool:
+				if !valueSet {
+					if v {
+						metricValue = 1
+					} else {
+						metricValue = 0
+					}
+					valueSet = true
+				} else {
+					dp.Attributes().PutBool(column, v)
+				}
+			default:
+				if value != nil {
+					dp.Attributes().PutStr(column, fmt.Sprintf("%v", value))
+				}
+			}
+		}
+		
+		if valueSet {
+			dp.SetDoubleValue(metricValue)
+		}
+	}
+	
+	return rows.Err()
+}
+
+// executeLogQuery executes a query and creates log records
+func (r *Receiver) executeLogQuery(ctx context.Context, queryDef featuredetector.QueryDefinition, sl plog.ScopeLogs, timestamp time.Time) error {
+	rows, err := r.db.QueryContext(ctx, queryDef.SQL)
+	if err != nil {
+		return fmt.Errorf("query execution failed: %w", err)
+	}
+	defer rows.Close()
+	
+	columns, err := rows.Columns()
+	if err != nil {
+		return fmt.Errorf("failed to get columns: %w", err)
+	}
+	
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		
+		if err := rows.Scan(valuePtrs...); err != nil {
+			r.logger.Warn("Failed to scan row", zap.Error(err))
+			continue
+		}
+		
+		// Create log record
+		logRecord := sl.LogRecords().AppendEmpty()
+		logRecord.SetTimestamp(plog.NewTimestampFromTime(timestamp))
+		logRecord.SetSeverityNumber(plog.SeverityNumberInfo)
+		logRecord.SetSeverityText("INFO")
+		
+		// Build log body with query results
+		bodyBuilder := strings.Builder{}
+		bodyBuilder.WriteString(fmt.Sprintf("Query: %s | ", queryDef.Name))
+		
+		// Add all values as attributes and build body
+		for i, column := range columns {
+			value := values[i]
+			
+			if i > 0 {
+				bodyBuilder.WriteString(" | ")
+			}
+			
+			switch v := value.(type) {
+			case int64:
+				logRecord.Attributes().PutInt(column, v)
+				bodyBuilder.WriteString(fmt.Sprintf("%s: %d", column, v))
+			case float64:
+				logRecord.Attributes().PutDouble(column, v)
+				bodyBuilder.WriteString(fmt.Sprintf("%s: %.6f", column, v))
+			case string:
+				logRecord.Attributes().PutStr(column, v)
+				bodyBuilder.WriteString(fmt.Sprintf("%s: %s", column, v))
+			case []byte:
+				strVal := string(v)
+				logRecord.Attributes().PutStr(column, strVal)
+				bodyBuilder.WriteString(fmt.Sprintf("%s: %s", column, strVal))
+			case bool:
+				logRecord.Attributes().PutBool(column, v)
+				bodyBuilder.WriteString(fmt.Sprintf("%s: %t", column, v))
+			case time.Time:
+				timestamp := v.Format(time.RFC3339)
+				logRecord.Attributes().PutStr(column, timestamp)
+				bodyBuilder.WriteString(fmt.Sprintf("%s: %s", column, timestamp))
+			default:
+				if value != nil {
+					strVal := fmt.Sprintf("%v", value)
+					logRecord.Attributes().PutStr(column, strVal)
+					bodyBuilder.WriteString(fmt.Sprintf("%s: %s", column, strVal))
+				}
+			}
+		}
+		
+		logRecord.Body().SetStr(bodyBuilder.String())
+		
+		// Add standard attributes
+		logRecord.Attributes().PutStr("source", "enhancedsql")
+		logRecord.Attributes().PutStr("query_name", queryDef.Name)
+		logRecord.Attributes().PutStr("query_category", "database_telemetry")
+	}
+	
+	return rows.Err()
+}
+
+// getFallbackMetricQueries returns basic queries when feature detection fails
+func (r *Receiver) getFallbackMetricQueries() []featuredetector.QueryDefinition {
+	queries := []featuredetector.QueryDefinition{}
+	
+	switch r.config.Driver {
+	case "postgres":
+		queries = append(queries, featuredetector.QueryDefinition{
+			Name:        "pg_database_size",
+			SQL:         "SELECT pg_database_size(current_database()) as database_size_bytes",
+			Description: "Current database size in bytes",
+			Priority:    100,
+		})
+		
+		queries = append(queries, featuredetector.QueryDefinition{
+			Name:        "pg_connection_count",
+			SQL:         "SELECT count(*) as active_connections FROM pg_stat_activity WHERE state = 'active'",
+			Description: "Number of active database connections",
+			Priority:    90,
+		})
+		
+	case "mysql":
+		queries = append(queries, featuredetector.QueryDefinition{
+			Name:        "mysql_connection_count",
+			SQL:         "SELECT VARIABLE_VALUE as active_connections FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected'",
+			Description: "Number of active MySQL connections",
+			Priority:    90,
+		})
+	}
+	
+	return queries
 }

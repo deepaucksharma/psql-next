@@ -1,0 +1,300 @@
+# Secure Docker Configuration for Database Intelligence Collector
+# This configuration implements security best practices for Docker deployment
+
+extensions:
+  # Health check extension with restricted access
+  health_check:
+    endpoint: "127.0.0.1:13133"  # Localhost only
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: 30s
+      exporter_failure_threshold: 5
+
+receivers:
+  # OTLP receiver with security restrictions
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+        max_recv_msg_size: 4194304  # 4MB limit
+        max_concurrent_streams: 16   # Limit concurrent streams
+        keepalive:
+          server_parameters:
+            max_connection_idle: 11s
+            max_connection_age: 12s
+            max_connection_age_grace: 13s
+            time: 30s
+            timeout: 5s
+        auth:
+          # Authentication disabled for internal Docker network
+          # In production, consider adding mTLS
+      http:
+        endpoint: "0.0.0.0:4318"
+        max_request_body_size: 4194304  # 4MB limit
+        include_metadata: true
+        
+  # PostgreSQL receiver with improved security
+  postgresql:
+    endpoint: "${env:POSTGRES_HOST}:${env:POSTGRES_PORT}"
+    transport: tcp
+    username: "${env:POSTGRES_USER}"
+    password: "${env:POSTGRES_PASSWORD}"
+    databases:
+      - "${env:POSTGRES_DB}"
+    collection_interval: 60s  # Less frequent for Docker
+    timeout: 30s
+    tls:
+      insecure: "${env:POSTGRES_TLS_INSECURE:-false}"
+      insecure_skip_verify: false
+      # Note: In production, use proper certificates
+    metrics:
+      # Enable only essential metrics to reduce load
+      postgresql.blocks_read:
+        enabled: true
+      postgresql.commits:
+        enabled: true
+      postgresql.database.count:
+        enabled: true
+      postgresql.database.locks:
+        enabled: true
+      postgresql.database.backends:
+        enabled: true
+      postgresql.table.count:
+        enabled: true
+      # Disable high-cardinality metrics
+      postgresql.table.size:
+        enabled: false
+      postgresql.index.size:
+        enabled: false
+        
+  # MySQL receiver with improved security
+  mysql:
+    endpoint: "${env:MYSQL_HOST}:${env:MYSQL_PORT}"
+    username: "${env:MYSQL_USER}"
+    password: "${env:MYSQL_PASSWORD}"
+    database: "${env:MYSQL_DB}"
+    collection_interval: 60s  # Less frequent for Docker
+    timeout: 30s
+    tls:
+      insecure: "${env:MYSQL_TLS_INSECURE:-false}"
+      insecure_skip_verify: false
+      # Note: In production, use proper certificates
+    metrics:
+      # Enable only essential metrics
+      mysql.connections:
+        enabled: true
+      mysql.operations:
+        enabled: true
+      mysql.locks:
+        enabled: true
+      mysql.buffer_pool:
+        enabled: true
+      # Disable potentially high-cardinality metrics
+      mysql.table_io_wait:
+        enabled: false
+
+processors:
+  # Critical: Memory protection
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 512
+    spike_limit_mib: 128
+    
+  # Resource attribution for tracking
+  resource:
+    attributes:
+      - key: collector.name
+        value: "docker-otelcol"
+        action: upsert
+      - key: service.name
+        value: "database-intelligence"
+        action: upsert
+      - key: deployment.environment
+        value: "${env:ENVIRONMENT:-development}"
+        action: upsert
+      - key: container.runtime
+        value: "docker"
+        action: upsert
+      - key: service.version
+        value: "1.0.0"
+        action: upsert
+        
+  # Circuit breaker for stability
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 2
+    open_state_timeout: 60s
+    max_concurrent_requests: 20
+    enable_adaptive_timeout: true
+    base_timeout: 10s
+    max_timeout: 60s
+    memory_threshold_mb: 256
+    health_check_interval: 30s
+    
+  # Plan attribute extraction with security
+  planattributeextractor:
+    safe_mode: true
+    timeout_ms: 5000
+    error_mode: ignore
+    enable_debug_logging: false
+    hash_config:
+      algorithm: "sha256"
+      include:
+        - "db.query.plan.cost"
+        - "db.query.plan.rows"
+      output: "db.query.plan.fingerprint"
+    postgresql_rules:
+      detection_jsonpath: "$.message"
+      extractions:
+        "db.query.plan.cost": '$.cost'
+        "db.query.plan.rows": '$.rows'
+        "db.query.plan.type": '$.type'
+    query_anonymization:
+      enabled: true
+      attributes_to_anonymize:
+        - "db.statement"
+        - "db.query.text"
+      generate_fingerprint: true
+      fingerprint_attribute: "db.query.fingerprint"
+      
+  # Adaptive sampling for performance
+  adaptivesampler:
+    sampling_percentage: 25  # Higher for Docker development
+    evaluation_interval: 120s
+    max_traces_per_second: 50
+    adjust_sampling_on_overload: true
+    memory_threshold_mb: 128
+    
+  # Data transformation with security filtering
+  transform:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - set(resource.attributes["service.instance.id"], "${env:HOSTNAME}")
+          - set(resource.attributes["telemetry.sdk.name"], "opentelemetry")
+          - set(resource.attributes["telemetry.sdk.language"], "go")
+          
+    log_statements:
+      - context: log
+        statements:
+          # Security: Remove sensitive attributes
+          - delete_key(attributes, "password") where attributes["password"] != nil
+          - delete_key(attributes, "secret") where attributes["secret"] != nil
+          - delete_key(attributes, "token") where attributes["token"] != nil
+          
+  # Efficient batching
+  batch:
+    timeout: 15s
+    send_batch_size: 500
+    send_batch_max_size: 1000
+    
+  # Metric filtering for performance
+  filter/metrics:
+    error_mode: ignore
+    metrics:
+      metric:
+        # Filter out noisy metrics
+        - 'name == "process.cpu.time" and resource.attributes["process.pid"] != nil'
+        # Keep only database-related metrics
+        - 'name matches "^(postgresql|mysql|db)\\."'
+
+exporters:
+  # New Relic OTLP exporter with security
+  otlp/newrelic:
+    endpoint: "${env:NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net:4318}"
+    headers:
+      "api-key": "${env:NEW_RELIC_LICENSE_KEY}"
+      "user-agent": "database-intelligence-docker/1.0.0"
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 120s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 500
+      
+  # Prometheus metrics exporter (restricted)
+  prometheus:
+    endpoint: "127.0.0.1:8888"  # Localhost only
+    const_labels:
+      collector: "database-intelligence"
+      environment: "${env:ENVIRONMENT:-development}"
+    send_timestamps: true
+    metric_expiration: 5m
+    enable_open_metrics: false  # Security: disable experimental features
+    
+  # Logging exporter for debugging
+  logging:
+    loglevel: "${env:LOG_LEVEL:-info}"
+    sampling_initial: 2
+    sampling_thereafter: 100
+
+service:
+  telemetry:
+    logs:
+      level: "${env:LOG_LEVEL:-info}"
+      development: false
+      sampling:
+        enabled: true
+        tick: 10s
+        initial: 2
+        thereafter: 100
+    metrics:
+      level: basic
+      address: "127.0.0.1:8889"  # Internal metrics on localhost only
+      
+  extensions:
+    - health_check
+    
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers:
+        - postgresql
+        - mysql
+        - otlp
+      processors:
+        - memory_limiter
+        - circuitbreaker
+        - resource
+        - filter/metrics
+        - transform
+        - batch
+      exporters:
+        - otlp/newrelic
+        - prometheus
+        - logging
+        
+    # Logs pipeline with plan intelligence
+    logs:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - circuitbreaker
+        - planattributeextractor
+        - adaptivesampler
+        - resource
+        - transform
+        - batch
+      exporters:
+        - otlp/newrelic
+        - logging
+        
+    # Traces pipeline (minimal for security)
+    traces:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - circuitbreaker
+        - resource
+        - batch
+      exporters:
+        - otlp/newrelic

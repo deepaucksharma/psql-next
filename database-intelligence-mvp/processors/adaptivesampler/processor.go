@@ -33,6 +33,7 @@ type adaptiveSampler struct {
 	// State management (in-memory only)
 	deduplicationCache *lru.Cache[string, time.Time]
 	ruleLimiters       map[string]*rateLimiter
+	globalRateLimiter  *rateLimiter // Global rate limiter for MaxRecordsPerSecond
 	stateMutex         sync.RWMutex
 
 	// Metrics
@@ -73,12 +74,23 @@ func newAdaptiveSampler(cfg *Config, logger *zap.Logger, consumer consumer.Logs)
 		}
 	}
 
+	// Initialize global rate limiter
+	var globalLimiter *rateLimiter
+	if cfg.MaxRecordsPerSecond > 0 {
+		// Convert per-second to per-minute for consistency with existing rate limiter
+		globalLimiter = &rateLimiter{
+			maxPerMinute: cfg.MaxRecordsPerSecond * 60,
+			windowStart:  time.Now(),
+		}
+	}
+
 	processor := &adaptiveSampler{
 		config:             cfg,
 		logger:             logger,
 		consumer:           consumer,
 		deduplicationCache: cache,
 		ruleLimiters:       limiters,
+		globalRateLimiter:  globalLimiter,
 		shutdownChan:       make(chan struct{}),
 	}
 
@@ -138,6 +150,16 @@ func (p *adaptiveSampler) ConsumeLogs(ctx context.Context, logs plog.Logs) error
 
 			for k := 0; k < scopeLogs.LogRecords().Len(); k++ {
 				logRecord := scopeLogs.LogRecords().At(k)
+
+				// Check global rate limit first
+				if p.globalRateLimiter != nil && !p.checkGlobalRateLimit() {
+					if p.config.EnableDebugLogging {
+						p.logger.Debug("Log record dropped due to global rate limit",
+							zap.Int("max_records_per_second", p.config.MaxRecordsPerSecond))
+					}
+					p.droppedCount++
+					continue
+				}
 
 				// Apply sampling decision
 				if p.shouldSample(logRecord) {
@@ -403,6 +425,33 @@ func (p *adaptiveSampler) checkRateLimit(ruleName string) bool {
 	return true
 }
 
+// checkGlobalRateLimit checks if the global rate limit allows this record
+func (p *adaptiveSampler) checkGlobalRateLimit() bool {
+	if p.globalRateLimiter == nil {
+		return true // No global rate limiting configured
+	}
+
+	p.globalRateLimiter.mutex.Lock()
+	defer p.globalRateLimiter.mutex.Unlock()
+
+	now := time.Now()
+	
+	// For global rate limiting, use a rolling second window
+	if now.Sub(p.globalRateLimiter.windowStart) >= time.Second {
+		p.globalRateLimiter.count = 0
+		p.globalRateLimiter.windowStart = now
+	}
+
+	// Check if we're under the limit (per second)
+	maxPerSecond := p.globalRateLimiter.maxPerMinute / 60
+	if p.globalRateLimiter.count >= maxPerSecond {
+		return false
+	}
+
+	p.globalRateLimiter.count++
+	return true
+}
+
 // randomSample makes a random sampling decision
 func (p *adaptiveSampler) randomSample(rate float64) bool {
 	if rate >= 1.0 {
@@ -412,11 +461,13 @@ func (p *adaptiveSampler) randomSample(rate float64) bool {
 		return false
 	}
 
-	// Generate random number between 0 and 1
+	// Generate cryptographically secure random number between 0 and 1
 	n, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
 	if err != nil {
-		// Fallback to time-based pseudo-random
-		return float64(time.Now().UnixNano()%1000000)/1000000 < rate
+		// Log the error and fail securely rather than using weak randomness
+		p.logger.Error("Failed to generate secure random number for sampling", zap.Error(err))
+		// Fail closed - reject the sample to maintain security
+		return false
 	}
 
 	random := float64(n.Int64()) / float64(math.MaxInt64)

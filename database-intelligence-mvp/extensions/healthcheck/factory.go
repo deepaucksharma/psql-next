@@ -5,6 +5,7 @@ package healthcheck
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/extension"
@@ -37,6 +38,16 @@ func createExtension(
 		config:       config,
 		logger:       set.Logger,
 		shutdownChan: make(chan struct{}),
+		healthStatus: &HealthStatus{
+			Status:              "initializing",
+			LastCheck:           time.Now(),
+			DatabaseConnections: make(map[string]DatabaseHealth),
+			CollectorHealth: ComponentHealth{
+				Healthy:   false,
+				StartTime: time.Now(),
+				Version:   "2.0.0",
+			},
+		},
 	}
 
 	return ext, nil

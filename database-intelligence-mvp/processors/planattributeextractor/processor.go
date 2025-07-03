@@ -2,8 +2,6 @@ package planattributeextractor
 
 import (
 	"context"
-	"crypto/md5"
-	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -11,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/collector/component"
@@ -29,7 +28,9 @@ type planAttributeExtractor struct {
 	consumer       consumer.Logs
 	queryAnonymizer *queryAnonymizer
 	planHistory    map[int64]string // For pg_querylens plan change detection
+	planTimestamps map[int64]time.Time // Track when each plan was last seen
 	mu             sync.Mutex       // Mutex for thread-safe access to planHistory
+	shutdownChan   chan struct{}    // Shutdown signal
 }
 
 // newPlanAttributeExtractor creates a new plan attribute extractor processor
@@ -40,6 +41,8 @@ func newPlanAttributeExtractor(cfg *Config, logger *zap.Logger, consumer consume
 		consumer:        consumer,
 		queryAnonymizer: newQueryAnonymizer(),
 		planHistory:     make(map[int64]string),
+		planTimestamps:  make(map[int64]time.Time),
+		shutdownChan:    make(chan struct{}),
 	}
 }
 
@@ -67,14 +70,19 @@ func (p *planAttributeExtractor) Start(ctx context.Context, host component.Host)
 		zap.String("recommendation", "Use pg_stat_statements or similar for safe plan collection"),
 		zap.String("unsafe_alternative", "pg_querylens extension (requires C compilation and PostgreSQL restart)"))
 	
+	// Start cleanup routine for plan history
+	go p.cleanupRoutine()
+	
 	return nil
 }
 
 // Shutdown stops the processor
 func (p *planAttributeExtractor) Shutdown(ctx context.Context) error {
 	p.logger.Info("Shutting down plan attribute extractor processor")
+	close(p.shutdownChan)
 	return nil
 }
+
 
 // ConsumeLogs processes log records and extracts plan attributes
 func (p *planAttributeExtractor) ConsumeLogs(ctx context.Context, logs plog.Logs) error {
@@ -370,17 +378,17 @@ func (p *planAttributeExtractor) generatePlanHash(record plog.LogRecord) (string
 		hashInput.WriteString("|")
 	}
 	
-	// Create appropriate hasher
+	// Create secure hasher - only SHA-256 supported for security
 	var hasher hash.Hash
 	switch p.config.HashConfig.Algorithm {
-	case "sha256":
+	case "sha256", "":
 		hasher = sha256.New()
-	case "sha1":
-		hasher = sha1.New()
-	case "md5":
-		hasher = md5.New()
 	default:
-		hasher = sha256.New() // Default to SHA256
+		// Log warning for deprecated algorithms and use SHA-256
+		p.logger.Warn("Unsupported or insecure hash algorithm specified, using SHA-256",
+			zap.String("requested_algorithm", p.config.HashConfig.Algorithm),
+			zap.String("using_algorithm", "sha256"))
+		hasher = sha256.New()
 	}
 	
 	hasher.Write([]byte(hashInput.String()))
@@ -482,5 +490,49 @@ func (p *planAttributeExtractor) applyQueryAnonymization(record plog.LogRecord) 
 					zap.Bool("fingerprint_generated", p.config.QueryAnonymization.GenerateFingerprint))
 			}
 		}
+	}
+}
+
+// cleanupRoutine periodically cleans up old plan history entries to prevent memory leaks
+func (p *planAttributeExtractor) cleanupRoutine() {
+	ticker := time.NewTicker(30 * time.Minute) // Cleanup every 30 minutes
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			p.cleanupOldPlans()
+		case <-p.shutdownChan:
+			return
+		}
+	}
+}
+
+// cleanupOldPlans removes plan history entries older than the configured retention period
+func (p *planAttributeExtractor) cleanupOldPlans() {
+	retentionPeriod := 24 * time.Hour // Default 24 hours
+	if p.config.QueryLens.PlanHistoryHours > 0 {
+		retentionPeriod = time.Duration(p.config.QueryLens.PlanHistoryHours) * time.Hour
+	}
+
+	cutoff := time.Now().Add(-retentionPeriod)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	removedCount := 0
+	for queryID, timestamp := range p.planTimestamps {
+		if timestamp.Before(cutoff) {
+			delete(p.planHistory, queryID)
+			delete(p.planTimestamps, queryID)
+			removedCount++
+		}
+	}
+
+	if removedCount > 0 {
+		p.logger.Info("Cleaned up old plan history entries",
+			zap.Int("removed_count", removedCount),
+			zap.Int("remaining_count", len(p.planHistory)),
+			zap.Duration("retention_period", retentionPeriod))
 	}
 }

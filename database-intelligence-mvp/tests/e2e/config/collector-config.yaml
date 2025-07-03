@@ -1,0 +1,211 @@
+extensions:
+  healthcheck:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  # Metrics receivers
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - testdb
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: root
+    database: testdb
+    collection_interval: 10s
+
+  # SQL query receiver for PostgreSQL logs
+  sqlquery/postgresql_logs:
+    driver: postgres
+    datasource: "host=localhost port=5432 user=postgres password=postgres dbname=testdb sslmode=disable"
+    queries:
+      - sql: |
+          SELECT 
+            'query_' || generate_series as query_id,
+            'SELECT * FROM users WHERE id = ' || generate_series as query_text,
+            json_build_object('0', json_build_object('Plan', json_build_object(
+              'Total Cost', (100 + random() * 1000)::numeric(10,2),
+              'Plan Rows', (1 + random() * 1000)::int,
+              'Node Type', 'Index Scan',
+              'Startup Cost', (10 + random() * 50)::numeric(10,2)
+            )))::text as plan_json,
+            (50 + random() * 500)::numeric(10,2) as duration_ms,
+            current_database() as database_name,
+            'postgresql' as db_system
+          FROM generate_series(1, 10)
+        logs:
+          - body_column: query_text
+            attribute_columns:
+              - query_id
+              - plan_json  
+              - duration_ms
+              - database_name
+              - db_system
+    collection_interval: 30s
+
+  # SQL query receiver for MySQL logs
+  sqlquery/mysql_logs:
+    driver: mysql
+    datasource: "root:root@tcp(localhost:3306)/testdb"
+    queries:
+      - sql: |
+          SELECT 
+            CONCAT('mysql_query_', seq) as query_id,
+            CONCAT('SELECT * FROM products WHERE id = ', seq) as query_text,
+            ROUND(50 + RAND() * 500, 2) as duration_ms,
+            DATABASE() as database_name,
+            'mysql' as db_system,
+            FLOOR(10 + RAND() * 1000) as rows_examined,
+            FLOOR(1 + RAND() * 100) as rows_sent
+          FROM (
+            SELECT 1 as seq UNION SELECT 2 UNION SELECT 3 
+            UNION SELECT 4 UNION SELECT 5
+          ) numbers
+        logs:
+          - body_column: query_text
+            attribute_columns:
+              - query_id
+              - duration_ms
+              - database_name
+              - db_system
+              - rows_examined
+              - rows_sent
+    collection_interval: 30s
+
+processors:
+  # Metrics processors
+  querycorrelator:
+    retention_period: 24h
+    cleanup_interval: 1h
+    enable_table_correlation: true
+    enable_database_correlation: true
+    max_queries_tracked: 10000
+
+  nrerrormonitor:
+    max_attribute_length: 4096
+    max_metric_name_length: 255
+    cardinality_warning_threshold: 10000
+    alert_threshold: 100
+    reporting_interval: 60s
+    error_suppression_duration: 5m
+    enable_proactive_validation: true
+
+  costcontrol/metrics:
+    monthly_budget_usd: 1000.0
+    price_per_gb: 0.35
+    metric_cardinality_limit: 10000
+    slow_span_threshold_ms: 2000
+    max_log_body_size: 10240
+    reporting_interval: 60s
+    aggressive_mode: false
+    data_plus_enabled: false
+
+  # Logs processors
+  verification:
+    enable_periodic_verification: true
+    verification_interval: 30s
+    data_freshness_threshold: 5m
+    min_entity_correlation_rate: 0.8
+    min_normalization_rate: 0.9
+    require_entity_synthesis: false
+    export_feedback_as_logs: true
+
+  adaptivesampler:
+    sync_interval: 1m
+    high_cost_threshold: 1000.0
+    min_sample_rate: 0.01
+    max_samples_per_second: 100.0
+    in_memory_only: true
+    default_sample_rate: 1.0
+    max_records_per_second: 1000
+    enable_debug_logging: true
+
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 3
+    open_state_timeout: 30s
+    max_concurrent_requests: 100
+    base_timeout: 5s
+    max_timeout: 30s
+    enable_adaptive_timeout: true
+    health_check_interval: 10s
+    memory_threshold_mb: 512
+    cpu_threshold_percent: 80.0
+    enable_debug_logging: true
+
+  planattributeextractor:
+    timeout_ms: 1000
+    error_mode: "ignore"
+    enable_debug_logging: true
+    safe_mode: true
+    postgresql_rules:
+      detection_jsonpath: "0.Plan"
+      extractions:
+        "db.query.plan.cost": "0.Plan.Total Cost"
+        "db.query.plan.rows": "0.Plan.Plan Rows"
+        "db.query.plan.node_type": "0.Plan.Node Type"
+        "db.query.plan.startup_cost": "0.Plan.Startup Cost"
+      derived:
+        "db.query.plan.has_seq_scan": "has_substr_in_plan(plan_json, 'Seq Scan')"
+        "db.query.plan.has_index_scan": "has_substr_in_plan(plan_json, 'Index Scan')"
+    mysql_rules:
+      detection_jsonpath: "rows_examined"
+      extractions:
+        "db.query.rows_examined": "rows_examined"
+        "db.query.rows_sent": "rows_sent"
+    hash_config:
+      include:
+        - "query_text"
+      output: "db.query.plan.hash"
+      algorithm: "sha256"
+
+  costcontrol/logs:
+    monthly_budget_usd: 1000.0
+    price_per_gb: 0.35
+    metric_cardinality_limit: 10000
+    slow_span_threshold_ms: 2000
+    max_log_body_size: 10240
+    reporting_interval: 60s
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 20
+
+  prometheus:
+    endpoint: "0.0.0.0:8890"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  extensions: [healthcheck]
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers: [postgresql, mysql]
+      processors: [querycorrelator, nrerrormonitor, costcontrol/metrics]
+      exporters: [debug, prometheus]
+    
+    # PostgreSQL logs pipeline
+    logs/postgresql:
+      receivers: [sqlquery/postgresql_logs]
+      processors: [verification, adaptivesampler, circuitbreaker, planattributeextractor, costcontrol/logs]
+      exporters: [debug]
+    
+    # MySQL logs pipeline
+    logs/mysql:
+      receivers: [sqlquery/mysql_logs]
+      processors: [verification, adaptivesampler, circuitbreaker, planattributeextractor, costcontrol/logs]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: info

@@ -8,7 +8,7 @@ all: test
 # Run all E2E tests
 test:
 	@echo "Running all E2E tests..."
-	./run_e2e_tests.sh --mode all
+	./run-e2e-tests.sh --mode all
 
 # Run only unit tests (fast)
 test-unit:
@@ -18,17 +18,17 @@ test-unit:
 # Run integration tests
 test-integration:
 	@echo "Running integration tests..."
-	./run_e2e_tests.sh --mode integration
+	./run-e2e-tests.sh --mode integration
 
 # Run performance tests
 test-performance:
 	@echo "Running performance tests..."
-	./run_e2e_tests.sh --mode performance
+	./run-e2e-tests.sh --mode performance
 
 # Run benchmarks
 test-benchmark:
 	@echo "Running benchmarks..."
-	./run_e2e_tests.sh --mode benchmark
+	./run-e2e-tests.sh --mode benchmark
 
 # Run specific test
 test-specific:
@@ -72,7 +72,7 @@ fmt:
 # Run tests in CI mode
 ci:
 	@echo "Running tests in CI mode..."
-	./run_e2e_tests.sh --mode all --timeout 20m
+	./run-e2e-tests.sh --mode all --timeout 20m
 
 # Generate test report
 report:

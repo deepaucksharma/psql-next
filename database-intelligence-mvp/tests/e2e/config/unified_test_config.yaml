@@ -1,0 +1,349 @@
+# Unified E2E Test Configuration for Database Intelligence MVP
+# World-class testing framework configuration
+
+framework:
+  version: "2.0.0"
+  parallel_execution: true
+  max_concurrent_suites: 4
+  default_timeout: "30m"
+  continue_on_error: false
+  artifact_retention: "30d"
+
+environments:
+  local:
+    type: "docker_compose"
+    docker_compose: "docker-compose.e2e.yml"
+    databases:
+      postgresql:
+        host: "localhost"
+        port: 5432
+        database: "testdb"
+        username: "postgres"
+        password: "postgres"
+        ssl: false
+      mysql:
+        host: "localhost"
+        port: 3306
+        database: "testdb"
+        username: "root"
+        password: "root"
+        ssl: false
+    resources:
+      cpu: "4"
+      memory: "8Gi"
+      disk: "20Gi"
+    network:
+      collector_port: 4317
+      metrics_port: 8888
+      network_name: "e2e-test-network"
+    environment:
+      NEW_RELIC_LICENSE_KEY: "${TEST_NR_LICENSE_KEY}"
+      POSTGRES_HOST: "postgres"
+      MYSQL_HOST: "mysql"
+      LOG_LEVEL: "debug"
+
+  kubernetes:
+    type: "kubernetes"
+    kubernetes_config: "k8s-test-environment.yaml"
+    databases:
+      postgresql:
+        host: "postgres-service"
+        port: 5432
+        database: "testdb"
+        username: "postgres"
+        password: "postgres"
+        ssl: true
+      mysql:
+        host: "mysql-service"
+        port: 3306
+        database: "testdb"
+        username: "root"
+        password: "root"
+        ssl: true
+    resources:
+      cpu: "2"
+      memory: "4Gi"
+      disk: "10Gi"
+    network:
+      collector_port: 4317
+      metrics_port: 8888
+      network_name: "default"
+    environment:
+      NEW_RELIC_LICENSE_KEY: "${TEST_NR_LICENSE_KEY}"
+      KUBERNETES_MODE: "true"
+
+  ci:
+    type: "docker_compose"
+    docker_compose: "docker-compose.ci.yml"
+    databases:
+      postgresql:
+        host: "localhost"
+        port: 5432
+        database: "testdb"
+        username: "postgres"
+        password: "postgres"
+        ssl: false
+      mysql:
+        host: "localhost"
+        port: 3306
+        database: "testdb"
+        username: "root"
+        password: "root"
+        ssl: false
+    resources:
+      cpu: "2"
+      memory: "4Gi"
+      disk: "10Gi"
+    network:
+      collector_port: 4317
+      metrics_port: 8888
+      network_name: "ci-test-network"
+    environment:
+      CI_MODE: "true"
+      TEST_QUICK_MODE: "true"
+
+test_suites:
+  core_pipeline:
+    enabled: true
+    timeout: "10m"
+    tags: ["core", "pipeline", "essential"]
+    dependencies: []
+    parameters:
+      data_volume: "medium"
+      validation_level: "comprehensive"
+      include_performance: true
+      test_processors: ["adaptivesampler", "circuitbreaker", "planattributeextractor", "verification"]
+
+  database_integration:
+    enabled: true
+    timeout: "15m"
+    tags: ["database", "integration"]
+    dependencies: []
+    parameters:
+      test_postgresql: true
+      test_mysql: true
+      test_pg_querylens: true
+      data_volume: "large"
+      performance_benchmarks: true
+
+  security_compliance:
+    enabled: true
+    timeout: "20m"
+    tags: ["security", "compliance", "pii"]
+    dependencies: []
+    parameters:
+      pii_categories: ["email", "phone", "ssn", "credit_card", "api_key"]
+      compliance_standards: ["GDPR", "HIPAA", "PCI_DSS", "SOC2"]
+      vulnerability_scanning: true
+      penetration_testing: false
+
+  performance_testing:
+    enabled: true
+    timeout: "25m"
+    tags: ["performance", "load", "stress"]
+    dependencies: ["core_pipeline"]
+    parameters:
+      load_testing:
+        enabled: true
+        duration: "5m"
+        target_qps: 1000
+        concurrent_connections: 50
+      stress_testing:
+        enabled: true
+        duration: "3m"
+        max_qps: 5000
+        memory_pressure: true
+      endurance_testing:
+        enabled: false
+        duration: "24h"
+        steady_qps: 500
+
+  newrelic_integration:
+    enabled: true
+    timeout: "12m"
+    tags: ["newrelic", "integration", "dashboard"]
+    dependencies: ["core_pipeline"]
+    parameters:
+      dashboard_validation: true
+      alert_validation: true
+      nrql_testing: true
+      metric_accuracy: 0.95
+      data_freshness: "2m"
+
+  failure_scenarios:
+    enabled: true
+    timeout: "18m"
+    tags: ["failure", "recovery", "resilience"]
+    dependencies: ["core_pipeline"]
+    parameters:
+      network_partitions: true
+      disk_failures: true
+      memory_pressure: true
+      process_crashes: true
+      recovery_validation: true
+
+  deployment_testing:
+    enabled: false  # Enable for full deployment testing
+    timeout: "30m"
+    tags: ["deployment", "scaling", "operational"]
+    dependencies: []
+    parameters:
+      docker_deployment: true
+      kubernetes_deployment: true
+      scaling_tests: true
+      upgrade_tests: false
+      rollback_tests: false
+
+  regression_testing:
+    enabled: false  # Enable for regression validation
+    timeout: "45m"
+    tags: ["regression", "compatibility"]
+    dependencies: ["core_pipeline", "performance_testing"]
+    parameters:
+      baseline_comparison: true
+      performance_regression: true
+      api_compatibility: true
+      data_format_validation: true
+
+reporting:
+  formats: ["json", "html", "junit"]
+  output_dir: "test-results"
+  metrics_collection: true
+  dashboard_generation: true
+  notifications:
+    enabled: false
+    channels: ["webhook"]
+    webhook: "${TEST_WEBHOOK_URL}"
+    email: "${TEST_EMAIL_RECIPIENT}"
+
+security:
+  pii_detection:
+    enabled: true
+    categories: ["email", "phone", "ssn", "credit_card", "ip_address", "api_key"]
+    patterns:
+      - name: "email"
+        category: "email"
+        regex: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+        examples: ["user@example.com", "test.email+tag@domain.co.uk"]
+      - name: "ssn"
+        category: "ssn"
+        regex: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+        examples: ["123-45-6789", "987-65-4321"]
+      - name: "credit_card"
+        category: "credit_card"
+        regex: "\\b(?:\\d{4}[- ]){3}\\d{4}\\b"
+        examples: ["1234-5678-9012-3456", "4111 1111 1111 1111"]
+      - name: "api_key"
+        category: "api_key"
+        regex: "\\b[A-Za-z0-9]{32,}\\b"
+        examples: ["sk_test_1234567890abcdef", "pk_live_abcdef1234567890"]
+  compliance_standards: ["GDPR", "HIPAA", "PCI_DSS", "SOC2"]
+  vulnerability_scanning: true
+
+# Test data generation configuration
+data_generation:
+  workload_patterns:
+    light:
+      qps: 10
+      duration: "1m"
+      data_size: "small"
+    medium:
+      qps: 100
+      duration: "5m"
+      data_size: "medium"
+    heavy:
+      qps: 1000
+      duration: "10m"
+      data_size: "large"
+  
+  pii_data:
+    generate_realistic: true
+    obfuscation_levels: ["partial", "full"]
+    categories_per_dataset: 5
+    samples_per_category: 100
+
+  load_patterns:
+    steady:
+      type: "constant"
+      duration: "5m"
+    burst:
+      type: "spike"
+      duration: "30s"
+      multiplier: 10
+    ramp_up:
+      type: "gradual"
+      duration: "2m"
+      start_qps: 10
+      end_qps: 500
+
+# Validation configuration
+validation:
+  metrics:
+    tolerance: 0.05  # 5% tolerance for metric validation
+    required_metrics:
+      - "database.query.duration"
+      - "database.connections.active"
+      - "database.locks.waiting"
+      - "processor.errors.total"
+  
+  performance:
+    max_latency: "10ms"
+    min_throughput: "100qps"
+    max_memory_usage: "512MB"
+    max_cpu_usage: "200m"
+  
+  data_quality:
+    completeness_threshold: 0.95
+    accuracy_threshold: 0.99
+    freshness_threshold: "5m"
+
+# Alert and notification thresholds
+alerts:
+  test_failure:
+    severity: "critical"
+    channels: ["webhook", "email"]
+  
+  performance_degradation:
+    latency_threshold: "50ms"
+    throughput_threshold: "50qps"
+    severity: "warning"
+  
+  security_violation:
+    pii_exposure: "critical"
+    compliance_failure: "high"
+    vulnerability_found: "high"
+
+# Integration settings
+integrations:
+  new_relic:
+    api_endpoint: "https://api.newrelic.com/v2"
+    otlp_endpoint: "https://otlp.nr-data.net"
+    dashboard_api: "https://api.newrelic.com/graphql"
+    timeout: "30s"
+    retry_attempts: 3
+  
+  prometheus:
+    endpoint: "http://localhost:9090"
+    query_timeout: "30s"
+  
+  grafana:
+    endpoint: "http://localhost:3000"
+    dashboard_creation: true
+
+# CI/CD specific settings
+ci_cd:
+  quick_mode:
+    enabled_suites: ["core_pipeline"]
+    timeout: "10m"
+    parallel_execution: true
+  
+  full_mode:
+    enabled_suites: ["core_pipeline", "database_integration", "security_compliance", "performance_testing", "newrelic_integration"]
+    timeout: "60m"
+    parallel_execution: true
+  
+  nightly:
+    enabled_suites: ["all"]
+    timeout: "120m"
+    include_endurance: true
+    include_regression: true

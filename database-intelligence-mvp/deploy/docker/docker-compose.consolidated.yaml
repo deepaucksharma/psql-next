@@ -1,0 +1,287 @@
+# Consolidated Docker Compose Configuration
+# Replaces multiple Docker Compose files with profile-based deployment
+
+version: '3.8'
+
+networks:
+  db-intelligence:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  mysql_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  otel_storage:
+    driver: local
+
+services:
+  # Database Services
+  postgres:
+    image: postgres:15-alpine
+    profiles: ["dev", "prod", "ha", "monitoring", "test"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-testdb}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:---auth-host=scram-sha-256}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/database/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - db-intelligence
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-testdb}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY_LIMIT:-512M}
+          cpus: ${POSTGRES_CPU_LIMIT:-1.0}
+        reservations:
+          memory: ${POSTGRES_MEMORY_RESERVATION:-256M}
+          cpus: ${POSTGRES_CPU_RESERVATION:-0.5}
+
+  mysql:
+    image: mysql:8.0
+    profiles: ["dev", "prod", "ha", "monitoring", "test"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-mysql}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_USER: ${MYSQL_USER:-mysql}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mysql}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/database/mysql-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - db-intelligence
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-mysql}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${MYSQL_MEMORY_LIMIT:-512M}
+          cpus: ${MYSQL_CPU_LIMIT:-1.0}
+        reservations:
+          memory: ${MYSQL_MEMORY_RESERVATION:-256M}
+          cpus: ${MYSQL_CPU_RESERVATION:-0.5}
+
+  # OpenTelemetry Collector Services
+  collector-primary:
+    image: ${COLLECTOR_IMAGE:-database-intelligence-collector:latest}
+    profiles: ["dev", "prod", "ha"]
+    environment:
+      - OTEL_LOG_LEVEL=${OTEL_LOG_LEVEL:-info}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-testdb}
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=${MYSQL_USER:-mysql}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-mysql}
+      - MYSQL_DB=${MYSQL_DATABASE:-testdb}
+      - SERVICE_NAME=${SERVICE_NAME:-database-intelligence-collector}
+      - SERVICE_VERSION=${SERVICE_VERSION:-2.0.0}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
+    ports:
+      - "${OTLP_GRPC_PORT:-4317}:4317"
+      - "${OTLP_HTTP_PORT:-4318}:4318"
+      - "${PROMETHEUS_PORT:-8889}:8889"
+      - "${HEALTH_CHECK_PORT:-13133}:13133"
+      - "${ZPAGES_PORT:-55679}:55679"
+      - "${PPROF_PORT:-1777}:1777"
+    volumes:
+      - ./config/environments/${DEPLOYMENT_ENVIRONMENT:-development}.yaml:/etc/otelcol/config.yaml:ro
+      - otel_storage:/var/lib/otelcol/storage
+    networks:
+      - db-intelligence
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${COLLECTOR_MEMORY_LIMIT:-1G}
+          cpus: ${COLLECTOR_CPU_LIMIT:-2.0}
+        reservations:
+          memory: ${COLLECTOR_MEMORY_RESERVATION:-512M}
+          cpus: ${COLLECTOR_CPU_RESERVATION:-1.0}
+
+  collector-secondary:
+    image: ${COLLECTOR_IMAGE:-database-intelligence-collector:latest}
+    profiles: ["ha"]
+    environment:
+      - OTEL_LOG_LEVEL=${OTEL_LOG_LEVEL:-info}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-testdb}
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=${MYSQL_USER:-mysql}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-mysql}
+      - MYSQL_DB=${MYSQL_DATABASE:-testdb}
+      - SERVICE_NAME=${SERVICE_NAME:-database-intelligence-collector-secondary}
+      - SERVICE_VERSION=${SERVICE_VERSION:-2.0.0}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
+    ports:
+      - "${OTLP_GRPC_PORT_SECONDARY:-4327}:4317"
+      - "${OTLP_HTTP_PORT_SECONDARY:-4328}:4318"
+      - "${PROMETHEUS_PORT_SECONDARY:-8899}:8889"
+      - "${HEALTH_CHECK_PORT_SECONDARY:-13143}:13133"
+    volumes:
+      - ./config/environments/${DEPLOYMENT_ENVIRONMENT:-development}.yaml:/etc/otelcol/config.yaml:ro
+      - otel_storage:/var/lib/otelcol/storage
+    networks:
+      - db-intelligence
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Load Balancer for HA
+  nginx:
+    image: nginx:alpine
+    profiles: ["ha"]
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/docker/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - db-intelligence
+    depends_on:
+      - collector-primary
+      - collector-secondary
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Monitoring Services
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["dev", "monitoring"]
+    ports:
+      - "${PROMETHEUS_UI_PORT:-9090}:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    networks:
+      - db-intelligence
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles: ["dev", "monitoring"]
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=${GRAFANA_PLUGINS:-}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./dashboards:/etc/grafana/provisioning/dashboards:ro
+    networks:
+      - db-intelligence
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Test and Load Generation Services
+  load-generator:
+    image: postgres:15-alpine
+    profiles: ["test", "load-test"]
+    environment:
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=${POSTGRES_USER:-postgres}
+      - PGPASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - PGDATABASE=${POSTGRES_DB:-testdb}
+      - LOAD_DURATION=${LOAD_DURATION:-300}
+      - LOAD_RATE=${LOAD_RATE:-10}
+    volumes:
+      - ./scripts/testing/generate-db-load.sh:/scripts/generate-load.sh:ro
+    networks:
+      - db-intelligence
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["/scripts/generate-load.sh"]
+
+  test-runner:
+    image: ${COLLECTOR_IMAGE:-database-intelligence-collector:latest}
+    profiles: ["test"]
+    environment:
+      - TEST_CONFIG_PATH=/etc/test-config
+      - POSTGRES_HOST=postgres
+      - MYSQL_HOST=mysql
+      - COLLECTOR_HOST=collector-primary
+    volumes:
+      - ./tests/configs:/etc/test-config:ro
+      - ./tests/e2e:/tests:ro
+    networks:
+      - db-intelligence
+    depends_on:
+      collector-primary:
+        condition: service_healthy
+    command: ["/tests/run_working_e2e_tests.sh"]

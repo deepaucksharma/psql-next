@@ -31,6 +31,9 @@ type queryCorrelator struct {
 	// Metrics
 	correlationsCreated int64
 	metricsEnriched    int64
+
+	// Shutdown management
+	shutdownChan chan struct{}
 }
 
 type queryInfo struct {
@@ -75,6 +78,7 @@ func (p *queryCorrelator) Start(ctx context.Context, host component.Host) error 
 // Shutdown stops the processor
 func (p *queryCorrelator) Shutdown(context.Context) error {
 	p.logger.Info("Shutting down query correlator processor")
+	close(p.shutdownChan)
 	return nil
 }
 
@@ -471,8 +475,13 @@ func (p *queryCorrelator) cleanupLoop() {
 	ticker := time.NewTicker(p.config.CleanupInterval)
 	defer ticker.Stop()
 	
-	for range ticker.C {
-		p.cleanupOldData()
+	for {
+		select {
+		case <-ticker.C:
+			p.cleanupOldData()
+		case <-p.shutdownChan:
+			return
+		}
 	}
 }
 

@@ -1,150 +1,290 @@
-# Database Intelligence Dashboard Scripts
+# Scripts Directory - Database Intelligence MVP
 
-This directory contains scripts for creating and managing the Database Intelligence Dashboard in New Relic.
+Organized collection of utility scripts for building, deploying, monitoring, and maintaining the Database Intelligence MVP.
 
-## Scripts Overview
+## Directory Structure
 
-### 1. `deploy-database-dashboard.sh`
-Main deployment script that orchestrates the entire dashboard creation process.
-- Verifies environment configuration
-- Checks metrics collection
-- Creates the dashboard
-- Provides deployment summary
-
-**Usage:**
-```bash
-./deploy-database-dashboard.sh
+```
+scripts/
+├── README.md                    # This file
+├── init-env.sh                  # Environment setup (core)
+├── preflight-check.sh          # Pre-deployment checks (core)
+├── compare-modes.sh             # Interactive mode comparison (core)
+├── lib/
+│   └── common.sh               # Shared utilities library
+├── build/
+│   ├── build-custom-collector.sh  # Custom collector builder
+│   └── generate-config.sh         # Dynamic config generator
+├── deployment/
+│   ├── docker-start.sh            # Docker environment startup
+│   ├── deploy-database-dashboard.sh # Dashboard deployment
+│   └── generate-mtls-certs.sh     # Certificate generation
+├── monitoring/
+│   ├── check-metrics.sh           # New Relic metrics checker
+│   ├── verify-metrics.sh          # Metrics verification
+│   ├── verify-newrelic-integration.sh # NR integration check
+│   ├── verify-collected-metrics.js    # JS metrics verification
+│   ├── create-database-dashboard.js   # Dashboard creation
+│   └── generate-architecture-diagram.py # Visual diagrams
+├── maintenance/
+│   ├── fix-configs.sh             # Unified config fixer (NEW)
+│   ├── cleanup-configs.sh         # Configuration cleanup
+│   ├── cleanup-scripts.sh         # Script cleanup
+│   └── organize-documentation.sh  # Documentation organizer
+├── testing/
+│   ├── validate-all.sh            # Comprehensive validation
+│   ├── validate-e2e.sh           # End-to-end testing
+│   ├── validate-e2e-setup.sh     # E2E setup validation
+│   ├── validate-env.sh           # Environment validation
+│   ├── validate-project-consistency.sh # Project validation
+│   └── generate-db-load.sh       # Test data generator
+├── database/
+│   ├── mysql-init.sql            # MySQL initialization
+│   └── postgres-init.sql         # PostgreSQL initialization
+└── archive/
+    ├── sql-duplicates-20250703/   # Archived duplicate SQL files
+    └── config-fix-scripts-20250703/ # Archived old fix scripts
 ```
 
-### 2. `verify-collected-metrics.js`
-Verification script that checks what metrics are actually being collected in New Relic.
-- Queries for PostgreSQL metrics
-- Queries for MySQL metrics
-- Checks for query log data
-- Provides recommendations based on findings
+## Core Scripts (Root Level)
 
-**Usage:**
+### `init-env.sh`
+Interactive environment setup with validation.
 ```bash
-node verify-collected-metrics.js
+./init-env.sh
 ```
 
-### 3. `create-database-dashboard.js`
-Dashboard creation script that uses NerdGraph API to create the dashboard.
-- Creates a multi-page dashboard
-- Includes widgets for both PostgreSQL and MySQL
-- Adapts MySQL OHI dashboard structure for OTEL metrics
-- Saves dashboard info to `dashboard-info.json`
-
-**Usage:**
+### `preflight-check.sh`
+Pre-deployment system validation.
 ```bash
-node create-database-dashboard.js
+./preflight-check.sh
 ```
 
-## Prerequisites
+### `compare-modes.sh`
+Interactive mode comparison tool.
+```bash
+./compare-modes.sh
+```
 
-1. **Environment Variables** (in `.env` file):
-   ```
-   NEW_RELIC_USER_KEY=your_user_api_key
-   NEW_RELIC_ACCOUNT_ID=your_account_id
-   ```
+## Build Scripts
 
-2. **Node.js**: Required for running JavaScript scripts
+### `build/build-custom-collector.sh`
+Builds OpenTelemetry collector with custom processors.
+```bash
+./build/build-custom-collector.sh
+```
 
-3. **Active Data Collection**: OTEL collector should be running and sending data to New Relic
+### `build/generate-config.sh`
+Generates dynamic configurations based on environment.
+```bash
+./build/generate-config.sh [template] [output]
+```
 
-## Dashboard Features
+## Deployment Scripts
 
-The created dashboard includes:
+### `deployment/docker-start.sh`
+Starts complete Docker Compose environment.
+```bash
+./deployment/docker-start.sh
+```
 
-### Page 1: Bird's-Eye View
-- Database count and overview
-- Query execution time trends
-- Active connections monitoring
-- Disk usage by database
-- Slowest queries table
-- Transaction rates (commits/rollbacks)
-- Buffer pool usage
-- Operations summary
+### `deployment/deploy-database-dashboard.sh`
+Deploys New Relic dashboard using NerdGraph API.
+```bash
+./deployment/deploy-database-dashboard.sh
+```
 
-### Page 2: Query Performance
-- Detailed query log analysis
-- Query execution trends over time
-- Average duration by database
-- Query plan information (when available)
+### `deployment/generate-mtls-certs.sh`
+Generates mTLS certificates for secure communication.
+```bash
+./deployment/generate-mtls-certs.sh
+```
 
-### Page 3: Database Resources
-- I/O operations monitoring
-- Handler operations (MySQL)
-- Background writer stats (PostgreSQL)
-- Temporary resource usage
-- Connection and thread details
+## Monitoring Scripts
 
-## Metric Sources
+### `monitoring/check-metrics.sh`
+Queries New Relic for collected metrics.
+```bash
+./monitoring/check-metrics.sh
+```
 
-The dashboard uses metrics from:
+### `monitoring/verify-metrics.sh`
+Verifies metrics collection and forwarding.
+```bash
+./monitoring/verify-metrics.sh
+```
 
-1. **PostgreSQL Receiver** (`postgresql.*` metrics)
-   - Connections, commits, rollbacks
-   - Disk usage, block I/O
-   - Background writer statistics
+### `monitoring/verify-newrelic-integration.sh`
+Comprehensive New Relic integration verification.
+```bash
+./monitoring/verify-newrelic-integration.sh
+```
 
-2. **MySQL Receiver** (`mysql.*` metrics)
-   - Threads, uptime
-   - Buffer pool metrics
-   - Handler operations
-   - Temporary resources
+### `monitoring/create-database-dashboard.js`
+Creates New Relic dashboard via NerdGraph API.
+```bash
+node monitoring/create-database-dashboard.js
+```
 
-3. **SQL Query Receiver** (Log data)
-   - Query text and IDs
-   - Execution times
-   - Execution counts
-   - Plan metadata
+### `monitoring/generate-architecture-diagram.py`
+Generates visual architecture diagrams.
+```bash
+python monitoring/generate-architecture-diagram.py
+```
 
-## Customization
+## Maintenance Scripts
 
-To customize the dashboard, edit `create-database-dashboard.js`:
+### `maintenance/fix-configs.sh` (NEW - Unified)
+Unified configuration fix script with multiple modes.
+```bash
+# Quick fixes (env vars, memory)
+./maintenance/fix-configs.sh quick
 
-1. **Modify Queries**: Update NRQL queries in widget configurations
-2. **Add Widgets**: Add new widget definitions to pages
-3. **Change Layout**: Adjust column, row, width, and height values
-4. **Add Variables**: Include dashboard variables for filtering
+# Critical fixes (default)
+./maintenance/fix-configs.sh critical
 
-## Troubleshooting
+# Comprehensive fixes  
+./maintenance/fix-configs.sh all
+```
 
-### No Data in Dashboard
-1. Run `verify-collected-metrics.js` to check data availability
-2. Ensure OTEL collector is running
-3. Verify database connections are working
-4. Check New Relic for any ingestion errors
+### `maintenance/cleanup-configs.sh`
+Archives unused configuration files.
+```bash
+./maintenance/cleanup-configs.sh [--dry-run]
+```
 
-### API Errors
-- **401**: Invalid API key
-- **403**: Insufficient permissions
-- **Account mismatch**: Wrong account ID
+### `maintenance/cleanup-scripts.sh`
+Archives unused scripts.
+```bash
+./maintenance/cleanup-scripts.sh [--dry-run]
+```
 
-### Missing Specific Metrics
-- PostgreSQL: Enable `pg_stat_statements`
-- MySQL: Enable Performance Schema
-- Both: Check user permissions
+## Testing Scripts
 
-## Output
+### `testing/validate-all.sh`
+Comprehensive validation framework.
+```bash
+./testing/validate-all.sh [mode]
+```
 
-After successful dashboard creation:
-- Console output with dashboard GUID and URL
-- `dashboard-info.json` file containing:
-  ```json
-  {
-    "guid": "dashboard-guid",
-    "name": "Database Intelligence - OTEL Metrics",
-    "accountId": "account-id",
-    "createdAt": "timestamp",
-    "url": "https://one.newrelic.com/dashboards/dashboard-guid"
-  }
-  ```
+### `testing/validate-e2e.sh`
+End-to-end pipeline testing.
+```bash
+./testing/validate-e2e.sh
+```
+
+### `testing/validate-env.sh`
+Environment and .env file validation.
+```bash
+./testing/validate-env.sh
+```
+
+### `testing/generate-db-load.sh`
+Generates test data and queries.
+```bash
+./testing/generate-db-load.sh
+```
+
+## Database Scripts
+
+### `database/mysql-init.sql`
+Comprehensive MySQL initialization with monitoring user, sample data, and procedures.
+
+### `database/postgres-init.sql`
+Comprehensive PostgreSQL initialization with extensions, monitoring user, and sample data.
+
+## Common Library
+
+### `lib/common.sh`
+Shared utility functions used by all scripts:
+- Logging functions (`log_info`, `log_error`, `log_success`)
+- Environment loading
+- Database testing utilities
+- Validation functions
+
+## Usage Patterns
+
+### Quick Start
+```bash
+# 1. Setup environment
+./init-env.sh
+
+# 2. Run preflight checks
+./preflight-check.sh
+
+# 3. Start environment
+./deployment/docker-start.sh
+
+# 4. Validate setup
+./testing/validate-all.sh
+```
+
+### Maintenance Workflow
+```bash
+# Fix configurations
+./maintenance/fix-configs.sh critical
+
+# Clean up unused files
+./maintenance/cleanup-configs.sh --dry-run
+./maintenance/cleanup-scripts.sh --dry-run
+
+# Validate changes
+./testing/validate-project-consistency.sh
+```
+
+### Monitoring Workflow
+```bash
+# Check metrics collection
+./monitoring/verify-metrics.sh
+
+# Verify New Relic integration
+./monitoring/verify-newrelic-integration.sh
+
+# Create dashboard
+./monitoring/deploy-database-dashboard.sh
+```
+
+## Dependencies
+
+### Required Tools
+- **bash** (4.0+)
+- **Docker** and **docker-compose**
+- **Go** (1.21+)
+- **curl** and **jq**
+- **yq** (recommended)
+
+### Optional Tools
+- **Node.js** (for JavaScript scripts)
+- **Python** (for diagram generation)
+- **OpenSSL** (for certificate generation)
+
+## Recent Changes
+
+### Consolidated (2025-07-03)
+- **Unified fix-configs.sh**: Combined 3 separate fix scripts into one with modes
+- **Organized structure**: Moved scripts into logical subdirectories
+- **Archived duplicates**: Removed redundant SQL initialization scripts
+- **Enhanced documentation**: Comprehensive usage examples
+
+### Quality Improvements
+- All scripts use shared `lib/common.sh` utilities
+- Consistent error handling and logging
+- Comprehensive validation and testing
+- Backup creation for destructive operations
+
+## Contributing
+
+When adding new scripts:
+1. Place in appropriate subdirectory
+2. Use `lib/common.sh` for shared functionality
+3. Follow existing naming conventions
+4. Include usage documentation
+5. Add validation and error handling
 
 ## Support
 
-For detailed documentation, see:
-- [Dashboard Guide](../docs/DASHBOARD_GUIDE.md)
-- [OpenTelemetry PostgreSQL Receiver](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/postgresqlreceiver)
-- [OpenTelemetry MySQL Receiver](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/mysqlreceiver)
+For script issues:
+1. Check script documentation (this file)
+2. Run with debug: `bash -x ./script-name.sh`
+3. Verify dependencies and permissions
+4. Check logs in script output

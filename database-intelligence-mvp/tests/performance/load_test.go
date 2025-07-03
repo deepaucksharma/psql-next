@@ -348,7 +348,7 @@ func createTestPipeline(t *testing.T) *testPipeline {
 	samplerCfg := samplerFactory.CreateDefaultConfig().(*adaptivesampler.Config)
 	samplerCfg.DefaultSampleRate = 0.5
 	samplerCfg.InMemoryOnly = true
-	sampler, err := samplerFactory.CreateLogsProcessor(context.Background(), samplerSettings, samplerCfg, consumertest.NewNop())
+	sampler, err := samplerFactory.CreateLogs(context.Background(), samplerSettings, samplerCfg, consumertest.NewNop())
 	require.NoError(t, err)
 	
 	// Create circuit breaker
@@ -356,7 +356,7 @@ func createTestPipeline(t *testing.T) *testPipeline {
 	breakerCfg := breakerFactory.CreateDefaultConfig().(*circuitbreaker.Config)
 	breakerCfg.FailureThreshold = 10
 	breakerCfg.Timeout = 30 * time.Second
-	breaker, err := breakerFactory.CreateMetricsProcessor(context.Background(), breakerSettings, breakerCfg, consumertest.NewNop())
+	breaker, err := breakerFactory.CreateMetrics(context.Background(), breakerSettings, breakerCfg, consumertest.NewNop())
 	require.NoError(t, err)
 	
 	// Create plan extractor
@@ -364,14 +364,14 @@ func createTestPipeline(t *testing.T) *testPipeline {
 	extractorCfg := extractorFactory.CreateDefaultConfig().(*planattributeextractor.Config)
 	extractorCfg.SafeMode = true
 	extractorCfg.ErrorMode = "ignore"
-	extractor, err := extractorFactory.CreateMetricsProcessor(context.Background(), extractorSettings, extractorCfg, consumertest.NewNop())
+	extractor, err := extractorFactory.CreateMetrics(context.Background(), extractorSettings, extractorCfg, consumertest.NewNop())
 	require.NoError(t, err)
 	
 	// Create verification processor
 	verifierFactory := verification.NewFactory()
 	verifierCfg := verifierFactory.CreateDefaultConfig().(*verification.Config)
 	verifierCfg.PIIDetection.Enabled = false // Disable for performance tests
-	verifier, err := verifierFactory.CreateMetricsProcessor(context.Background(), verifierSettings, verifierCfg, consumertest.NewNop())
+	verifier, err := verifierFactory.CreateMetrics(context.Background(), verifierSettings, verifierCfg, consumertest.NewNop())
 	require.NoError(t, err)
 	
 	return &testPipeline{

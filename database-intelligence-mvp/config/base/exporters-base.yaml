@@ -1,0 +1,101 @@
+# Base Exporters Configuration
+# Standard exporter patterns for telemetry output
+
+exporters:
+  # OTLP/HTTP exporter to New Relic
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: ${env:OTLP_TIMEOUT:-30s}
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:OTLP_RETRY_INITIAL_INTERVAL:-5s}
+      max_interval: ${env:OTLP_RETRY_MAX_INTERVAL:-30s}
+      max_elapsed_time: ${env:OTLP_RETRY_MAX_ELAPSED_TIME:-300s}
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:OTLP_QUEUE_CONSUMERS:-10}
+      queue_size: ${env:OTLP_QUEUE_SIZE:-5000}
+
+  # OTLP/gRPC exporter for high-throughput scenarios
+  otlp/grpc:
+    endpoint: ${env:OTLP_GRPC_ENDPOINT:-https://otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: ${env:OTLP_GRPC_TIMEOUT:-30s}
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:OTLP_GRPC_RETRY_INITIAL_INTERVAL:-5s}
+      max_interval: ${env:OTLP_GRPC_RETRY_MAX_INTERVAL:-30s}
+      max_elapsed_time: ${env:OTLP_GRPC_RETRY_MAX_ELAPSED_TIME:-300s}
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: ${env:PROMETHEUS_ENDPOINT:-0.0.0.0:8889}
+    namespace: ${env:PROMETHEUS_NAMESPACE:-database_intelligence}
+    const_labels:
+      service: ${env:SERVICE_NAME:-database-intelligence-collector}
+      version: ${env:SERVICE_VERSION:-2.0.0}
+      environment: ${env:DEPLOYMENT_ENVIRONMENT:-development}
+    metric_expiration: ${env:PROMETHEUS_METRIC_EXPIRATION:-10m}
+    enable_open_metrics: ${env:PROMETHEUS_ENABLE_OPEN_METRICS:-false}
+
+  # Logging exporter for debugging
+  logging:
+    loglevel: ${env:LOGGING_EXPORTER_LEVEL:-info}
+    sampling_initial: ${env:LOGGING_SAMPLING_INITIAL:-2}
+    sampling_thereafter: ${env:LOGGING_SAMPLING_THEREAFTER:-500}
+
+  # Debug exporter for development
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:-normal}
+    sampling:
+      initial: ${env:DEBUG_SAMPLING_INITIAL:-5}
+      thereafter: ${env:DEBUG_SAMPLING_THEREAFTER:-200}
+
+  # File exporter for data archival
+  file:
+    path: ${env:FILE_EXPORTER_PATH:-/tmp/otel-data.json}
+    rotation:
+      max_megabytes: ${env:FILE_ROTATION_MAX_MB:-100}
+      max_days: ${env:FILE_ROTATION_MAX_DAYS:-7}
+      max_backups: ${env:FILE_ROTATION_MAX_BACKUPS:-3}
+    format: ${env:FILE_EXPORTER_FORMAT:-json}
+
+  # OTLP/HTTP for forwarding to gateway collectors
+  otlphttp/gateway:
+    endpoint: ${env:GATEWAY_ENDPOINT:-http://gateway-collector:4318}
+    headers:
+      authorization: "Bearer ${env:GATEWAY_TOKEN}"
+    compression: gzip
+    timeout: ${env:GATEWAY_TIMEOUT:-10s}
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:GATEWAY_RETRY_INITIAL_INTERVAL:-1s}
+      max_interval: ${env:GATEWAY_RETRY_MAX_INTERVAL:-5s}
+      max_elapsed_time: ${env:GATEWAY_RETRY_MAX_ELAPSED_TIME:-30s}
+
+  # Jaeger exporter for distributed tracing
+  jaeger:
+    endpoint: ${env:JAEGER_ENDPOINT:-http://localhost:14268/api/traces}
+    timeout: ${env:JAEGER_TIMEOUT:-5s}
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:JAEGER_RETRY_INITIAL_INTERVAL:-5s}
+      max_interval: ${env:JAEGER_RETRY_MAX_INTERVAL:-30s}
+      max_elapsed_time: ${env:JAEGER_RETRY_MAX_ELAPSED_TIME:-120s}
+
+  # Kafka exporter for streaming scenarios
+  kafka:
+    brokers: 
+      - ${env:KAFKA_BROKER_1:-localhost:9092}
+    topic: ${env:KAFKA_TOPIC:-otel-database-metrics}
+    encoding: ${env:KAFKA_ENCODING:-otlp_proto}
+    partition_key: ${env:KAFKA_PARTITION_KEY:-service.name}
+    timeout: ${env:KAFKA_TIMEOUT:-5s}
+    retry:
+      max_retries: ${env:KAFKA_MAX_RETRIES:-3}
+      backoff: ${env:KAFKA_RETRY_BACKOFF:-100ms}

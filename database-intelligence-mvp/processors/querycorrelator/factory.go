@@ -66,6 +66,7 @@ func createMetricsProcessor(
 		queryIndex:    make(map[string]*queryInfo),
 		tableIndex:    make(map[string]*tableInfo),
 		databaseIndex: make(map[string]*databaseInfo),
+		shutdownChan:  make(chan struct{}),
 	}
 
 	return correlator, nil

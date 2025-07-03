@@ -70,7 +70,7 @@ type HashGenerationConfig struct {
 	// Output specifies the attribute name for the generated hash
 	Output string `mapstructure:"output"`
 
-	// Algorithm specifies the hash algorithm (sha256, sha1, md5)
+	// Algorithm specifies the hash algorithm (only sha256 supported for security)
 	Algorithm string `mapstructure:"algorithm"`
 }
 
@@ -104,13 +104,9 @@ func (cfg *Config) Validate() error {
 	}
 
 	if cfg.HashConfig.Algorithm != "" {
-		validAlgorithms := map[string]bool{
-			"sha256": true,
-			"sha1":   true,
-			"md5":    true,
-		}
-		if !validAlgorithms[cfg.HashConfig.Algorithm] {
-			return fmt.Errorf("invalid hash algorithm: %s", cfg.HashConfig.Algorithm)
+		// Only SHA-256 is supported for security reasons
+		if cfg.HashConfig.Algorithm != "sha256" {
+			return fmt.Errorf("unsupported hash algorithm: %s (only sha256 is supported for security)", cfg.HashConfig.Algorithm)
 		}
 	}
 

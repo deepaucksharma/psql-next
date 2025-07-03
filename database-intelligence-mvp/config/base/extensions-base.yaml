@@ -1,0 +1,91 @@
+# Base Extensions Configuration  
+# Common extensions for health checks, monitoring, and debugging
+
+extensions:
+  # Health check endpoint
+  health_check:
+    endpoint: ${env:HEALTH_CHECK_ENDPOINT:-0.0.0.0:13133}
+    path: ${env:HEALTH_CHECK_PATH:-/}
+    check_collector_pipeline:
+      enabled: ${env:HEALTH_CHECK_PIPELINE_ENABLED:-true}
+      interval: ${env:HEALTH_CHECK_INTERVAL:-5m}
+      exporter_failure_threshold: ${env:HEALTH_CHECK_EXPORTER_FAILURE_THRESHOLD:-5}
+
+  # Performance profiling (pprof)
+  pprof:
+    endpoint: ${env:PPROF_ENDPOINT:-0.0.0.0:1777}
+    block_profile_fraction: ${env:PPROF_BLOCK_PROFILE_FRACTION:-0}
+    mutex_profile_fraction: ${env:PPROF_MUTEX_PROFILE_FRACTION:-0}
+    save_to_file: ${env:PPROF_SAVE_TO_FILE:-}
+
+  # zPages for debugging
+  zpages:
+    endpoint: ${env:ZPAGES_ENDPOINT:-0.0.0.0:55679}
+
+  # Memory ballast for GC optimization
+  memory_ballast:
+    size_mib: ${env:MEMORY_BALLAST_SIZE_MIB:-64}
+
+  # File storage extension for persistent state
+  filestorage:
+    directory: ${env:FILE_STORAGE_DIRECTORY:-/tmp/otel-storage}
+    timeout: ${env:FILE_STORAGE_TIMEOUT:-1s}
+    compaction:
+      directory: ${env:FILE_STORAGE_COMPACTION_DIRECTORY:-/tmp/otel-storage-compaction}
+      on_start: ${env:FILE_STORAGE_COMPACTION_ON_START:-false}
+      on_rebound: ${env:FILE_STORAGE_COMPACTION_ON_REBOUND:-true}
+      rebound_needed_threshold_mib: ${env:FILE_STORAGE_REBOUND_THRESHOLD_MIB:-100}
+      rebound_trigger_threshold_mib: ${env:FILE_STORAGE_REBOUND_TRIGGER_MIB:-150}
+
+  # Basic authenticator for secured endpoints
+  basicauth/server:
+    htpasswd:
+      file: ${env:BASIC_AUTH_HTPASSWD_FILE:-/etc/otelcol/auth/.htpasswd}
+      inline: |
+        ${env:BASIC_AUTH_INLINE}
+
+  # Bearer token authenticator
+  bearertokenauth:
+    token: ${env:BEARER_TOKEN}
+    filename: ${env:BEARER_TOKEN_FILE}
+
+  # Headers setter for outbound requests
+  headers_setter:
+    headers:
+      - action: ${env:HEADERS_ACTION:-upsert}
+        key: ${env:HEADERS_KEY:-X-Custom-Header}
+        value: ${env:HEADERS_VALUE:-database-intelligence}
+
+  # OAuth2 client credentials extension
+  oauth2client:
+    client_id: ${env:OAUTH2_CLIENT_ID}
+    client_secret: ${env:OAUTH2_CLIENT_SECRET}
+    token_url: ${env:OAUTH2_TOKEN_URL}
+    scopes: 
+      - ${env:OAUTH2_SCOPE:-read}
+    endpoint_params:
+      audience: ${env:OAUTH2_AUDIENCE}
+
+  # HTTP forwarder extension
+  http_forwarder:
+    ingress:
+      endpoint: ${env:HTTP_FORWARDER_INGRESS_ENDPOINT:-0.0.0.0:6060}
+    egress:
+      endpoint: ${env:HTTP_FORWARDER_EGRESS_ENDPOINT:-http://backend:8080}
+      timeout: ${env:HTTP_FORWARDER_EGRESS_TIMEOUT:-5s}
+
+  # Docker observer for container discovery
+  docker_observer:
+    endpoint: ${env:DOCKER_OBSERVER_ENDPOINT:-unix:///var/run/docker.sock}
+    timeout: ${env:DOCKER_OBSERVER_TIMEOUT:-5s}
+    excluded_images:
+      - ${env:DOCKER_OBSERVER_EXCLUDED_IMAGE_1:-otel/opentelemetry-collector*}
+    use_hostname_if_present: ${env:DOCKER_OBSERVER_USE_HOSTNAME:-false}
+    use_host_bindings: ${env:DOCKER_OBSERVER_USE_HOST_BINDINGS:-false}
+
+  # Kubernetes observer for pod discovery
+  k8s_observer:
+    auth_type: ${env:K8S_OBSERVER_AUTH_TYPE:-serviceAccount}
+    node: ${env:K8S_OBSERVER_NODE:-${env:K8S_NODE_NAME}}
+    observe_pods: ${env:K8S_OBSERVER_OBSERVE_PODS:-true}
+    observe_nodes: ${env:K8S_OBSERVER_OBSERVE_NODES:-false}

@@ -15,8 +15,6 @@ type Config struct {
 	HighCostThreshold float64 `mapstructure:"high_cost_threshold"`
 	// MinSampleRate is the minimum sample rate for any query.
 	MinSampleRate float64 `mapstructure:"min_sample_rate"`
-	// MaxSamplesPerSecond is the maximum number of samples to be collected per second.
-	MaxSamplesPerSecond float64 `mapstructure:"max_samples_per_second"`
 	// InMemoryOnly forces in-memory-only operation (no persistence)
 	InMemoryOnly bool `mapstructure:"in_memory_only"`
 

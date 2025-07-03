@@ -1,0 +1,234 @@
+# Production Environment Configuration
+# Optimized settings for production deployment
+
+# Production service configuration
+service:
+  extensions: [health_check, pprof, memory_ballast, filestorage]
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql, sqlquery/postgresql, sqlquery/mysql]
+      processors: [
+        memory_limiter, 
+        adaptivesampler, 
+        circuitbreaker,
+        planattributeextractor, 
+        verification, 
+        costcontrol,
+        nrerrormonitor,
+        querycorrelator,
+        resource, 
+        attributes, 
+        batch
+      ]
+      exporters: [otlphttp/newrelic, prometheus]
+    traces:
+      receivers: [otlp, enhancedsql/postgresql]
+      processors: [
+        memory_limiter,
+        adaptivesampler,
+        circuitbreaker, 
+        planattributeextractor,
+        verification,
+        querycorrelator,
+        resource,
+        attributes,
+        batch
+      ]
+      exporters: [otlphttp/newrelic]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, attributes, verification, batch]
+      exporters: [otlphttp/newrelic]
+
+  telemetry:
+    logs:
+      level: ${env:OTEL_LOG_LEVEL:-info}
+      encoding: json
+      disable_caller: true
+      disable_stacktrace: true
+    metrics:
+      level: ${env:OTEL_METRICS_LEVEL:-normal}
+      address: 0.0.0.0:8888
+    resource:
+      service.name: ${env:SERVICE_NAME:-database-intelligence-collector}
+      service.version: ${env:SERVICE_VERSION:-2.0.0}
+      deployment.environment: production
+
+# Production-optimized processor settings
+processors:
+  # Production memory limits
+  memory_limiter:
+    limit_mib: 1024
+    spike_limit_mib: 256
+    check_interval: 1s
+
+  # Conservative sampling for production
+  adaptivesampler:
+    sampling_percentage: 10
+    max_traces_per_second: 100
+    sampling_rules:
+      - service_name_pattern: "database-.*"
+        span_name_pattern: "SELECT.*"
+        sampling_percentage: 5
+      - service_name_pattern: "database-.*"  
+        span_name_pattern: "(INSERT|UPDATE|DELETE).*"
+        sampling_percentage: 25
+      - attribute_key: "db.sql.table"
+        attribute_value_pattern: ".*_audit|.*_log"
+        sampling_percentage: 1
+
+  # Active circuit breaker for production
+  circuitbreaker:
+    max_failures: 5
+    failure_threshold_percentage: 50
+    timeout: 30s
+    recovery_timeout: 60s
+    per_database_circuit: true
+
+  # Production plan extraction with anonymization
+  planattributeextractor:
+    enable_anonymization: true
+    enable_plan_analysis: true
+    max_query_length: 2048
+    plan_cache:
+      enabled: true
+      max_size: 10000
+      ttl: 3600s
+
+  # Active PII detection and validation
+  verification:
+    enable_pii_detection: true
+    enable_data_validation: true
+    sample_rate: 0.1
+    max_field_length: 500
+
+  # Production cost controls
+  costcontrol:
+    daily_budget_usd: 100
+    monthly_budget_usd: 3000
+    alert_threshold_percentage: 80
+    enforcement_enabled: true
+
+  # New Relic monitoring enabled
+  nrerrormonitor:
+    enable_validation: true
+    validation_interval: 300s
+    error_threshold: 10
+
+  # Enhanced correlation for production
+  querycorrelator:
+    correlation_window: 30s
+    max_correlations: 1000
+    enable_trace_correlation: true
+
+  # Production resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:SERVICE_NAME:-database-intelligence-collector}
+        action: upsert
+      - key: service.version
+        value: ${env:SERVICE_VERSION:-2.0.0}
+        action: upsert
+      - key: deployment.environment
+        value: production
+        action: upsert
+      - key: service.instance.id
+        from_attribute: host.name
+        action: upsert
+      - key: k8s.cluster.name
+        value: ${env:K8S_CLUSTER_NAME}
+        action: upsert
+      - key: k8s.namespace.name
+        value: ${env:K8S_NAMESPACE_NAME:-db-intelligence}
+        action: upsert
+
+  # Production batch settings
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+# Production exporter settings
+exporters:
+  # Primary New Relic export
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+
+  # Production Prometheus export
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: database_intelligence
+    const_labels:
+      service: database-intelligence-collector
+      version: ${env:SERVICE_VERSION:-2.0.0}
+      environment: production
+      cluster: ${env:K8S_CLUSTER_NAME}
+    metric_expiration: 10m
+
+# Production receiver settings
+receivers:
+  # Standard collection intervals
+  postgresql:
+    collection_interval: 60s
+    tls:
+      insecure: false
+      cert_file: ${env:POSTGRES_CERT_FILE}
+      key_file: ${env:POSTGRES_KEY_FILE}
+      ca_file: ${env:POSTGRES_CA_FILE}
+    
+  mysql:
+    collection_interval: 60s
+    tls:
+      insecure: false
+      cert_file: ${env:MYSQL_CERT_FILE}
+      key_file: ${env:MYSQL_KEY_FILE}
+      ca_file: ${env:MYSQL_CA_FILE}
+    
+  sqlquery/postgresql:
+    collection_interval: 300s
+    
+  sqlquery/mysql:
+    collection_interval: 300s
+
+  # Enhanced SQL with plan collection
+  enhancedsql/postgresql:
+    enable_plan_collection: true
+    plan_cache_size: 1000
+    collection_interval: 60s
+
+# Production extensions
+extensions:
+  # Health check with pipeline monitoring
+  health_check:
+    endpoint: 0.0.0.0:13133
+    check_collector_pipeline:
+      enabled: true
+      interval: 5m
+      exporter_failure_threshold: 5
+
+  # pprof for production debugging
+  pprof:
+    endpoint: 127.0.0.1:1777  # Localhost only for security
+
+  # File storage for persistence
+  filestorage:
+    directory: /var/lib/otelcol/storage
+    timeout: 1s
+    compaction:
+      on_start: false
+      on_rebound: true
+      rebound_needed_threshold_mib: 100

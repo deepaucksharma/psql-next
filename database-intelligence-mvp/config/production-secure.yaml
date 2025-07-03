@@ -1,0 +1,307 @@
+# Production-Secure OpenTelemetry Collector Configuration
+# This configuration implements comprehensive security measures for production deployment
+
+extensions:
+  # Health check extension with security controls
+  health_check:
+    endpoint: "127.0.0.1:13133"
+    path: "/health"
+    
+  # pprof extension disabled for security in production
+  # pprof:
+  #   endpoint: disabled
+    
+  # zpages disabled for security in production  
+  # zpages:
+  #   endpoint: disabled
+
+receivers:
+  # PostgreSQL metrics collection with security hardening
+  postgresql:
+    endpoint: "${env:POSTGRES_HOST}:${env:POSTGRES_PORT}"
+    username: "${file:/run/secrets/postgres_user}"
+    password: "${file:/run/secrets/postgres_password}" 
+    databases:
+      - "${env:POSTGRES_DATABASE}"
+    collection_interval: 60s  # Conservative interval for production
+    timeout: 30s              # Reasonable timeout
+    tls:
+      insecure: false         # Force TLS in production
+      insecure_skip_verify: false
+      cert_file: "/etc/ssl/certs/postgres-client.crt"
+      key_file: "/etc/ssl/private/postgres-client.key"
+      ca_file: "/etc/ssl/certs/postgres-ca.crt"
+      server_name: "${env:POSTGRES_HOST}"
+    metrics:
+      postgresql.blocks_read:
+        enabled: true
+      postgresql.commits:
+        enabled: true
+      postgresql.database.count:
+        enabled: true
+      postgresql.database.locks:
+        enabled: true
+      postgresql.index.size:
+        enabled: true
+      postgresql.table.count:
+        enabled: true
+    
+  # MySQL metrics collection with security hardening  
+  mysql:
+    endpoint: "${env:MYSQL_HOST}:${env:MYSQL_PORT}"
+    username: "${file:/run/secrets/mysql_user}"
+    password: "${file:/run/secrets/mysql_password}"
+    database: "${env:MYSQL_DATABASE}"
+    collection_interval: 60s  # Conservative interval for production
+    timeout: 30s              # Reasonable timeout
+    tls:
+      insecure: false         # Force TLS in production
+      insecure_skip_verify: false
+      cert_file: "/etc/ssl/certs/mysql-client.crt"
+      key_file: "/etc/ssl/private/mysql-client.key"
+      ca_file: "/etc/ssl/certs/mysql-ca.crt"
+      server_name: "${env:MYSQL_HOST}"
+
+  # Secure log collection with filtering
+  filelog:
+    include: 
+      - "/var/log/postgresql/postgresql-*.log"
+      - "/var/log/mysql/error.log"
+    exclude:
+      - "/var/log/**/*.tmp"
+      - "/var/log/**/debug*.log"
+    start_at: end              # Don't process historical logs for security
+    max_log_size: 10MiB        # Limit log size to prevent abuse
+    encoding: utf-8
+    operators:
+      # Security: Filter out sensitive information
+      - type: filter
+        expr: 'body matches "password|secret|token|key" == false'
+      
+      # Parse PostgreSQL logs securely
+      - type: regex_parser
+        if: 'body matches "^\\d{4}-\\d{2}-\\d{2}"'
+        regex: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \w+) \[(?P<pid>\d+)\] (?P<level>\w+):  (?P<message>.*)'
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: '2006-01-02 15:04:05.000 MST'
+      
+      # Security: Only process performance-related logs
+      - type: filter
+        expr: 'attributes.message matches "duration:|slow|performance" and attributes.level != "DEBUG"'
+
+processors:
+  # Critical: Memory protection to prevent OOM attacks
+  memory_limiter:
+    check_interval: 5s        # Frequent checks in production
+    limit_mib: 512            # Conservative memory limit
+    spike_limit_mib: 128      # Lower spike limit
+    
+  # Security-focused resource attribution
+  resource:
+    attributes:
+      - key: collector.name
+        value: "otelcol-secure"
+        action: upsert
+      - key: service.name
+        value: "database-intelligence"
+        action: upsert
+      - key: service.namespace
+        value: "production"
+        action: upsert
+      - key: environment
+        value: "${env:ENVIRONMENT}"
+        action: upsert
+      - key: deployment.region
+        value: "${env:AWS_REGION}"
+        action: upsert
+      - key: deployment.type
+        value: "production-secure"
+        action: upsert
+      - key: service.version
+        value: "${env:SERVICE_VERSION}"
+        action: upsert
+      - key: security.mode
+        value: "enabled"
+        action: upsert
+        
+  # Circuit breaker for production resilience
+  circuitbreaker:
+    failure_threshold: 3      # Conservative threshold
+    success_threshold: 2      # Quick recovery
+    open_state_timeout: 60s   # Reasonable timeout
+    max_concurrent_requests: 10  # Limit concurrency
+    enable_adaptive_timeout: true
+    base_timeout: 5s
+    max_timeout: 30s
+    memory_threshold_mb: 256  # Memory protection
+    cpu_threshold_percent: 80 # CPU protection
+    new_relic_error_patterns:
+      - "rate limit"
+      - "cardinality"
+      - "quota"
+      - "forbidden"
+        
+  # Secure plan attribute extraction
+  planattributeextractor:
+    safe_mode: true           # Always safe mode in production
+    timeout_ms: 2000          # Reasonable timeout
+    error_mode: ignore        # Don't fail on errors
+    enable_debug_logging: false  # No debug in production
+    hash_config:
+      algorithm: "sha256"     # Secure hash only
+      include:
+        - "db.query.plan.cost"
+        - "db.query.plan.rows"
+      output: "db.query.plan.fingerprint"
+    postgresql_rules:
+      detection_jsonpath: "$.message"
+      extractions:
+        "db.query.plan.cost": '$.cost'
+        "db.query.plan.rows": '$.rows'
+        "db.query.plan.type": '$.type'
+    query_anonymization:
+      enabled: true           # Always anonymize in production
+      attributes_to_anonymize:
+        - "db.statement"
+        - "db.query.text"
+      generate_fingerprint: true
+      fingerprint_attribute: "db.query.fingerprint"
+      
+  # Adaptive sampler for cost control
+  adaptivesampler:
+    sampling_percentage: 10   # Conservative sampling in production
+    evaluation_interval: 300s # 5 minute intervals
+    max_traces_per_second: 100
+    adjust_sampling_on_overload: true
+    memory_threshold_mb: 256
+    cost_control:
+      max_cost_per_minute: 1000
+      enable_cost_alerts: true
+      cost_calculation_method: "complexity_based"
+      
+  # Secure data transformation
+  transform:
+    error_mode: ignore        # Don't fail pipeline on transform errors
+    metric_statements:
+      - context: metric
+        statements:
+          # Security: Sanitize instance ID
+          - set(resource.attributes["service.instance.id"], Concat([Split("${env:HOSTNAME}", ".")[0], "-secure"]))
+          - set(resource.attributes["telemetry.sdk.name"], "opentelemetry")
+          - set(resource.attributes["telemetry.sdk.language"], "go")
+          - set(resource.attributes["telemetry.distro.name"], "database-intelligence-secure")
+          
+    log_statements:
+      - context: log
+        statements:
+          # Security: Remove potentially sensitive data
+          - delete_key(attributes, "user")
+          - delete_key(attributes, "username") 
+          - delete_key(attributes, "password")
+          - delete_key(attributes, "token")
+          - delete_key(attributes, "secret")
+          - delete_key(attributes, "key")
+          
+  # Efficient batching for production
+  batch:
+    send_batch_size: 500      # Smaller batches for reliability
+    timeout: 30s              # Longer timeout for efficiency
+    send_batch_max_size: 1000 # Maximum batch size
+    
+  # Production-grade filtering
+  filter:
+    error_mode: ignore
+    metrics:
+      metric:
+        # Filter out high-cardinality metrics
+        - 'name == "system.cpu.utilization" and resource.attributes["cpu"] != nil'
+        - 'HasAttrKeyOnDatapoint("instance") == true and resource.attributes["service.instance.id"] != nil'
+        
+exporters:
+  # Secure New Relic OTLP exporter
+  otlp/newrelic:
+    endpoint: "${env:NEW_RELIC_OTLP_ENDPOINT}"
+    headers:
+      "api-key": "${file:/run/secrets/new_relic_license_key}"
+      "user-agent": "database-intelligence-secure/1.0.0"
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 2        # Conservative consumers
+      queue_size: 1000        # Reasonable queue size
+    tls:
+      insecure: false         # Force TLS
+      insecure_skip_verify: false
+      
+  # Debug exporter (disabled in production)
+  # debug:
+  #   verbosity: disabled
+    
+  # Logging exporter for audit trail
+  logging:
+    loglevel: warn            # Only warnings and errors
+    sampling_initial: 2
+    sampling_thereafter: 500
+    
+service:
+  telemetry:
+    logs:
+      level: warn             # Minimal logging in production
+      development: false
+      sampling:
+        enabled: true
+        tick: 10s
+        initial: 2
+        thereafter: 500
+    metrics:
+      level: none             # Disable internal metrics for security
+      address: ""             # No metrics endpoint
+      
+  extensions: 
+    - health_check
+    
+  pipelines:
+    # Metrics pipeline with comprehensive security
+    metrics:
+      receivers: 
+        - postgresql
+        - mysql
+      processors: 
+        - memory_limiter
+        - circuitbreaker  
+        - adaptivesampler
+        - resource
+        - transform
+        - filter
+        - batch
+      exporters: 
+        - otlp/newrelic
+        - logging
+        
+    # Logs pipeline with security filtering
+    logs:
+      receivers: 
+        - filelog
+      processors: 
+        - memory_limiter
+        - circuitbreaker
+        - planattributeextractor
+        - resource
+        - transform
+        - batch
+      exporters: 
+        - otlp/newrelic
+        - logging
+        
+    # Traces disabled for security and performance
+    # traces:
+    #   receivers: []
+    #   processors: []
+    #   exporters: []

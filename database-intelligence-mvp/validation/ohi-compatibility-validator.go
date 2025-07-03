@@ -8,9 +8,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/database-intelligence-mvp/internal/database"
 	_ "github.com/lib/pq"
 	"github.com/newrelic/newrelic-client-go/newrelic"
 	"github.com/newrelic/newrelic-client-go/pkg/nrdb"
+	"go.uber.org/zap"
 )
 
 // OHIMetric represents a metric from OHI
@@ -86,10 +88,17 @@ var MetricMappings = map[string]string{
 
 // NewValidator creates a new validator instance
 func NewValidator(config Config) (*Validator, error) {
-	// Connect to PostgreSQL for direct metrics
-	db, err := sql.Open("postgres", config.PostgresURL)
+	// Create logger for validation
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+	
+	// Use validation-specific connection pool configuration
+	poolConfig := database.ValidationConnectionPoolConfig()
+	
+	// Connect to PostgreSQL with secure connection pooling
+	db, err := database.OpenWithSecurePool("postgres", config.PostgresURL, poolConfig, logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to postgres: %w", err)
+		return nil, fmt.Errorf("failed to establish secure database connection: %w", err)
 	}
 
 	// Create New Relic client

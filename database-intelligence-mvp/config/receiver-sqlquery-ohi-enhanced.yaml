@@ -1,0 +1,452 @@
+# Enhanced SQL Query Receiver Configuration for Complete OHI Feature Parity
+# Includes individual queries, histograms, percentiles, and CPU/IO split
+
+receivers:
+  # PostgreSQL enhanced query performance monitoring
+  sqlquery/postgresql_enhanced:
+    driver: postgres
+    datasource: "host=${POSTGRES_HOST} port=${POSTGRES_PORT} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=postgres sslmode=disable"
+    collection_interval: 60s
+    
+    queries:
+      # Enhanced pg_stat_statements with percentiles and histograms
+      - sql: |
+          WITH query_stats AS (
+            SELECT 
+              s.queryid,
+              LEFT(s.query, 4095) as query_text,
+              s.calls as execution_count,
+              s.total_exec_time,
+              s.mean_exec_time as avg_elapsed_time_ms,
+              s.stddev_exec_time,
+              s.min_exec_time,
+              s.max_exec_time,
+              s.rows,
+              s.shared_blks_hit + s.shared_blks_read as total_blocks,
+              s.shared_blks_hit,
+              s.shared_blks_read,
+              s.shared_blks_dirtied,
+              s.shared_blks_written,
+              s.local_blks_hit + s.local_blks_read as local_blocks,
+              s.temp_blks_read + s.temp_blks_written as temp_blocks,
+              s.blk_read_time,
+              s.blk_write_time,
+              s.userid,
+              s.dbid,
+              d.datname as database_name,
+              -- Calculate percentiles using stddev (approximation)
+              s.mean_exec_time + (1.282 * s.stddev_exec_time) as p90_latency_ms,  -- 90th percentile
+              s.mean_exec_time + (1.645 * s.stddev_exec_time) as p95_latency_ms,  -- 95th percentile
+              s.mean_exec_time + (2.326 * s.stddev_exec_time) as p99_latency_ms,  -- 99th percentile
+              -- CPU/IO split calculation
+              CASE 
+                WHEN (s.blk_read_time + s.blk_write_time) > 0 
+                THEN (s.total_exec_time - (s.blk_read_time + s.blk_write_time)) / NULLIF(s.calls, 0)
+                ELSE s.mean_exec_time * 0.7  -- Estimate 70% CPU if no I/O timing
+              END as cpu_time_ms,
+              CASE
+                WHEN (s.blk_read_time + s.blk_write_time) > 0
+                THEN (s.blk_read_time + s.blk_write_time) / NULLIF(s.calls, 0)
+                ELSE s.mean_exec_time * 0.3  -- Estimate 30% I/O if no I/O timing
+              END as io_time_ms,
+              -- Statement type classification
+              CASE
+                WHEN s.query ILIKE 'SELECT%' THEN 'SELECT'
+                WHEN s.query ILIKE 'INSERT%' THEN 'INSERT'
+                WHEN s.query ILIKE 'UPDATE%' THEN 'UPDATE'
+                WHEN s.query ILIKE 'DELETE%' THEN 'DELETE'
+                ELSE 'OTHER'
+              END as statement_type
+            FROM pg_stat_statements s
+            JOIN pg_database d ON d.oid = s.dbid
+            WHERE 
+              s.calls > 20  -- OHI threshold
+              AND s.mean_exec_time > 500  -- OHI threshold (500ms)
+              AND s.query NOT LIKE '%pg_stat%'
+          ),
+          -- Individual queries from pg_stat_activity (for RDS mode)
+          individual_queries AS (
+            SELECT DISTINCT
+              query as individual_query_text,
+              -- Create normalized version for matching
+              regexp_replace(
+                regexp_replace(
+                  regexp_replace(
+                    regexp_replace(
+                      lower(query),
+                      '\s+', ' ', 'g'  -- Normalize whitespace
+                    ),
+                    '\d+', '?', 'g'  -- Replace numbers
+                  ),
+                  '''[^'']*''', '''?''', 'g'  -- Replace string literals
+                ),
+                '"[^"]*"', '"?"', 'g'  -- Replace identifiers
+              ) as normalized_query
+            FROM pg_stat_activity
+            WHERE query IS NOT NULL 
+              AND query != ''
+              AND state != 'idle'
+              AND pid != pg_backend_pid()
+          )
+          SELECT 
+            qs.*,
+            iq.individual_query_text as individual_query,
+            to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as collection_timestamp,
+            'newrelic' as newrelic  -- OHI compatibility field
+          FROM query_stats qs
+          LEFT JOIN individual_queries iq 
+            ON regexp_replace(
+                regexp_replace(
+                  regexp_replace(
+                    regexp_replace(
+                      lower(qs.query_text),
+                      '\s+', ' ', 'g'
+                    ),
+                    '\d+', '?', 'g'
+                  ),
+                  '''[^'']*''', '''?''', 'g'
+                ),
+                '"[^"]*"', '"?"', 'g'
+              ) = iq.normalized_query
+          ORDER BY qs.avg_elapsed_time_ms DESC
+          LIMIT 100
+        metrics:
+          # Standard OHI metrics
+          - metric_name: db.query.count
+            value_column: execution_count
+            value_type: int
+            attributes:
+              - queryid
+              - database_name
+              - query_text
+              - statement_type
+              - newrelic
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.query.duration
+            value_column: total_exec_time
+            value_type: double
+            unit: ms
+            attributes:
+              - queryid
+              - database_name
+              - query_text
+              - statement_type
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.query.mean_duration
+            value_column: avg_elapsed_time_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - queryid
+              - database_name
+              - query_text
+              - statement_type
+            data_point_type: gauge
+            
+          # Enhanced percentile metrics
+          - metric_name: db.query.p90_latency
+            value_column: p90_latency_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - queryid
+              - database_name
+              - statement_type
+            data_point_type: gauge
+            
+          - metric_name: db.query.p95_latency
+            value_column: p95_latency_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - queryid
+              - database_name
+              - statement_type
+            data_point_type: gauge
+            
+          - metric_name: db.query.p99_latency
+            value_column: p99_latency_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - queryid
+              - database_name
+              - statement_type
+            data_point_type: gauge
+            
+          # CPU/IO split metrics
+          - metric_name: db.query.cpu_time
+            value_column: cpu_time_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - queryid
+              - database_name
+              - statement_type
+            data_point_type: gauge
+            
+          - metric_name: db.query.io_time
+            value_column: io_time_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - queryid
+              - database_name
+              - statement_type
+            data_point_type: gauge
+            
+          # I/O metrics
+          - metric_name: db.io.disk_reads
+            value_column: shared_blks_read
+            value_type: int
+            attributes:
+              - queryid
+              - database_name
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.io.disk_writes
+            value_column: shared_blks_written
+            value_type: int
+            attributes:
+              - queryid
+              - database_name
+            data_point_type: sum
+            monotonic: true
+            
+        logs:
+          # Log record with individual query for OHI compatibility
+          - body_column: query_text
+            attributes:
+              queryid: queryid
+              database_name: database_name
+              individual_query: individual_query
+              execution_count: execution_count
+              avg_elapsed_time_ms: avg_elapsed_time_ms
+              statement_type: statement_type
+              collection_timestamp: collection_timestamp
+              newrelic: newrelic
+              
+      # Histogram bucket collection for accurate percentiles
+      - sql: |
+          WITH histogram_data AS (
+            SELECT 
+              queryid,
+              -- Create histogram buckets (in milliseconds)
+              COUNT(*) FILTER (WHERE mean_exec_time <= 1) as bucket_1ms,
+              COUNT(*) FILTER (WHERE mean_exec_time > 1 AND mean_exec_time <= 5) as bucket_5ms,
+              COUNT(*) FILTER (WHERE mean_exec_time > 5 AND mean_exec_time <= 10) as bucket_10ms,
+              COUNT(*) FILTER (WHERE mean_exec_time > 10 AND mean_exec_time <= 50) as bucket_50ms,
+              COUNT(*) FILTER (WHERE mean_exec_time > 50 AND mean_exec_time <= 100) as bucket_100ms,
+              COUNT(*) FILTER (WHERE mean_exec_time > 100 AND mean_exec_time <= 500) as bucket_500ms,
+              COUNT(*) FILTER (WHERE mean_exec_time > 500 AND mean_exec_time <= 1000) as bucket_1s,
+              COUNT(*) FILTER (WHERE mean_exec_time > 1000 AND mean_exec_time <= 5000) as bucket_5s,
+              COUNT(*) FILTER (WHERE mean_exec_time > 5000 AND mean_exec_time <= 10000) as bucket_10s,
+              COUNT(*) FILTER (WHERE mean_exec_time > 10000) as bucket_inf
+            FROM pg_stat_statements
+            WHERE calls > 20
+            GROUP BY queryid
+          )
+          SELECT * FROM histogram_data
+        metrics:
+          - metric_name: db.query.latency_histogram
+            value_column: bucket_1ms
+            value_type: int
+            attributes:
+              - queryid
+              - bucket: "1"
+            data_point_type: gauge
+            
+          - metric_name: db.query.latency_histogram
+            value_column: bucket_5ms
+            value_type: int
+            attributes:
+              - queryid
+              - bucket: "5"
+            data_point_type: gauge
+            
+          - metric_name: db.query.latency_histogram
+            value_column: bucket_10ms
+            value_type: int
+            attributes:
+              - queryid
+              - bucket: "10"
+            data_point_type: gauge
+            
+          - metric_name: db.query.latency_histogram
+            value_column: bucket_50ms
+            value_type: int
+            attributes:
+              - queryid
+              - bucket: "50"
+            data_point_type: gauge
+            
+          - metric_name: db.query.latency_histogram
+            value_column: bucket_100ms
+            value_type: int
+            attributes:
+              - queryid
+              - bucket: "100"
+            data_point_type: gauge
+            
+          - metric_name: db.query.latency_histogram
+            value_column: bucket_500ms
+            value_type: int
+            attributes:
+              - queryid
+              - bucket: "500"
+            data_point_type: gauge
+            
+          - metric_name: db.query.latency_histogram
+            value_column: bucket_1s
+            value_type: int
+            attributes:
+              - queryid
+              - bucket: "1000"
+            data_point_type: gauge
+            
+          - metric_name: db.query.latency_histogram
+            value_column: bucket_5s
+            value_type: int
+            attributes:
+              - queryid
+              - bucket: "5000"
+            data_point_type: gauge
+            
+      # Active Session History (ASH) implementation
+      - sql: |
+          SELECT 
+            NOW() as sample_time,
+            a.pid,
+            a.usename as username,
+            a.datname as database_name,
+            a.application_name,
+            a.client_addr::text as client_address,
+            a.backend_start,
+            a.xact_start,
+            a.query_start,
+            a.state_change,
+            a.wait_event_type,
+            a.wait_event,
+            a.state,
+            a.backend_xid,
+            a.backend_xmin,
+            a.backend_type,
+            LEFT(a.query, 1000) as current_query,
+            -- Additional session metrics
+            age(NOW(), a.query_start) as query_duration,
+            age(NOW(), a.xact_start) as transaction_duration,
+            pg_stat_get_backend_activity_start(s.backendid) as activity_start,
+            -- Resource usage (requires pg_stat_activity extensions)
+            pg_stat_get_backend_mem_allocated(s.backendid) / 1024.0 / 1024.0 as memory_mb,
+            -- Blocking information
+            pg_blocking_pids(a.pid) as blocking_pids,
+            CASE 
+              WHEN a.wait_event IS NOT NULL THEN true
+              ELSE false
+            END as is_waiting,
+            -- On CPU detection (simplified)
+            CASE
+              WHEN a.state = 'active' AND a.wait_event IS NULL THEN true
+              ELSE false
+            END as on_cpu
+          FROM pg_stat_activity a
+          LEFT JOIN pg_stat_get_activity(NULL) s ON a.pid = s.pid
+          WHERE a.state != 'idle'
+            AND a.pid != pg_backend_pid()
+        metrics:
+          - metric_name: db.ash.active_sessions
+            value_column: pid
+            value_type: int
+            attributes:
+              - database_name
+              - state
+              - wait_event_type
+              - wait_event
+              - backend_type
+              - on_cpu
+            data_point_type: gauge
+            aggregation_temporality: delta
+            
+          - metric_name: db.ash.session_memory
+            value_column: memory_mb
+            value_type: double
+            unit: MB
+            attributes:
+              - database_name
+              - username
+              - state
+            data_point_type: gauge
+            
+        logs:
+          - body_column: current_query
+            attributes:
+              pid: pid
+              username: username
+              database_name: database_name
+              application_name: application_name
+              client_address: client_address
+              state: state
+              wait_event_type: wait_event_type
+              wait_event: wait_event
+              backend_type: backend_type
+              query_duration: query_duration
+              transaction_duration: transaction_duration
+              blocking_pids: blocking_pids
+              is_waiting: is_waiting
+              on_cpu: on_cpu
+              sample_time: sample_time
+              
+      # Wait event summary with detailed breakdown
+      - sql: |
+          WITH wait_summary AS (
+            SELECT 
+              wait_event_type,
+              wait_event,
+              COUNT(*) as session_count,
+              COUNT(*) FILTER (WHERE state = 'active') as active_count,
+              COUNT(*) FILTER (WHERE state = 'idle in transaction') as idle_in_transaction_count,
+              array_agg(DISTINCT datname) as databases,
+              array_agg(pid) as pids
+            FROM pg_stat_activity
+            WHERE wait_event IS NOT NULL
+            GROUP BY wait_event_type, wait_event
+          )
+          SELECT 
+            wait_event_type,
+            wait_event,
+            session_count,
+            active_count,
+            idle_in_transaction_count,
+            array_to_string(databases, ',') as affected_databases,
+            array_length(databases, 1) as database_count
+          FROM wait_summary
+          ORDER BY session_count DESC
+        metrics:
+          - metric_name: db.wait_events.total
+            value_column: session_count
+            value_type: int
+            attributes:
+              - wait_event_type
+              - wait_event
+            data_point_type: gauge
+            
+          - metric_name: db.wait_events.active
+            value_column: active_count
+            value_type: int
+            attributes:
+              - wait_event_type
+              - wait_event
+            data_point_type: gauge
+            
+          - metric_name: db.wait_events.database_count
+            value_column: database_count
+            value_type: int
+            attributes:
+              - wait_event_type
+              - wait_event
+            data_point_type: gauge

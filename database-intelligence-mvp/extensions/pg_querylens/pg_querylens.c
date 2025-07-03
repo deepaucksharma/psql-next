@@ -18,6 +18,11 @@
 #include "tcop/utility.h"
 #include "parser/analyze.h"
 #include "pgstat.h"
+#include "funcapi.h"
+#include "utils/tuplestore.h"
+#include "utils/memutils.h"
+#include "access/htup_details.h"
+#include "catalog/pg_type.h"
 
 PG_MODULE_MAGIC;
 
@@ -71,6 +76,7 @@ static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 static ExecutorRun_hook_type prev_ExecutorRun = NULL;
 static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
+static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 /* Shared memory pointer */
 static QueryLensSharedState *querylens_state = NULL;
@@ -433,8 +439,83 @@ querylens_compute_planid(PlannedStmt *plan)
 Datum
 pg_querylens_stats(PG_FUNCTION_ARGS)
 {
-    /* Implementation would return a set of statistics records */
-    PG_RETURN_NULL();
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    TupleDesc    tupdesc;
+    Tuplestorestate *tupstore;
+    MemoryContext per_query_ctx;
+    MemoryContext oldcontext;
+    int          i;
+
+    /* check to see if caller supports us returning a tuplestore */
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("set-valued function called in context that cannot accept a set")));
+    if (!(rsinfo->allowedModes & SFRM_Materialize))
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("materialize mode required, but it is not allowed in this context")));
+
+    /* Build a tuple descriptor for our result type */
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        elog(ERROR, "return type must be a row type");
+
+    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+    oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+    tupstore = tuplestore_begin_heap(true, false, work_mem);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = tupdesc;
+
+    MemoryContextSwitchTo(oldcontext);
+
+    if (!querylens_state)
+    {
+        /* Return empty result set if not initialized */
+        tuplestore_donestoring(tupstore);
+        PG_RETURN_VOID();
+    }
+
+    LWLockAcquire(querylens_state->lock, LW_SHARED);
+
+    for (i = 0; i < querylens_state->query_count; i++)
+    {
+        QueryLensEntry *entry = &querylens_state->entries[i];
+        Datum       values[13];
+        bool        nulls[13] = {false};
+        int         col = 0;
+
+        SpinLockAcquire(&entry->mutex);
+
+        if (entry->queryid != 0)
+        {
+            values[col++] = Int64GetDatum(entry->queryid);
+            values[col++] = Int64GetDatum(entry->planid);
+            values[col++] = Int64GetDatum(entry->calls);
+            values[col++] = Float8GetDatum((double)entry->total_time / 1000000.0); /* Convert to seconds */
+            values[col++] = Float8GetDatum((double)entry->mean_time / 1000000.0);  /* Convert to seconds */
+            values[col++] = Int64GetDatum(entry->rows);
+            values[col++] = Float8GetDatum(entry->shared_blks_hit);
+            values[col++] = Float8GetDatum(entry->shared_blks_read);
+            values[col++] = Float8GetDatum(entry->temp_blks_written);
+            values[col++] = TimestampTzGetDatum(entry->first_seen);
+            values[col++] = TimestampTzGetDatum(entry->last_execution);
+            values[col++] = Int32GetDatum(entry->userid);
+            values[col++] = Int32GetDatum(entry->dbid);
+
+            tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+        }
+
+        SpinLockRelease(&entry->mutex);
+    }
+
+    LWLockRelease(querylens_state->lock);
+
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(tupstore);
+
+    PG_RETURN_VOID();
 }
 
 /*
@@ -471,6 +552,46 @@ pg_querylens_reset(PG_FUNCTION_ARGS)
 Datum
 pg_querylens_info(PG_FUNCTION_ARGS)
 {
-    /* Return extension configuration and status */
-    PG_RETURN_NULL();
+    TupleDesc    tupdesc;
+    Datum        values[10];
+    bool         nulls[10] = {false};
+    HeapTuple    htup;
+    int          col = 0;
+
+    /* Build a tuple descriptor for our result type */
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        elog(ERROR, "return type must be a row type");
+
+    /* Extension version and configuration */
+    values[col++] = CStringGetTextDatum("1.0");  /* version */
+    values[col++] = BoolGetDatum(querylens_enabled);
+    values[col++] = Int32GetDatum(querylens_max_queries);
+    values[col++] = Int32GetDatum(querylens_buffer_size);
+    values[col++] = Int32GetDatum(querylens_sample_rate);
+
+    if (querylens_state)
+    {
+        LWLockAcquire(querylens_state->lock, LW_SHARED);
+        
+        values[col++] = Int64GetDatum(querylens_state->total_queries);
+        values[col++] = Int64GetDatum(querylens_state->queries_sampled);
+        values[col++] = Int32GetDatum(querylens_state->query_count);
+        values[col++] = Int64GetDatum(querylens_state->buffer_overflows);
+        values[col++] = TimestampTzGetDatum(querylens_state->stats_reset_time);
+        
+        LWLockRelease(querylens_state->lock);
+    }
+    else
+    {
+        /* Extension not initialized */
+        values[col++] = Int64GetDatum(0);  /* total_queries */
+        values[col++] = Int64GetDatum(0);  /* queries_sampled */
+        values[col++] = Int32GetDatum(0);  /* current_queries */
+        values[col++] = Int64GetDatum(0);  /* buffer_overflows */
+        values[col++] = TimestampTzGetDatum(0);  /* stats_reset_time */
+        nulls[9] = true;  /* Mark stats_reset_time as null */
+    }
+
+    htup = heap_form_tuple(tupdesc, values, nulls);
+    PG_RETURN_DATUM(HeapTupleGetDatum(htup));
 }

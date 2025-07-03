@@ -1,0 +1,122 @@
+extensions:
+  healthcheck:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  # Metrics receivers
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - testdb
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: root
+    database: testdb
+    collection_interval: 10s
+
+  # Logs receiver for testing log processors
+  filelog:
+    include: ["/tmp/test-logs/*.log"]
+    start_at: beginning
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: '%Y-%m-%d %H:%M:%S'
+
+processors:
+  # Logs processors
+  verification:
+    enable_periodic_verification: true
+    verification_interval: 30s
+    data_freshness_threshold: 5m
+    min_entity_correlation_rate: 0.8
+    min_normalization_rate: 0.9
+
+  adaptivesampler:
+    sync_interval: 1m
+    high_cost_threshold: 1000.0
+    min_sample_rate: 0.01
+    max_samples_per_second: 100.0
+    default_sample_rate: 0.1
+
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 3
+    open_state_timeout: 30s
+    max_concurrent_requests: 100
+    base_timeout: 5s
+
+  planattributeextractor:
+    timeout_ms: 100
+    error_mode: "ignore"
+    safe_mode: true
+    postgresql_rules:
+      detection_jsonpath: "0.Plan"
+      extractions:
+        "db.query.plan.cost": "0.Plan.Total Cost"
+        "db.query.plan.rows": "0.Plan.Plan Rows"
+
+  # Metrics processors
+  querycorrelator:
+    retention_period: 24h
+    cleanup_interval: 1h
+    enable_table_correlation: true
+    enable_database_correlation: true
+
+  nrerrormonitor:
+    max_attribute_length: 4096
+    max_metric_name_length: 255
+    cardinality_warning_threshold: 10000
+    alert_threshold: 100
+
+  # Multi-telemetry processor
+  costcontrol:
+    monthly_budget_usd: 1000.0
+    price_per_gb: 0.35
+    metric_cardinality_limit: 10000
+    slow_span_threshold_ms: 2000
+    max_log_body_size: 10240
+    reporting_interval: 60s
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+  prometheus:
+    endpoint: "0.0.0.0:8890"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  file:
+    path: "/tmp/test-output.json"
+
+service:
+  extensions: [healthcheck]
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers: [postgresql, mysql]
+      processors: [querycorrelator, nrerrormonitor, costcontrol]
+      exporters: [debug, prometheus]
+    
+    # Logs pipeline
+    logs:
+      receivers: [filelog]
+      processors: [verification, adaptivesampler, circuitbreaker, planattributeextractor, costcontrol]
+      exporters: [debug, file]
+
+  telemetry:
+    logs:
+      level: debug
+    metrics:
+      address: :8891

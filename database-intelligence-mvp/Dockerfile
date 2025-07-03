@@ -40,12 +40,15 @@ RUN apk add --no-cache \
     tzdata \
     curl \
     && update-ca-certificates \
-    && apk upgrade --no-cache
+    && apk upgrade --no-cache \
+    && rm -rf /var/cache/apk/* \
+    && rm -rf /tmp/*
 
-# Create non-root user and directories
+# Create non-root user and directories with strict permissions
 RUN addgroup -g 1000 -S otel && \
     adduser -u 1000 -S otel -G otel && \
     mkdir -p /etc/otel /var/lib/otel /var/log/otel && \
+    chmod 750 /etc/otel /var/lib/otel /var/log/otel && \
     chown -R otel:otel /etc/otel /var/lib/otel /var/log/otel
 
 # Copy binary from builder
@@ -54,17 +57,23 @@ COPY --from=builder /build/bin/otelcol-custom /usr/local/bin/otelcol
 # Make binary executable
 RUN chmod +x /usr/local/bin/otelcol
 
-# Copy configuration files
-COPY --chown=otel:otel config/*.yaml /etc/otel/
+# Copy configuration files with secure permissions
+COPY --chown=otel:otel --chmod=640 config/*.yaml /etc/otel/
 
-# Set environment variables for performance tuning
+# Set environment variables for performance tuning and security
 ENV GOGC=80 \
     GOMEMLIMIT=512MiB \
     OTEL_RESOURCE_ATTRIBUTES="service.name=database-intelligence,service.version=1.0.0" \
-    OTEL_LOG_LEVEL=info
+    OTEL_LOG_LEVEL=info \
+    TMPDIR=/tmp \
+    HOME=/home/otel
 
-# Switch to non-root user
-USER otel
+# Remove any potentially sensitive files and set secure defaults
+RUN rm -rf /root/.* 2>/dev/null || true && \
+    chmod 700 /home/otel
+
+# Switch to non-root user (security hardening)
+USER otel:otel
 
 # Expose ports
 # 4317  - OTLP gRPC receiver

@@ -1,0 +1,337 @@
+# Database Intelligence Collector - End-to-End Test Configuration
+# This configuration demonstrates the complete data flow from database to export
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  # Standard PostgreSQL receiver for basic metrics
+  postgresql:
+    endpoint: ${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}
+    transport: tcp
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:password}
+    databases: 
+      - ${POSTGRES_DB:testdb}
+    collection_interval: 30s
+    
+    # Collect comprehensive metrics
+    tls:
+      insecure: true
+      
+    metrics:
+      postgresql.blocks_read:
+        enabled: true
+      postgresql.commits:
+        enabled: true
+      postgresql.rollbacks:
+        enabled: true
+      postgresql.database.count:
+        enabled: true
+      postgresql.database.locks:
+        enabled: true
+      postgresql.index.scans:
+        enabled: true
+      postgresql.index.size:
+        enabled: true
+      postgresql.table.size:
+        enabled: true
+      postgresql.table.vacuum.count:
+        enabled: true
+
+  # Enhanced SQL receiver for pg_querylens data (when available)
+  sqlquery:
+    driver: postgres
+    datasource: "host=${POSTGRES_HOST:localhost} port=${POSTGRES_PORT:5432} user=${POSTGRES_USER:postgres} password=${POSTGRES_PASSWORD:password} dbname=${POSTGRES_DB:testdb} sslmode=disable"
+    queries:
+      # pg_querylens queries (when extension is installed)
+      - sql: "SELECT queryid, planid, calls, total_exec_time, mean_exec_time, rows, shared_blks_hit, shared_blks_read FROM pg_querylens_stats() WHERE calls > 0 ORDER BY total_exec_time DESC LIMIT 100"
+        metrics:
+          - metric_name: db.query.execution_time_total
+            value_column: total_exec_time
+            attribute_columns: ["queryid", "planid"]
+          - metric_name: db.query.execution_time_mean
+            value_column: mean_exec_time
+            attribute_columns: ["queryid", "planid"]
+          - metric_name: db.query.calls
+            value_column: calls
+            attribute_columns: ["queryid", "planid"]
+          - metric_name: db.query.rows
+            value_column: rows
+            attribute_columns: ["queryid", "planid"]
+          - metric_name: db.query.shared_blocks_hit
+            value_column: shared_blks_hit
+            attribute_columns: ["queryid", "planid"]
+          - metric_name: db.query.shared_blocks_read
+            value_column: shared_blks_read
+            attribute_columns: ["queryid", "planid"]
+            
+      # Fallback to pg_stat_statements when pg_querylens not available
+      - sql: "SELECT queryid, calls, total_exec_time, mean_exec_time, rows, shared_blks_hit, shared_blks_read FROM pg_stat_statements WHERE calls > 0 ORDER BY total_exec_time DESC LIMIT 100"
+        metrics:
+          - metric_name: db.query.execution_time_total_fallback
+            value_column: total_exec_time
+            attribute_columns: ["queryid"]
+          - metric_name: db.query.execution_time_mean_fallback
+            value_column: mean_exec_time
+            attribute_columns: ["queryid"]
+          - metric_name: db.query.calls_fallback
+            value_column: calls
+            attribute_columns: ["queryid"]
+
+processors:
+  # Memory protection (always first)
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+  # Adaptive sampling based on rules
+  adaptivesampler:
+    in_memory_only: true
+    default_sample_rate: 0.1
+    enable_debug_logging: true
+    
+    deduplication:
+      enabled: true
+      cache_size: 1000
+      window_seconds: 300
+      hash_attribute: "db.query.plan.hash"
+      cleanup_interval: 60s
+    
+    rules:
+      # Always keep slow queries
+      - name: "slow_queries"
+        priority: 100
+        sample_rate: 1.0
+        conditions:
+          - attribute: "db.query.execution_time_mean"
+            operator: "gt"
+            value: 1000.0  # > 1 second
+            
+      # Always keep high-impact queries
+      - name: "high_impact"
+        priority: 90
+        sample_rate: 1.0
+        conditions:
+          - attribute: "db.query.calls"
+            operator: "gt"
+            value: 100.0
+            
+      # Sample normal queries at low rate
+      - name: "normal_queries"
+        priority: 10
+        sample_rate: 0.1
+
+  # Circuit breaker for database protection
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 3
+    open_state_timeout: 30s
+    max_concurrent_requests: 10
+    enable_adaptive_timeout: true
+    base_timeout: 30s
+    max_timeout: 300s
+    
+    # Memory and CPU thresholds
+    memory_threshold_mb: 1024
+    cpu_threshold_percent: 80.0
+    health_check_interval: 30s
+    
+    # New Relic specific error patterns
+    new_relic_error_patterns:
+      - "NrIntegrationError"
+      - "cardinality"
+      - "rate limit"
+      - "API limit"
+
+  # Plan attribute extraction and query anonymization
+  planattributeextractor:
+    safe_mode: true
+    unsafe_plan_collection: false
+    error_mode: "ignore"
+    timeout: 10s
+    enable_debug_logging: true
+    
+    # Hash configuration for deduplication
+    hash_config:
+      algorithm: "sha256"
+      output: "db.query.plan.hash"
+      include:
+        - "db.query.plan.cost"
+        - "db.query.plan.rows"
+        - "db.query.plan.has_seq_scan"
+        - "db.query.plan.node_count"
+    
+    # Query anonymization
+    query_anonymization:
+      enabled: true
+      generate_fingerprint: true
+      fingerprint_attribute: "db.query.fingerprint"
+      attributes_to_anonymize:
+        - "db.statement"
+        - "db.sql.table"
+    
+    # PostgreSQL plan extraction rules
+    postgresql_rules:
+      detection_json_path: "Plan"
+      extractions:
+        "db.query.plan.cost": "Plan.Total Cost"
+        "db.query.plan.rows": "Plan.Plan Rows"
+        "db.query.plan.startup_cost": "Plan.Startup Cost"
+        "db.query.plan.node_type": "Plan.Node Type"
+      derived_attributes:
+        "db.query.plan.has_seq_scan": "has_substr_in_plan(plan_json, 'Seq Scan')"
+        "db.query.plan.has_nested_loop": "has_substr_in_plan(plan_json, 'Nested Loop')"
+        "db.query.plan.node_count": "json_node_count(plan_json)"
+        "db.query.plan.efficiency": "calculate_efficiency(cost, rows)"
+
+  # Data verification and PII protection
+  verification:
+    enable_debug_logging: true
+    
+    # PII detection configuration
+    pii_detection:
+      enabled: true
+      action: "redact"  # redact, hash, or drop
+      patterns:
+        credit_card: '\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'
+        ssn: '\b\d{3}-?\d{2}-?\d{4}\b'
+        email: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        phone: '\b\d{3}[-.()]?\d{3}[-.()]?\d{4}\b'
+        ip_address: '\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'
+      
+    # Data quality validation
+    quality_validation:
+      enabled: true
+      max_string_length: 1000
+      max_numeric_value: 1e12
+      required_attributes:
+        - "db.system"
+        - "db.connection.string"
+      
+    # Cardinality management
+    cardinality_management:
+      enabled: true
+      max_series_per_metric: 10000
+      high_cardinality_attributes:
+        - "user.id"
+        - "session.id"
+        - "request.id"
+        - "trace.id"
+
+  # Cost control for budget management
+  costcontrol:
+    monthly_budget_usd: 100.0
+    price_per_gb: 0.35  # New Relic standard pricing
+    reporting_interval: 5m
+    
+    # Cardinality limits
+    metric_cardinality_limit: 1000
+    
+    # Aggressive mode thresholds
+    slow_span_threshold_ms: 5000
+    max_log_body_size: 4096
+
+  # New Relic error monitoring
+  nrerrormonitor:
+    enabled: true
+    alert_threshold: 0.1  # 10% error rate
+    
+    # Error patterns to detect
+    error_patterns:
+      - pattern: "NrIntegrationError"
+        severity: "critical"
+        action: "alert"
+      - pattern: "cardinality limit"
+        severity: "warning"
+        action: "log"
+      - pattern: "rate limit exceeded"
+        severity: "warning"
+        action: "throttle"
+
+  # Query correlation for transaction analysis
+  querycorrelator:
+    session_timeout: 30m
+    enable_transaction_tracking: true
+    correlation_attributes:
+      - "session.id"
+      - "transaction.id"
+      - "user.id"
+
+  # Batch processing for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    send_batch_max_size: 1500
+
+exporters:
+  # New Relic OTLP export
+  otlp/newrelic:
+    endpoint: https://otlp.nr-data.net:4317
+    compression: gzip
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # File exporter for backup/analysis
+  file:
+    path: /tmp/otel-output.json
+    rotation:
+      max_megabytes: 100
+      max_days: 3
+      max_backups: 3
+
+  # Prometheus for local monitoring
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    const_labels:
+      environment: test
+      service: database-intelligence
+
+service:
+  extensions: [health_check]
+  
+  pipelines:
+    metrics:
+      receivers: [postgresql, sqlquery]
+      processors: [
+        memory_limiter,
+        adaptivesampler,
+        circuitbreaker,
+        planattributeextractor,
+        verification,
+        costcontrol,
+        nrerrormonitor,
+        querycorrelator,
+        batch
+      ]
+      exporters: [otlp/newrelic, debug, file, prometheus]
+
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+      output_paths: ["stdout"]
+      error_output_paths: ["stderr"]
+    
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+    
+    # Resource attributes
+    resource:
+      service.name: database-intelligence-collector
+      service.version: 2.0.0
+      deployment.environment: test

@@ -150,6 +150,7 @@ type databaseCircuitState struct {
 	failureCount int
 	successCount int
 	lastFailure  time.Time
+	lastActivity time.Time  // Track when this state was last accessed
 	errorRate    float64
 	avgDuration  time.Duration
 	mutex        sync.RWMutex
@@ -185,6 +186,10 @@ func (p *circuitBreakerProcessor) Start(ctx context.Context, host component.Host
 	// Start health monitoring
 	p.wg.Add(1)
 	go p.healthMonitor()
+
+	// Start cleanup routine for database states
+	p.wg.Add(1)
+	go p.cleanupRoutine()
 
 	return nil
 }
@@ -329,8 +334,8 @@ func (p *circuitBreakerProcessor) ConsumeLogs(ctx context.Context, logs plog.Log
 
 // allowRequest checks if the request should be allowed
 func (p *circuitBreakerProcessor) allowRequest() bool {
-	p.stateMutex.RLock()
-	defer p.stateMutex.RUnlock()
+	p.stateMutex.Lock()
+	defer p.stateMutex.Unlock()
 
 	switch p.state {
 	case Closed:
@@ -338,16 +343,10 @@ func (p *circuitBreakerProcessor) allowRequest() bool {
 	case Open:
 		// Check if we should transition to half-open
 		if time.Since(p.lastFailure) > p.config.OpenStateTimeout {
-			p.stateMutex.RUnlock()
-			p.stateMutex.Lock()
-			if p.state == Open && time.Since(p.lastFailure) > p.config.OpenStateTimeout {
-				p.state = HalfOpen
-				p.successCount = 0
-				p.logger.Info("Circuit breaker transitioning to half-open")
-			}
-			p.stateMutex.Unlock()
-			p.stateMutex.RLock()
-			return p.state == HalfOpen
+			p.state = HalfOpen
+			p.successCount = 0
+			p.logger.Info("Circuit breaker transitioning to half-open")
+			return true
 		}
 		return false
 	case HalfOpen:
@@ -588,8 +587,8 @@ func (p *circuitBreakerProcessor) allowDatabaseRequest(dbName string) bool {
 		return true // No state means allow
 	}
 	
-	state.mutex.RLock()
-	defer state.mutex.RUnlock()
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
 	
 	switch state.state {
 	case Closed:
@@ -597,17 +596,11 @@ func (p *circuitBreakerProcessor) allowDatabaseRequest(dbName string) bool {
 	case Open:
 		if time.Since(state.lastFailure) > p.config.OpenStateTimeout {
 			// Transition to half-open
-			state.mutex.RUnlock()
-			state.mutex.Lock()
-			if state.state == Open && time.Since(state.lastFailure) > p.config.OpenStateTimeout {
-				state.state = HalfOpen
-				state.successCount = 0
-				p.logger.Info("Database circuit breaker transitioning to half-open",
-					zap.String("database", dbName))
-			}
-			state.mutex.Unlock()
-			state.mutex.RLock()
-			return state.state == HalfOpen
+			state.state = HalfOpen
+			state.successCount = 0
+			p.logger.Info("Database circuit breaker transitioning to half-open",
+				zap.String("database", dbName))
+			return true
 		}
 		return false
 	case HalfOpen:
@@ -647,7 +640,8 @@ func (p *circuitBreakerProcessor) onDatabaseFailure(dbName string, err error, du
 	state, exists := p.databaseStates[dbName]
 	if !exists {
 		state = &databaseCircuitState{
-			state: Closed,
+			state:        Closed,
+			lastActivity: time.Now(),
 		}
 		p.databaseStates[dbName] = state
 	}
@@ -658,6 +652,7 @@ func (p *circuitBreakerProcessor) onDatabaseFailure(dbName string, err error, du
 	
 	state.failureCount++
 	state.lastFailure = time.Now()
+	state.lastActivity = time.Now()
 	
 	// Update error rate
 	state.errorRate = float64(state.failureCount) / float64(state.failureCount+state.successCount)
@@ -694,12 +689,13 @@ func (p *circuitBreakerProcessor) onDatabaseSuccess(dbName string, duration time
 	state.mutex.Lock()
 	defer state.mutex.Unlock()
 	
-	// Update average duration
+	// Update average duration and activity timestamp
 	if state.avgDuration == 0 {
 		state.avgDuration = duration
 	} else {
 		state.avgDuration = (state.avgDuration + duration) / 2
 	}
+	state.lastActivity = time.Now()
 	
 	switch state.state {
 	case Closed:
@@ -977,4 +973,48 @@ func (mm *MemoryMonitor) GetUsagePercent() float64 {
 	}
 
 	return float64(mm.currentBytes) / float64(mm.maxMemoryBytes) * 100
+}
+
+// cleanupRoutine periodically cleans up inactive database states to prevent memory leaks
+func (p *circuitBreakerProcessor) cleanupRoutine() {
+	defer p.wg.Done()
+
+	ticker := time.NewTicker(15 * time.Minute) // Cleanup every 15 minutes
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			p.cleanupInactiveDatabaseStates()
+		case <-p.shutdownChan:
+			return
+		}
+	}
+}
+
+// cleanupInactiveDatabaseStates removes database states that haven't been active for a long time
+func (p *circuitBreakerProcessor) cleanupInactiveDatabaseStates() {
+	cleanupThreshold := time.Hour * 24 // Remove states inactive for 24 hours
+	now := time.Now()
+
+	p.dbStatesMutex.Lock()
+	defer p.dbStatesMutex.Unlock()
+
+	removedCount := 0
+	for dbName, state := range p.databaseStates {
+		state.mutex.RLock()
+		inactive := now.Sub(state.lastActivity) > cleanupThreshold
+		state.mutex.RUnlock()
+
+		if inactive {
+			delete(p.databaseStates, dbName)
+			removedCount++
+		}
+	}
+
+	if removedCount > 0 {
+		p.logger.Info("Cleaned up inactive database circuit states",
+			zap.Int("removed_count", removedCount),
+			zap.Int("remaining_count", len(p.databaseStates)))
+	}
 }

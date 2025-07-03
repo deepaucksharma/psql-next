@@ -1,0 +1,133 @@
+extensions:
+  healthcheck:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - testdb
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: root
+    database: testdb
+    collection_interval: 10s
+
+processors:
+  # Verification processor
+  verification:
+    enable_periodic_verification: true
+    verification_interval: 30s
+    data_freshness_threshold: 5m
+    min_entity_correlation_rate: 0.8
+    min_normalization_rate: 0.9
+    require_entity_synthesis: true
+    export_feedback_as_logs: true
+
+  # Adaptive sampler with correct parameters
+  adaptivesampler:
+    sync_interval: 1m
+    high_cost_threshold: 1000.0
+    min_sample_rate: 0.01
+    max_samples_per_second: 100.0
+    in_memory_only: true
+    default_sample_rate: 0.1
+    max_records_per_second: 1000
+    enable_debug_logging: false
+
+  # Circuit breaker with correct parameters
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 3
+    open_state_timeout: 30s
+    max_concurrent_requests: 100
+    base_timeout: 5s
+    max_timeout: 30s
+    enable_adaptive_timeout: true
+    health_check_interval: 10s
+    memory_threshold_mb: 512
+    cpu_threshold_percent: 80.0
+    enable_debug_logging: false
+
+  # Query correlator with correct parameters
+  querycorrelator:
+    retention_period: 24h
+    cleanup_interval: 1h
+    enable_table_correlation: true
+    enable_database_correlation: true
+    max_queries_tracked: 10000
+
+  # Cost control processor
+  costcontrol:
+    monthly_budget_usd: 1000.0
+    price_per_gb: 0.35
+    metric_cardinality_limit: 10000
+    slow_span_threshold_ms: 2000
+    max_log_body_size: 10240
+    reporting_interval: 60s
+    aggressive_mode: false
+    data_plus_enabled: false
+
+  # NR error monitor with correct parameters
+  nrerrormonitor:
+    max_attribute_length: 4096
+    max_metric_name_length: 255
+    cardinality_warning_threshold: 10000
+    alert_threshold: 100
+    reporting_interval: 60s
+    error_suppression_duration: 5m
+    enable_proactive_validation: true
+
+  # Plan attribute extractor with correct parameters
+  planattributeextractor:
+    timeout_ms: 100
+    error_mode: "ignore"
+    enable_debug_logging: false
+    unsafe_plan_collection: false
+    safe_mode: true
+    postgresql_rules:
+      detection_jsonpath: "0.Plan"
+      extractions:
+        "db.query.plan.cost": "0.Plan.Total Cost"
+        "db.query.plan.rows": "0.Plan.Plan Rows"
+    mysql_rules:
+      detection_jsonpath: "system"
+      extractions:
+        "db.query.plan.avg_rows": "avg_rows"
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+  prometheus:
+    endpoint: "0.0.0.0:8890"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  extensions: [healthcheck]
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql]
+      processors: [
+        verification,
+        adaptivesampler,
+        circuitbreaker,
+        querycorrelator,
+        costcontrol,
+        nrerrormonitor,
+        planattributeextractor
+      ]
+      exporters: [debug, prometheus]
+  telemetry:
+    logs:
+      level: debug
