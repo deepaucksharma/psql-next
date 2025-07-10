@@ -78,7 +78,7 @@ processors:
         sampling_percentage: 5
 
   # Staging circuit breaker
-  circuitbreaker:
+  circuit_breaker:
     max_failures: 8
     failure_threshold_percentage: 60
     timeout: 20s

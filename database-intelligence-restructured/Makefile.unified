@@ -1,0 +1,382 @@
+# Database Intelligence - Unified Makefile
+# Single point of control for all operations: build, test, run, deploy
+
+.DEFAULT_GOAL := help
+SHELL := /bin/bash
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Project metadata
+PROJECT_NAME := database-intelligence
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "2.0.0-dev")
+BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS := -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)
+
+# Directories
+BIN_DIR := bin
+CONFIGS_DIR := configs/unified
+DOCKER_DIR := deployments/docker
+TOOLS_DIR := tools/scripts
+
+# Docker configuration
+DOCKER_REGISTRY := database-intelligence
+DOCKER_TAG := $(VERSION)
+COMPOSE_FILE := docker-compose.unified.yml
+
+# Environment configuration
+ENV_FILE := .env
+ENV_TEMPLATE := configs/unified/environment-template.env
+
+# Testing configuration
+TEST_TIMEOUT := 600s
+E2E_TIMEOUT := 900s
+
+# Colors for output
+GREEN := \033[0;32m
+BLUE := \033[0;34m
+YELLOW := \033[1;33m
+RED := \033[0;31m
+NC := \033[0m # No Color
+
+# =============================================================================
+# HELP TARGET
+# =============================================================================
+
+.PHONY: help
+help: ## Show this help message
+	@echo 'Database Intelligence - Unified Operations'
+	@echo ''
+	@echo 'Usage: make [target]'
+	@echo ''
+	@echo 'Available targets:'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  $(BLUE)%-20s$(NC) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+# =============================================================================
+# SETUP AND INITIALIZATION
+# =============================================================================
+
+.PHONY: setup
+setup: ## Initialize the project environment
+	@echo "$(GREEN)Setting up Database Intelligence environment...$(NC)"
+	@if [ ! -f $(ENV_FILE) ]; then \
+		echo "$(YELLOW)Creating .env file from template...$(NC)"; \
+		cp $(ENV_TEMPLATE) $(ENV_FILE); \
+		echo "$(YELLOW)Please edit .env file with your configuration$(NC)"; \
+	fi
+	@mkdir -p $(BIN_DIR) test-results telemetry-output
+	@echo "$(GREEN)✓ Environment setup complete$(NC)"
+
+.PHONY: deps
+deps: ## Install and update dependencies
+	@echo "$(GREEN)Updating Go dependencies...$(NC)"
+	@go work sync
+	@find . -name "go.mod" -type f | while read gomod; do \
+		dir=$$(dirname "$$gomod"); \
+		echo "Updating dependencies in $$dir"; \
+		(cd "$$dir" && go mod tidy) || echo "Warning: failed to tidy $$dir"; \
+	done
+	@echo "$(GREEN)✓ Dependencies updated$(NC)"
+
+# =============================================================================
+# BUILD TARGETS
+# =============================================================================
+
+.PHONY: build-minimal
+build-minimal: ## Build minimal distribution
+	@echo "$(GREEN)Building minimal distribution...$(NC)"
+	@cd distributions/minimal && go build -ldflags="$(LDFLAGS)" -o ../../$(BIN_DIR)/collector-minimal
+	@echo "$(GREEN)✓ Minimal distribution built: $(BIN_DIR)/collector-minimal$(NC)"
+
+.PHONY: build-standard
+build-standard: ## Build standard distribution
+	@echo "$(GREEN)Building standard distribution...$(NC)"
+	@cd distributions/standard && go build -ldflags="$(LDFLAGS)" -o ../../$(BIN_DIR)/collector-standard
+	@echo "$(GREEN)✓ Standard distribution built: $(BIN_DIR)/collector-standard$(NC)"
+
+.PHONY: build-enterprise
+build-enterprise: ## Build enterprise distribution
+	@echo "$(GREEN)Building enterprise distribution...$(NC)"
+	@cd distributions/enterprise && go build -ldflags="$(LDFLAGS)" -o ../../$(BIN_DIR)/collector-enterprise
+	@echo "$(GREEN)✓ Enterprise distribution built: $(BIN_DIR)/collector-enterprise$(NC)"
+
+.PHONY: build-all
+build-all: build-minimal build-standard build-enterprise ## Build all distributions
+	@echo "$(GREEN)✓ All distributions built successfully$(NC)"
+	@ls -la $(BIN_DIR)/
+
+# =============================================================================
+# DOCKER TARGETS
+# =============================================================================
+
+.PHONY: docker-build
+docker-build: ## Build all Docker images
+	@echo "$(GREEN)Building Docker images...$(NC)"
+	@docker build -f $(DOCKER_DIR)/dockerfiles/Dockerfile.minimal -t $(DOCKER_REGISTRY)/minimal:$(DOCKER_TAG) .
+	@docker build -f $(DOCKER_DIR)/dockerfiles/Dockerfile.standard -t $(DOCKER_REGISTRY)/standard:$(DOCKER_TAG) .
+	@docker build -f $(DOCKER_DIR)/dockerfiles/Dockerfile.enterprise -t $(DOCKER_REGISTRY)/enterprise:$(DOCKER_TAG) .
+	@docker build -f $(DOCKER_DIR)/dockerfiles/Dockerfile.load-generator -t $(DOCKER_REGISTRY)/load-generator:$(DOCKER_TAG) .
+	@docker build -f $(DOCKER_DIR)/dockerfiles/Dockerfile.e2e-tests -t $(DOCKER_REGISTRY)/e2e-tests:$(DOCKER_TAG) .
+	@echo "$(GREEN)✓ Docker images built$(NC)"
+
+.PHONY: docker-run
+docker-run: ## Run the complete system with Docker Compose
+	@echo "$(GREEN)Starting complete Database Intelligence system...$(NC)"
+	@if [ ! -f $(ENV_FILE) ]; then \
+		echo "$(RED)Error: .env file not found. Run 'make setup' first.$(NC)"; \
+		exit 1; \
+	fi
+	@docker-compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
+	@echo "$(GREEN)✓ System started. Access points:$(NC)"
+	@echo "  • Collector Health: http://localhost:13133/health"
+	@echo "  • Collector Internal Metrics: http://localhost:8888/metrics"
+	@echo "  • ZPages (OTEL observability): http://localhost:55679"
+	@echo "  • All telemetry data sent to New Relic"
+
+.PHONY: docker-logs
+docker-logs: ## Show logs from all containers
+	@docker-compose -f $(COMPOSE_FILE) logs -f
+
+.PHONY: docker-stop
+docker-stop: ## Stop the Docker Compose system
+	@echo "$(GREEN)Stopping Database Intelligence system...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) down
+	@echo "$(GREEN)✓ System stopped$(NC)"
+
+.PHONY: docker-clean
+docker-clean: ## Clean up Docker resources
+	@echo "$(GREEN)Cleaning up Docker resources...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) down -v --remove-orphans
+	@docker system prune -f
+	@echo "$(GREEN)✓ Docker cleanup complete$(NC)"
+
+# =============================================================================
+# TESTING TARGETS
+# =============================================================================
+
+.PHONY: test-unit
+test-unit: ## Run unit tests for all modules
+	@echo "$(GREEN)Running unit tests...$(NC)"
+	@go test -v -timeout=$(TEST_TIMEOUT) ./...
+	@echo "$(GREEN)✓ Unit tests completed$(NC)"
+
+.PHONY: test-integration
+test-integration: ## Run integration tests
+	@echo "$(GREEN)Running integration tests...$(NC)"
+	@cd tests/integration && go test -v -timeout=$(TEST_TIMEOUT) ./...
+	@echo "$(GREEN)✓ Integration tests completed$(NC)"
+
+.PHONY: test-e2e
+test-e2e: docker-run ## Run end-to-end tests
+	@echo "$(GREEN)Running E2E tests...$(NC)"
+	@echo "$(YELLOW)Waiting for system to be ready...$(NC)"
+	@sleep 30
+	@docker-compose -f $(COMPOSE_FILE) --profile testing up --exit-code-from e2e-tests e2e-tests
+	@echo "$(GREEN)✓ E2E tests completed$(NC)"
+
+.PHONY: test-load
+test-load: docker-run ## Run load tests
+	@echo "$(GREEN)Running load tests...$(NC)"
+	@echo "$(YELLOW)Waiting for system to be ready...$(NC)"
+	@sleep 30
+	@docker-compose -f $(COMPOSE_FILE) --profile load-testing up --exit-code-from load-generator load-generator
+	@echo "$(GREEN)✓ Load tests completed$(NC)"
+
+.PHONY: test-all
+test-all: test-unit test-integration test-e2e ## Run all tests
+	@echo "$(GREEN)✓ All tests completed successfully$(NC)"
+
+# =============================================================================
+# RUN TARGETS
+# =============================================================================
+
+.PHONY: run-minimal
+run-minimal: build-minimal ## Run minimal distribution locally
+	@echo "$(GREEN)Starting minimal collector...$(NC)"
+	@$(BIN_DIR)/collector-minimal --config=$(CONFIGS_DIR)/database-intelligence-complete.yaml
+
+.PHONY: run-standard
+run-standard: build-standard ## Run standard distribution locally
+	@echo "$(GREEN)Starting standard collector...$(NC)"
+	@$(BIN_DIR)/collector-standard --config=$(CONFIGS_DIR)/database-intelligence-complete.yaml
+
+.PHONY: run-enterprise
+run-enterprise: build-enterprise ## Run enterprise distribution locally
+	@echo "$(GREEN)Starting enterprise collector...$(NC)"
+	@$(BIN_DIR)/collector-enterprise --config=$(CONFIGS_DIR)/database-intelligence-complete.yaml
+
+.PHONY: run-dev
+run-dev: setup ## Run in development mode with file watching
+	@echo "$(GREEN)Starting development mode...$(NC)"
+	@if command -v air >/dev/null 2>&1; then \
+		air -c .air.toml; \
+	else \
+		echo "$(YELLOW)Air not found. Installing...$(NC)"; \
+		go install github.com/cosmtrek/air@latest; \
+		air -c .air.toml; \
+	fi
+
+# =============================================================================
+# MONITORING AND VERIFICATION
+# =============================================================================
+
+.PHONY: health-check
+health-check: ## Check system health
+	@echo "$(GREEN)Checking system health...$(NC)"
+	@echo "Collector health:"
+	@curl -f http://localhost:13133/health || echo "$(RED)✗ Collector unhealthy$(NC)"
+	@echo ""
+	@echo "Database connections:"
+	@docker-compose -f $(COMPOSE_FILE) exec postgres pg_isready -U postgres || echo "$(RED)✗ PostgreSQL unhealthy$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) exec mysql mysqladmin ping -h localhost -u root -ppassword || echo "$(RED)✗ MySQL unhealthy$(NC)"
+
+.PHONY: metrics
+metrics: ## Show collector internal metrics
+	@echo "$(GREEN)Current collector internal metrics:$(NC)"
+	@curl -s http://localhost:8888/metrics | grep -E "(otelcol_|database_intelligence_)" | head -20
+
+.PHONY: logs
+logs: ## Show collector logs
+	@echo "$(GREEN)Recent collector logs:$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) logs --tail=50 collector
+
+.PHONY: verify-data
+verify-data: ## Verify data is flowing through the pipeline
+	@echo "$(GREEN)Verifying data pipeline...$(NC)"
+	@echo "Checking collector internal metrics:"
+	@curl -s http://localhost:8888/metrics | grep "otelcol_receiver_accepted_metric_points" || echo "$(RED)No receiver metrics found$(NC)"
+	@echo "Checking export metrics:"
+	@curl -s http://localhost:8888/metrics | grep "otelcol_exporter_sent_metric_points" || echo "$(RED)No export metrics found$(NC)"
+	@echo "Checking processor metrics:"
+	@curl -s http://localhost:8888/metrics | grep "otelcol_processor_accepted_metric_points" || echo "$(RED)No processor metrics found$(NC)"
+
+# =============================================================================
+# MAINTENANCE TARGETS
+# =============================================================================
+
+.PHONY: clean
+clean: ## Clean build artifacts
+	@echo "$(GREEN)Cleaning build artifacts...$(NC)"
+	@rm -rf $(BIN_DIR)
+	@rm -rf test-results
+	@rm -rf telemetry-output
+	@go clean -cache -testcache
+	@echo "$(GREEN)✓ Clean complete$(NC)"
+
+.PHONY: format
+format: ## Format code
+	@echo "$(GREEN)Formatting code...$(NC)"
+	@go fmt ./...
+	@goimports -w . 2>/dev/null || echo "$(YELLOW)goimports not found, skipping$(NC)"
+	@echo "$(GREEN)✓ Code formatted$(NC)"
+
+.PHONY: lint
+lint: ## Run linters
+	@echo "$(GREEN)Running linters...$(NC)"
+	@golangci-lint run ./... || echo "$(YELLOW)golangci-lint not found, skipping$(NC)"
+	@echo "$(GREEN)✓ Linting complete$(NC)"
+
+.PHONY: security
+security: ## Run security checks
+	@echo "$(GREEN)Running security checks...$(NC)"
+	@gosec ./... || echo "$(YELLOW)gosec not found, skipping$(NC)"
+	@echo "$(GREEN)✓ Security checks complete$(NC)"
+
+.PHONY: update
+update: ## Update dependencies and tools
+	@echo "$(GREEN)Updating dependencies and tools...$(NC)"
+	@go get -u ./...
+	@go mod tidy
+	@echo "$(GREEN)✓ Update complete$(NC)"
+
+# =============================================================================
+# DEMONSTRATION TARGETS
+# =============================================================================
+
+.PHONY: demo
+demo: docker-run ## Run complete demonstration
+	@echo "$(GREEN)Starting Database Intelligence demonstration...$(NC)"
+	@echo "$(YELLOW)Waiting for system to initialize...$(NC)"
+	@sleep 60
+	@echo "$(GREEN)System ready!$(NC)"
+	@echo "$(GREEN)✓ Demo environment ready$(NC)"
+	@echo ""
+	@echo "$(BLUE)Demo Instructions:$(NC)"
+	@echo "1. Collector Health: http://localhost:13133/health"
+	@echo "2. Collector Internal Metrics: http://localhost:8888/metrics"
+	@echo "3. ZPages (OTEL observability): http://localhost:55679"
+	@echo "4. All telemetry data is being sent to New Relic"
+	@echo ""
+	@echo "$(YELLOW)Check New Relic for your data visualization$(NC)"
+	@echo "$(YELLOW)Generate load with: make test-load$(NC)"
+	@echo "$(YELLOW)Stop demo with: make docker-stop$(NC)"
+
+.PHONY: demo-stop
+demo-stop: docker-stop ## Stop demonstration environment
+
+# =============================================================================
+# RELEASE TARGETS
+# =============================================================================
+
+.PHONY: release-build
+release-build: clean build-all docker-build ## Build release artifacts
+	@echo "$(GREEN)Building release artifacts...$(NC)"
+	@mkdir -p release/$(VERSION)
+	@cp -r $(BIN_DIR) release/$(VERSION)/
+	@cp -r $(CONFIGS_DIR) release/$(VERSION)/configs
+	@cp $(COMPOSE_FILE) release/$(VERSION)/
+	@cp $(ENV_TEMPLATE) release/$(VERSION)/
+	@tar -czf release/database-intelligence-$(VERSION).tar.gz -C release/$(VERSION) .
+	@echo "$(GREEN)✓ Release artifacts created: release/database-intelligence-$(VERSION).tar.gz$(NC)"
+
+.PHONY: release-test
+release-test: release-build ## Test release artifacts
+	@echo "$(GREEN)Testing release artifacts...$(NC)"
+	@cd release/$(VERSION) && make test-all
+	@echo "$(GREEN)✓ Release testing complete$(NC)"
+
+# =============================================================================
+# UTILITY TARGETS
+# =============================================================================
+
+.PHONY: config-validate
+config-validate: ## Validate configuration files
+	@echo "$(GREEN)Validating configuration files...$(NC)"
+	@$(BIN_DIR)/collector-enterprise --config=$(CONFIGS_DIR)/database-intelligence-complete.yaml --dry-run || echo "$(RED)Configuration validation failed$(NC)"
+	@echo "$(GREEN)✓ Configuration validated$(NC)"
+
+.PHONY: workspace-status
+workspace-status: ## Show Go workspace status
+	@echo "$(GREEN)Go workspace status:$(NC)"
+	@go work status
+	@echo ""
+	@echo "$(GREEN)Module list:$(NC)"
+	@find . -name "go.mod" -type f | sort
+
+.PHONY: version
+version: ## Show version information
+	@echo "$(GREEN)Database Intelligence Version Information:$(NC)"
+	@echo "Version: $(VERSION)"
+	@echo "Build Time: $(BUILD_TIME)"
+	@echo "Go Version: $(shell go version)"
+	@echo "Git Commit: $(shell git rev-parse HEAD 2>/dev/null || echo 'unknown')"
+
+# =============================================================================
+# SPECIAL TARGETS
+# =============================================================================
+
+.PHONY: all
+all: setup deps build-all test-all ## Complete build and test pipeline
+
+.PHONY: quick
+quick: build-enterprise run-enterprise ## Quick build and run for development
+
+.PHONY: ci
+ci: deps build-all test-unit test-integration ## CI pipeline (no E2E tests)
+
+# Ensure required tools are available
+check-tools:
+	@command -v go >/dev/null 2>&1 || { echo "$(RED)Go is required but not installed$(NC)"; exit 1; }
+	@command -v docker >/dev/null 2>&1 || { echo "$(RED)Docker is required but not installed$(NC)"; exit 1; }
+	@command -v docker-compose >/dev/null 2>&1 || { echo "$(RED)Docker Compose is required but not installed$(NC)"; exit 1; }

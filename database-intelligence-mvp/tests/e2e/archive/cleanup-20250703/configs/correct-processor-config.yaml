@@ -43,7 +43,7 @@ processors:
     enable_debug_logging: false
 
   # Circuit breaker with correct parameters
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     success_threshold: 3
     open_state_timeout: 30s

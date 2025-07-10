@@ -138,7 +138,7 @@ processors:
         action: upsert
   
   # Circuit breaker
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     timeout: 30s
     cooldown_period: 1m
@@ -311,7 +311,7 @@ service:
         - memory_limiter
         - resource
         - planattributeextractor
-        - circuitbreaker
+        - circuit_breaker
         - adaptivesampler
         - batch
       exporters: [otlp/newrelic, prometheus, debug]

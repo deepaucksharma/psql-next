@@ -1,0 +1,267 @@
+# Default values for database-intelligence
+# This is a YAML-formatted file with corrected configurations
+
+replicaCount: 2
+
+environment: production
+
+image:
+  repository: database-intelligence-collector
+  pullPolicy: IfNotPresent
+  tag: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 4317
+  targetPort: 4317
+  
+  health:
+    port: 13133
+  
+  zpages:
+    port: 55679
+    
+  metrics:
+    port: 8888
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8888"
+      prometheus.io/path: "/metrics"
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+config:
+  receivers:
+    postgresql:
+      enabled: true
+      collectionInterval: 60s
+      databases: []  # Will use env var default
+      tls:
+        insecure: true
+        
+    mysql:
+      enabled: true
+      collectionInterval: 60s
+      database: ""  # Will use env var default
+      
+    sqlquery:
+      postgresql:
+        enabled: true
+        collectionInterval: 300s
+        queries:
+          - sql: |
+              SET LOCAL statement_timeout = '3000ms';
+              SET LOCAL lock_timeout = '100ms';
+              
+              SELECT
+                queryid::text as query_id,
+                query as query_text,
+                round(mean_exec_time::numeric, 2) as avg_duration_ms,
+                calls as execution_count,
+                round(total_exec_time::numeric, 2) as total_duration_ms,
+                current_database() as database_name
+              FROM pg_stat_statements
+              WHERE mean_exec_time > 50
+                AND calls > 5
+                AND query NOT LIKE '%pg_%'
+              ORDER BY mean_exec_time DESC
+              LIMIT 10
+            logs:
+              - body_column: query_text
+                attributes:
+                  query_id: query_id
+                  avg_duration_ms: avg_duration_ms
+                  execution_count: execution_count
+                  total_duration_ms: total_duration_ms
+                  database_name: database_name
+                  
+      mysql:
+        enabled: true
+        collectionInterval: 300s
+        queries:
+          - sql: |
+              SELECT
+                DIGEST as query_id,
+                DIGEST_TEXT as query_text,
+                ROUND(AVG_TIMER_WAIT/1000000, 2) as avg_duration_ms,
+                COUNT_STAR as execution_count,
+                ROUND((AVG_TIMER_WAIT * COUNT_STAR)/1000000, 2) as total_duration_ms,
+                SCHEMA_NAME as database_name
+              FROM performance_schema.events_statements_summary_by_digest
+              WHERE SCHEMA_NAME IS NOT NULL
+                AND AVG_TIMER_WAIT > 50000000
+                AND COUNT_STAR > 5
+              ORDER BY AVG_TIMER_WAIT DESC
+              LIMIT 10
+            logs:
+              - body_column: query_text
+                attributes:
+                  query_id: query_id
+                  avg_duration_ms: avg_duration_ms
+                  execution_count: execution_count
+                  total_duration_ms: total_duration_ms
+                  database_name: database_name
+
+  processors:
+    memoryLimiter:
+      checkInterval: 2s
+      limitMib: 1024
+      spikeLimitMib: 256
+      
+    resource:
+      attributes: []  # Additional attributes beyond the defaults
+      
+    transform:
+      enabled: true
+      errorMode: ignore
+      metricStatements: []
+      logStatements: []
+      
+    sanitizePii:
+      enabled: true
+      patterns: []  # Additional patterns beyond defaults
+      
+    probabilisticSampler:
+      enabled: true
+      hashSeed: 22
+      samplingPercentage: 25
+      
+    batch:
+      timeout: 30s
+      sendBatchSize: 50
+      sendBatchMaxSize: 100
+
+  exporters:
+    otlp:
+      enabled: true
+      endpoint: "https://otlp.nr-data.net:4317"
+      compression: gzip
+      timeout: 30s
+      headers: {}  # Additional headers beyond api-key
+      retryOnFailure:
+        enabled: true
+        initialInterval: 5s
+        maxInterval: 30s
+        maxElapsedTime: 120s
+      sendingQueue:
+        enabled: true
+        numConsumers: 2
+        queueSize: 256
+        
+    debug:
+      enabled: true
+      verbosity: basic
+      samplingInitial: 5
+      samplingThereafter: 100
+
+  pipelines:
+    metrics:
+      processors: ["memory_limiter", "resource", "transform/metrics", "batch"]
+      exporters: ["otlp/newrelic", "debug"]
+      
+    logs:
+      processors: ["memory_limiter", "resource", "transform/logs", "transform/sanitize_pii", "probabilistic_sampler", "batch"]
+      exporters: ["otlp/newrelic", "debug"]
+
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+    metrics:
+      level: detailed
+
+# Environment variables configuration
+env:
+  - name: POSTGRES_HOST
+    valueFrom:
+      secretKeyRef:
+        name: database-credentials
+        key: postgres-host
+  - name: POSTGRES_PORT
+    value: "5432"
+  - name: POSTGRES_USER
+    valueFrom:
+      secretKeyRef:
+        name: database-credentials
+        key: postgres-user
+  - name: POSTGRES_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: database-credentials
+        key: postgres-password
+  - name: POSTGRES_DATABASE
+    value: "postgres"
+    
+  - name: MYSQL_HOST
+    valueFrom:
+      secretKeyRef:
+        name: database-credentials
+        key: mysql-host
+  - name: MYSQL_PORT
+    value: "3306"
+  - name: MYSQL_USER
+    valueFrom:
+      secretKeyRef:
+        name: database-credentials
+        key: mysql-user
+  - name: MYSQL_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: database-credentials
+        key: mysql-password
+  - name: MYSQL_DATABASE
+    value: "mysql"
+    
+  - name: NEW_RELIC_LICENSE_KEY
+    valueFrom:
+      secretKeyRef:
+        name: newrelic-credentials
+        key: license-key
+        
+  - name: OTLP_ENDPOINT
+    value: "https://otlp.nr-data.net:4317"
+    
+  - name: POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+        
+  - name: HOSTNAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - database-intelligence
+          topologyKey: kubernetes.io/hostname

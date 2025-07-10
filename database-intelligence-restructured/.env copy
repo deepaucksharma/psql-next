@@ -1,0 +1,71 @@
+# Database Intelligence MVP Environment Configuration Example
+# Copy this file to .env and update with your actual values
+# This example file can be safely committed to version control
+
+# ====================
+# New Relic Configuration
+# ====================
+# Your New Relic license key (required)
+NEW_RELIC_LICENSE_KEY=your_license_key_here
+NEW_RELIC_USER_KEY=your_user_key_here
+
+# Your New Relic account ID (required for verification)
+NEW_RELIC_ACCOUNT_ID=3630072
+
+# New Relic OTLP endpoint (default for US datacenter)
+# For EU: https://otlp.eu01.nr-data.net:4318
+OTLP_ENDPOINT=https://otlp.nr-data.net:4318
+
+# ====================
+# PostgreSQL Configuration
+# ====================
+# Connection string for PostgreSQL read replica
+# Format: postgres://username:password@host:port/database?sslmode=require
+PG_REPLICA_DSN=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+
+# ====================
+# MySQL Configuration
+# ====================
+# Connection string for MySQL read replica
+# Format: username:password@tcp(host:port)/database?tls=true
+MYSQL_READONLY_DSN="root:mysql@tcp(localhost:3306)/mysql?tls=false"
+
+# ====================
+# MongoDB Configuration (Optional)
+# ====================
+# Connection string for MongoDB secondary
+# Format: mongodb://username:password@host:port/database?authSource=admin&readPreference=secondary
+MONGODB_SECONDARY_DSN="mongodb://newrelic_monitor:password@mongodb-secondary.example.com:27017/production?authSource=admin&readPreference=secondary"
+
+# ====================
+# Deployment Configuration
+# ====================
+# Environment name (development, staging, production)
+DEPLOYMENT_ENV=development
+
+# ====================
+# Collection Settings
+# ====================
+# Collection interval in seconds (minimum 60 for production)
+COLLECTION_INTERVAL_SECONDS=300
+
+# Query timeout in milliseconds
+QUERY_TIMEOUT_MS=3000
+
+# ====================
+# Sampling Configuration
+# ====================
+# Sampling percentage (0-100)
+SAMPLING_PERCENTAGE=25
+
+# ====================
+# Security Settings
+# ====================
+# Enable PII sanitization
+ENABLE_PII_SANITIZATION=true
+
+# ====================
+# Logging Configuration
+# ====================
+# Log level (debug, info, warn, error)
+LOG_LEVEL=info

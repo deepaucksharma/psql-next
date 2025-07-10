@@ -229,7 +229,7 @@ processors:
         priority: 40
 
   # Circuit breaker to protect against runaway queries
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 0.5
     timeout: 30s
     half_open_requests: 5

@@ -85,7 +85,7 @@ processors:
             value: true
         sample_rate: 1.0
         
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     timeout_duration: 10s
     

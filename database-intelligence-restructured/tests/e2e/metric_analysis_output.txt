@@ -1,0 +1,316 @@
+🔍 Analyzing PostgreSQL Metrics Implementation Sources
+Account ID: 3630072
+Timestamp: Thu Jul 10 19:32:34 IST 2025
+================================================================================
+
+📊 SECTION 1: ALL POSTGRESQL METRICS
+========================================
+
+### All PostgreSQL Metrics ###
+[
+  {
+    "uniques.metricName": [
+      "postgresql.index.scans",
+      "postgresql.index.size",
+      "postgresql.table.size",
+      "postgres.execution_plan.cost",
+      "postgresql.connection.max",
+      "postgresql.bgwriter.buffers.writes",
+      "postgres.slow_queries.disk_reads",
+      "postgres.execution_plan.time",
+      "postgresql.backends",
+      "newrelic.goldenmetrics.infra.postgresqlinstance.scheduledCheckpoints",
+      "postgres.execution_plan.blocks_read",
+      "postgresql.rollbacks",
+      "postgresql.bgwriter.buffers.allocated",
+      "postgres.slow_queries.elapsed_time",
+      "postgresql.operations",
+      "postgresql.bgwriter.maxwritten",
+      "newrelic.goldenmetrics.infra.postgresqlinstance.buffersAllocated",
+      "postgres.execution_plan.blocks_hit",
+      "postgresql.db_size",
+      "postgres.slow_queries.cpu_time",
+      "postgresql.bgwriter.checkpoint.count",
+      "postgresql.blocks_read",
+      "postgresql.database.count",
+      "postgres.slow_queries.count",
+      "postgresql.table.vacuum.count",
+      "postgres.individual_queries.cpu_time",
+      "postgres.slow_queries.disk_writes",
+      "newrelic.goldenmetrics.infra.postgresqlinstance.requestedCheckpoints",
+      "postgresql.commits",
+      "postgresql.bgwriter.duration",
+      "postgres.execution_plan.rows",
+      "postgresql.table.count",
+      "postgresql.rows",
+      "postgres.wait_events"
+    ]
+  }
+]
+
+
+📊 SECTION 2: OOTB POSTGRESQL RECEIVER METRICS
+========================================
+
+### OOTB PostgreSQL Receiver Metrics Count ###
+Query failed
+
+
+📊 SECTION 3: CUSTOM SQLQUERY RECEIVER METRICS
+========================================
+
+### Custom SQLQuery Metrics Count ###
+Query failed
+
+
+📊 SECTION 4: OOTB METRIC ATTRIBUTES SAMPLE
+========================================
+Metric: postgresql.backends
+
+### postgresql.backends - Full Attributes ###
+[
+  {
+    "db.system": "postgresql",
+    "description": "The number of backends.",
+    "entity.guid": "MzYzMDA3MnxFWFR8U0VSVklDRXwtNjcwODUzMzE4NzU4NTIyMDUzNA",
+    "entity.name": "database-intelligence",
+    "entity.type": "SERVICE",
+    "environment": "e2e-test",
+    "instrumentation.provider": "opentelemetry",
+    "metricName": "postgresql.backends",
+    "newrelic.source": "api.metrics.otlp",
+    "otel.library.name": "otelcol/postgresqlreceiver",
+    "otel.library.version": "0.91.0",
+    "postgresql.backends": {
+      "count": 1,
+      "latest": 7.0,
+      "max": 7.0,
+      "min": 7.0,
+      "sum": 7.0,
+      "type": "gauge"
+    },
+    "postgresql.database.name": "postgres",
+    "service.name": "database-intelligence",
+    "timestamp": 1752155169627,
+    "unit": "1"
+  }
+]
+
+Metric: postgresql.db_size
+
+### postgresql.db_size - Full Attributes ###
+[
+  {
+    "db.system": "postgresql",
+    "description": "The database disk usage.",
+    "entity.guid": "MzYzMDA3MnxFWFR8U0VSVklDRXwtNjcwODUzMzE4NzU4NTIyMDUzNA",
+    "entity.name": "database-intelligence",
+    "entity.type": "SERVICE",
+    "environment": "e2e-test",
+    "instrumentation.provider": "opentelemetry",
+    "metricName": "postgresql.db_size",
+    "newrelic.source": "api.metrics.otlp",
+    "otel.library.name": "otelcol/postgresqlreceiver",
+    "otel.library.version": "0.91.0",
+    "postgresql.database.name": "postgres",
+    "postgresql.db_size": {
+      "count": 1,
+      "latest": 7787311.0,
+      "max": 7787311.0,
+      "min": 7787311.0,
+      "sum": 7787311.0,
+      "type": "gauge"
+    },
+    "service.name": "database-intelligence",
+    "timestamp": 1752155169627,
+    "unit": "By"
+  }
+]
+
+Metric: postgresql.commits
+
+### postgresql.commits - Full Attributes ###
+[
+  {
+    "db.system": "postgresql",
+    "description": "The number of commits.",
+    "endTimestamp": 1752155169627,
+    "entity.guid": "MzYzMDA3MnxFWFR8U0VSVklDRXwtNjcwODUzMzE4NzU4NTIyMDUzNA",
+    "entity.name": "database-intelligence",
+    "entity.type": "SERVICE",
+    "environment": "e2e-test",
+    "instrumentation.provider": "opentelemetry",
+    "metricName": "postgresql.commits",
+    "newrelic.source": "api.metrics.otlp",
+    "otel.library.name": "otelcol/postgresqlreceiver",
+    "otel.library.version": "0.91.0",
+    "postgresql.commits": {
+      "count": 20.0,
+      "cumulative": 33199.0,
+      "type": "cumulativeCount"
+    },
+    "postgresql.database.name": "postgres",
+    "service.name": "database-intelligence",
+    "timestamp": 1752155159627,
+    "unit": "1"
+  }
+]
+
+
+📊 SECTION 5: CUSTOM METRIC ATTRIBUTES SAMPLE
+========================================
+Metric: postgres.slow_queries.elapsed_time
+
+### postgres.slow_queries.elapsed_time - Full Attributes ###
+[
+  {
+    "db.name": "postgres",
+    "db.operation": "SELECT",
+    "db.postgresql.query_id": "-9050898131454713370",
+    "db.schema": "public",
+    "db.statement": "SELECT pg_sleep($1), $2 as description",
+    "db.system": "postgresql",
+    "entity.guid": "MzYzMDA3MnxFWFR8U0VSVklDRXwtNjcwODUzMzE4NzU4NTIyMDUzNA",
+    "entity.name": "database-intelligence",
+    "entity.type": "SERVICE",
+    "environment": "e2e-test",
+    "instrumentation.provider": "opentelemetry",
+    "metricName": "postgres.slow_queries.elapsed_time",
+    "newrelic.source": "api.metrics.otlp",
+    "otel.library.name": "",
+    "otel.library.version": "",
+    "postgres.slow_queries.elapsed_time": {
+      "count": 1,
+      "latest": 1000.566876,
+      "max": 1000.566876,
+      "min": 1000.566876,
+      "sum": 1000.566876,
+      "type": "gauge"
+    },
+    "query_id": "-9050898131454713370",
+    "query_text": "SELECT pg_sleep($1), $2 as description",
+    "schema_name": "public",
+    "service.name": "database-intelligence",
+    "statement_type": "SELECT",
+    "timestamp": 1752155164629,
+    "unit": "ms"
+  }
+]
+
+Metric: postgres.wait_events
+
+### postgres.wait_events - Full Attributes ###
+[
+  {
+    "db.name": "postgres",
+    "db.postgresql.query_id": "e25017c59f160267a8d1cf35acf420cd",
+    "db.system": "postgresql",
+    "db.wait_event.category": "None",
+    "db.wait_event.name": "None",
+    "entity.guid": "MzYzMDA3MnxFWFR8U0VSVklDRXwtNjcwODUzMzE4NzU4NTIyMDUzNA",
+    "entity.name": "database-intelligence",
+    "entity.type": "SERVICE",
+    "environment": "e2e-test",
+    "instrumentation.provider": "opentelemetry",
+    "metricName": "postgres.wait_events",
+    "newrelic.source": "api.metrics.otlp",
+    "otel.library.name": "",
+    "otel.library.version": "",
+    "postgres.wait_events": {
+      "count": 1,
+      "latest": 10.0,
+      "max": 10.0,
+      "min": 10.0,
+      "sum": 10.0,
+      "type": "gauge"
+    },
+    "query_id": "e25017c59f160267a8d1cf35acf420cd",
+    "service.name": "database-intelligence",
+    "timestamp": 1752155169629,
+    "unit": "ms",
+    "wait_category": "None",
+    "wait_event_name": "None"
+  }
+]
+
+Metric: postgres.execution_plan.cost
+
+### postgres.execution_plan.cost - Full Attributes ###
+[
+  {
+    "db.name": "postgres",
+    "db.plan.level": "1",
+    "db.plan.node_type": "SeqScan",
+    "db.postgresql.plan_id": "8732626461629751325",
+    "db.postgresql.query_id": "8732626461629751325",
+    "db.system": "postgresql",
+    "entity.guid": "MzYzMDA3MnxFWFR8U0VSVklDRXwtNjcwODUzMzE4NzU4NTIyMDUzNA",
+    "entity.name": "database-intelligence",
+    "entity.type": "SERVICE",
+    "environment": "e2e-test",
+    "instrumentation.provider": "opentelemetry",
+    "level_id": "1",
+    "metricName": "postgres.execution_plan.cost",
+    "newrelic.source": "api.metrics.otlp",
+    "node_type": "SeqScan",
+    "otel.library.name": "",
+    "otel.library.version": "",
+    "plan_id": "8732626461629751325",
+    "postgres.execution_plan.cost": {
+      "count": 1,
+      "latest": 0.089708,
+      "max": 0.089708,
+      "min": 0.089708,
+      "sum": 0.089708,
+      "type": "gauge"
+    },
+    "query_id": "8732626461629751325",
+    "service.name": "database-intelligence",
+    "timestamp": 1752155119628
+  }
+]
+
+
+📊 SECTION 6: UNIQUE ATTRIBUTES BY METRIC TYPE
+========================================
+
+### OOTB Metric Attribute Keys ###
+Query failed
+
+### Custom Metric Attribute Keys ###
+Query failed
+
+
+📊 SECTION 7: TRANSFORMED ATTRIBUTES
+========================================
+
+### Metrics with db.statement (transformed) ###
+[
+  {
+    "count": 0
+  }
+]
+
+### Metrics with db.postgresql.query_id (transformed) ###
+[
+  {
+    "count": 0
+  }
+]
+
+
+📊 SECTION 8: RESOURCE ATTRIBUTES
+========================================
+
+### Resource Attributes ###
+[
+  {
+    "uniques.attributes.environment": [],
+    "uniques.attributes.service.name": []
+  }
+]
+
+
+================================================================================
+📋 ANALYSIS COMPLETE
+================================================================================

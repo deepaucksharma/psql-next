@@ -47,7 +47,7 @@ processors:
     max_samples_per_second: 100.0
     default_sample_rate: 0.1
 
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     success_threshold: 3
     open_state_timeout: 30s

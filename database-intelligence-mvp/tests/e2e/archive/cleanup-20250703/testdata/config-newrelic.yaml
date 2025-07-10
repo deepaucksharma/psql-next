@@ -177,7 +177,7 @@ processors:
           - set(name, "postgresql.ash.blocking") where name == "ash_blocking"
   
   # Circuit breaker
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     timeout: 30s
     cooldown_period: 1m
@@ -233,7 +233,7 @@ service:
         - resource
         - attributes/newrelic
         - transform/metrics
-        - circuitbreaker
+        - circuit_breaker
         - batch
       exporters: [otlp/newrelic, debug]
     

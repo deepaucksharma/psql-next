@@ -1,0 +1,138 @@
+receivers:
+  # PostgreSQL receiver for metrics
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST}:${env:POSTGRES_PORT}
+    transport: tcp
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DATABASE}
+    collection_interval: ${env:COLLECTION_INTERVAL}
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+
+  # PostgreSQL detailed query stats
+  sqlquery/pg_stats:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST} port=${env:POSTGRES_PORT} user=${env:POSTGRES_USER} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DATABASE} sslmode=disable"
+    collection_interval: 60s
+    queries:
+      - sql: |
+          SELECT
+            queryid::text as query_id,
+            LEFT(query, 100) as query_text,
+            calls,
+            total_exec_time::float8 as total_time_ms,
+            mean_exec_time::float8 as mean_time_ms,
+            max_exec_time::float8 as max_time_ms,
+            rows,
+            shared_blks_hit + shared_blks_read as total_blocks
+          FROM pg_stat_statements
+          WHERE query NOT LIKE '%pg_stat%'
+          ORDER BY total_exec_time DESC
+          LIMIT 50
+        metrics:
+          - metric_name: postgresql.query.calls
+            value_column: calls
+            value_type: int
+            attributes:
+              - query_id
+              - query_text
+          - metric_name: postgresql.query.total_time
+            value_column: total_time_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - query_id
+              - query_text
+
+processors:
+  # Memory limiter
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Add New Relic required attributes
+  attributes:
+    actions:
+      - key: db.system
+        value: postgresql
+        action: insert
+      - key: service.name
+        value: postgresql-monitoring
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Resource processor for New Relic
+  resource:
+    attributes:
+      - key: service.instance.id
+        from_attribute: host.name
+        action: insert
+      - key: telemetry.sdk.name
+        value: opentelemetry
+        action: insert
+      - key: telemetry.sdk.language
+        value: go
+        action: insert
+      - key: telemetry.sdk.version
+        value: 1.19.0
+        action: insert
+
+  # Batch processor
+  batch:
+    send_batch_size: 1000
+    timeout: 10s
+
+exporters:
+  # New Relic OTLP exporter
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY}
+    sampling_initial: 5
+    sampling_thereafter: 20
+
+  # File exporter for backup
+  file:
+    path: /var/log/otel/metrics.json
+    format: json
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, zpages]
+  
+  pipelines:
+    metrics:
+      receivers: [postgresql, sqlquery/pg_stats]
+      processors: [memory_limiter, attributes, resource, batch]
+      exporters: [otlp/newrelic, debug, file]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}
+      encoding: json
+      output_paths: ["stdout", "/var/log/otel/collector.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

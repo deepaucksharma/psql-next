@@ -191,7 +191,7 @@ processors:
           - replace_pattern(attributes["query_text"], '\b\d+\b', '?')
           
   # Circuit breaker for protection
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     success_threshold: 3
     timeout: 30s

@@ -167,7 +167,7 @@ service:
       receivers: [sqlquery, postgresqlquery/advanced]
       processors: 
         - memory_limiter
-        - circuitbreaker/simple
+        - circuit_breaker/simple
         - transform/sanitize
         - resource
         - attributes/rename

@@ -1,0 +1,342 @@
+# OpenTelemetry Collector Configuration with pg_querylens Integration
+# This configuration demonstrates how to collect and process query performance data
+# from PostgreSQL databases with the pg_querylens extension installed
+
+receivers:
+  # PostgreSQL receiver for basic metrics
+  postgresql:
+    endpoint: ${env:POSTGRES_ENDPOINT}
+    transport: tcp
+    username: ${env:POSTGRES_USERNAME}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DATABASE}
+    collection_interval: 30s
+    tls:
+      insecure: true
+      insecure_skip_verify: false
+
+  # SQL query receiver for pg_querylens data
+  sqlquery:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST} port=${env:POSTGRES_PORT} user=${env:POSTGRES_USERNAME} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DATABASE} sslmode=disable"
+    collection_interval: 30s
+    queries:
+      # Current query performance metrics
+      - sql: |
+          SELECT 
+            q.queryid,
+            q.query_text,
+            q.userid,
+            q.dbid,
+            p.plan_id,
+            p.plan_text,
+            p.last_execution,
+            p.mean_exec_time_ms,
+            p.stddev_exec_time_ms,
+            p.min_exec_time_ms,
+            p.max_exec_time_ms,
+            p.total_exec_time_ms,
+            p.calls,
+            p.rows,
+            p.shared_blks_hit,
+            p.shared_blks_read,
+            p.shared_blks_dirtied,
+            p.shared_blks_written,
+            p.temp_blks_read,
+            p.temp_blks_written,
+            p.planning_time_ms,
+            p.jit_time_ms
+          FROM pg_querylens.queries q
+          JOIN pg_querylens.plans p ON q.queryid = p.queryid
+          WHERE p.last_execution > NOW() - INTERVAL '5 minutes'
+          ORDER BY p.last_execution DESC
+        metrics:
+          - metric_name: db.querylens.query.execution_time_mean
+            value_column: mean_exec_time_ms
+            value_type: double
+            data_point_type: gauge
+            unit: ms
+          - metric_name: db.querylens.query.execution_time_max
+            value_column: max_exec_time_ms
+            value_type: double
+            data_point_type: gauge
+            unit: ms
+          - metric_name: db.querylens.query.calls
+            value_column: calls
+            value_type: int
+            data_point_type: sum
+          - metric_name: db.querylens.query.rows
+            value_column: rows
+            value_type: int
+            data_point_type: sum
+          - metric_name: db.querylens.query.blocks_hit
+            value_column: shared_blks_hit
+            value_type: int
+            data_point_type: sum
+          - metric_name: db.querylens.query.blocks_read
+            value_column: shared_blks_read
+            value_type: int
+            data_point_type: sum
+          - metric_name: db.querylens.query.planning_time
+            value_column: planning_time_ms
+            value_type: double
+            data_point_type: gauge
+            unit: ms
+        resource_attributes:
+          - key: db.querylens.queryid
+            value_column: queryid
+          - key: db.querylens.plan_id
+            value_column: plan_id
+          - key: db.querylens.plan_text
+            value_column: plan_text
+          - key: db.querylens.query_text
+            value_column: query_text
+          - key: db.user.id
+            value_column: userid
+          - key: db.name
+            value_column: dbid
+
+      # Plan change detection query
+      - sql: |
+          WITH plan_changes AS (
+            SELECT 
+              queryid,
+              plan_id,
+              previous_plan_id,
+              change_timestamp,
+              mean_exec_time_ms,
+              previous_mean_exec_time_ms,
+              CASE 
+                WHEN previous_mean_exec_time_ms > 0 
+                THEN mean_exec_time_ms / previous_mean_exec_time_ms 
+                ELSE 1 
+              END as performance_ratio
+            FROM pg_querylens.plan_history
+            WHERE change_timestamp > NOW() - INTERVAL '1 hour'
+              AND previous_plan_id IS NOT NULL
+          )
+          SELECT * FROM plan_changes
+          WHERE performance_ratio > 1.2  -- Only show regressions > 20%
+        metrics:
+          - metric_name: db.querylens.plan.change_detected
+            value_type: int
+            value_expression: "1"
+            data_point_type: sum
+          - metric_name: db.querylens.plan.performance_ratio
+            value_column: performance_ratio
+            value_type: double
+            data_point_type: gauge
+        resource_attributes:
+          - key: db.querylens.queryid
+            value_column: queryid
+          - key: db.querylens.plan_id
+            value_column: plan_id
+          - key: db.querylens.previous_plan_id
+            value_column: previous_plan_id
+          - key: db.querylens.regression_severity
+            value_expression: |
+              CASE 
+                WHEN performance_ratio > 3 THEN 'critical'
+                WHEN performance_ratio > 2 THEN 'high'
+                WHEN performance_ratio > 1.5 THEN 'medium'
+                ELSE 'low'
+              END
+
+      # Top resource-consuming queries
+      - sql: |
+          SELECT 
+            queryid,
+            query_text,
+            SUM(total_exec_time_ms) as total_time,
+            SUM(calls) as total_calls,
+            AVG(mean_exec_time_ms) as avg_time,
+            SUM(shared_blks_read + shared_blks_written) as total_io_blocks,
+            SUM(temp_blks_read + temp_blks_written) as total_temp_blocks
+          FROM pg_querylens.queries_current
+          GROUP BY queryid, query_text
+          ORDER BY total_time DESC
+          LIMIT 20
+        metrics:
+          - metric_name: db.querylens.top_queries.total_time
+            value_column: total_time
+            value_type: double
+            data_point_type: gauge
+            unit: ms
+          - metric_name: db.querylens.top_queries.io_blocks
+            value_column: total_io_blocks
+            value_type: int
+            data_point_type: gauge
+        resource_attributes:
+          - key: db.querylens.queryid
+            value_column: queryid
+          - key: db.querylens.query_text
+            value_column: query_text
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Plan attribute extractor with pg_querylens support
+  planattributeextractor:
+    timeout_ms: 100
+    error_mode: ignore
+    safe_mode: true
+    querylens:
+      enabled: true
+      plan_history_hours: 24
+      regression_detection:
+        enabled: true
+        time_increase: 1.5    # 50% increase triggers detection
+        io_increase: 2.0      # 100% increase in I/O
+        cost_increase: 2.0    # 100% increase in cost
+      alert_on_regression: true
+    query_anonymization:
+      enabled: true
+      attributes_to_anonymize:
+        - db.querylens.query_text
+        - db.statement
+      generate_fingerprint: true
+      fingerprint_attribute: db.query.fingerprint
+
+  # Adaptive sampling with special rules for regressions
+  adaptivesampler:
+    in_memory_only: true
+    default_sampling_rate: 0.1
+    rules:
+      # Always sample queries with plan changes
+      - name: plan_changes
+        expression: 'attributes["db.plan.changed"] == true'
+        sample_rate: 1.0
+        priority: 100
+      # Always sample queries with regressions
+      - name: performance_regressions
+        expression: 'attributes["db.plan.has_regression"] == true'
+        sample_rate: 1.0
+        priority: 99
+      # Sample slow queries more frequently
+      - name: slow_queries
+        expression: 'metrics["db.querylens.query.execution_time_mean"] > 1000'
+        sample_rate: 0.5
+        priority: 50
+      # Sample high I/O queries
+      - name: high_io_queries
+        expression: 'metrics["db.querylens.query.blocks_read"] > 10000'
+        sample_rate: 0.3
+        priority: 40
+
+  # Circuit breaker to protect against runaway queries
+  circuit_breaker:
+    failure_threshold: 0.5
+    timeout: 30s
+    half_open_requests: 5
+    databases:
+      - name: "${env:POSTGRES_DATABASE}"
+        failure_threshold: 0.3
+        metrics_to_track:
+          - db.querylens.query.execution_time_mean
+          - db.querylens.query.blocks_read
+
+  # Batch processor for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  # Transform processor for additional attributes
+  transform:
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Calculate query efficiency score
+          - set(attributes["db.query.efficiency_score"], 
+              1000 / (attributes["db.querylens.query.execution_time_mean"] + 1))
+          # Flag queries needing optimization
+          - set(attributes["db.query.needs_optimization"], 
+              attributes["db.querylens.query.execution_time_mean"] > 500 || 
+              attributes["db.querylens.query.blocks_read"] > 5000)
+
+  # Resource processor to add standard attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence
+        action: upsert
+      - key: service.version
+        value: "1.0.0"
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+      - key: db.system
+        value: postgresql
+        action: upsert
+      - key: telemetry.sdk.name
+        value: opentelemetry
+        action: upsert
+
+exporters:
+  # OTLP exporter to New Relic
+  otlp:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Prometheus exporter for local monitoring
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: database_intelligence
+    const_labels:
+      environment: ${env:ENVIRONMENT}
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+extensions:
+  # Health check extension
+  healthcheck:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: 5s
+      exporter_failure_threshold: 5
+
+  # Memory ballast for stable memory usage
+  memory_ballast:
+    size_mib: 64
+
+service:
+  extensions: [healthcheck, memory_ballast]
+  pipelines:
+    metrics:
+      receivers: [postgresql, sqlquery]
+      processors: [memory_limiter, planattributeextractor, adaptivesampler, 
+                   circuit_breaker, transform, resource, batch]
+      exporters: [otlp, prometheus]
+    
+    # Debug pipeline for development
+    metrics/debug:
+      receivers: [postgresql, sqlquery]
+      processors: [memory_limiter, planattributeextractor]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

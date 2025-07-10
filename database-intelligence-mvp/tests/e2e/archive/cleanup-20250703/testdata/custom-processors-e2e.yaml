@@ -74,7 +74,7 @@ processors:
     send_batch_size: 1000
 
   # Circuit breaker processor
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     success_threshold: 2
     timeout: 30s
@@ -237,7 +237,7 @@ service:
       processors:
         - memory_limiter
         - resource
-        - circuitbreaker
+        - circuit_breaker
         - planattributeextractor
         - verification
         - adaptivesampler

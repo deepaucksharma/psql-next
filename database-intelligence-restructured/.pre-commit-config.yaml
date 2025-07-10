@@ -1,0 +1,74 @@
+# Pre-commit hooks for code quality
+# Install with: pip install pre-commit && pre-commit install
+
+repos:
+  # Go formatting and linting
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+      - id: go-vet
+      - id: go-imports
+      - id: go-cyclo
+        args: [-over=15]
+      - id: go-mod-tidy
+      - id: golangci-lint
+
+  # Security checks
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: test\.env\.example|.*\.md
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: ^configs/examples/
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'master']
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.37.0
+    hooks:
+      - id: markdownlint
+        args: ['--fix']
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint
+        args: ['--ignore', 'DL3008', '--ignore', 'DL3009']
+
+# Custom local hooks
+  - repo: local
+    hooks:
+      - id: check-hardcoded-credentials
+        name: Check for hardcoded credentials
+        entry: bash -c 'grep -r "password\s*=\s*[\"'\''][^\"'\'']*[\"'\'']" --include="*.go" --exclude-dir=test* --exclude-dir=vendor . || true'
+        language: system
+        files: '\.go$'
+        
+      - id: check-sql-concatenation
+        name: Check for SQL string concatenation
+        entry: bash -c 'grep -r "fmt\.Sprintf.*SELECT\|INSERT\|UPDATE\|DELETE" --include="*.go" . || true'
+        language: system
+        files: '\.go$'
+        
+      - id: check-ignored-errors
+        name: Check for ignored errors
+        entry: bash -c 'grep -r "_\s*=" --include="*.go" . | grep -v "test" || true'
+        language: system
+        files: '\.go$'

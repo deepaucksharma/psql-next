@@ -1,16 +1,13 @@
-go 1.24.3
+go 1.23.0
+
+toolchain go1.24.3
 
 use (
 	./common
 	./common/featuredetector
 	./common/queryselector
-	./core
-	./distributions/enterprise
 	./distributions/minimal
 	./distributions/production
-	./distributions/standard
-	./distributions/streamlined
-	./distributions/working
 	./exporters/nri
 	./extensions/healthcheck
 	./processors/adaptivesampler
@@ -20,8 +17,8 @@ use (
 	./processors/planattributeextractor
 	./processors/querycorrelator
 	./processors/verification
-	./tests
+	./receivers/ash
+	./receivers/enhancedsql
+	./receivers/kernelmetrics
 	./tests/e2e
-	./tests/integration
-	./tests/test-collector
 )

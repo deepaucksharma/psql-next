@@ -1,0 +1,486 @@
+# Default values for database-intelligence
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+## @section Global parameters
+## Global Docker image parameters
+## Please, note that this will override the image parameters, including dependencies, configured to use the global value
+##
+global:
+  ## @param global.imageRegistry Global Docker image registry
+  imageRegistry: ""
+  ## @param global.imagePullSecrets Global Docker registry secret names as an array
+  imagePullSecrets: []
+  ## @param global.storageClass Global StorageClass for Persistent Volume(s)
+  storageClass: ""
+
+## @section Common parameters
+##
+## @param nameOverride String to partially override database-intelligence.fullname template (will maintain the release name)
+nameOverride: ""
+## @param fullnameOverride String to fully override database-intelligence.fullname template
+fullnameOverride: ""
+## @param namespaceOverride String to fully override common.names.namespace
+namespaceOverride: ""
+## @param kubeVersion Force target Kubernetes version (using Helm capabilities if not set)
+kubeVersion: ""
+## @param commonLabels Labels to add to all deployed objects
+commonLabels: {}
+## @param commonAnnotations Annotations to add to all deployed objects
+commonAnnotations: {}
+
+## @section Database Intelligence Collector parameters
+##
+## @param image.registry Database Intelligence image registry
+## @param image.repository Database Intelligence image repository
+## @param image.tag Database Intelligence image tag (immutable tags are recommended)
+## @param image.digest Database Intelligence image digest in the way sha256:aa.... Please note this parameter, if set, will override the tag
+## @param image.pullPolicy Database Intelligence image pull policy
+## @param image.pullSecrets Database Intelligence image pull secrets
+##
+image:
+  registry: docker.io
+  repository: database-intelligence-mvp/database-intelligence-collector
+  tag: "1.0.0"
+  digest: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+## @param replicaCount Number of Database Intelligence replicas to deploy
+replicaCount: 1
+
+## @param updateStrategy.type Database Intelligence deployment strategy type
+## @param updateStrategy.rollingUpdate Database Intelligence deployment rolling update configuration parameters
+## ref: https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy
+##
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0
+
+## @param podLabels Extra labels for Database Intelligence pods
+podLabels: {}
+
+## @param podAnnotations Annotations for Database Intelligence pods
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8888"
+  prometheus.io/path: "/metrics"
+
+## @param podAffinityPreset Pod affinity preset. Ignored if `affinity` is set. Allowed values: `soft` or `hard`
+podAffinityPreset: ""
+## @param podAntiAffinityPreset Pod anti-affinity preset. Ignored if `affinity` is set. Allowed values: `soft` or `hard`
+podAntiAffinityPreset: soft
+## Node affinity preset
+## Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity
+##
+nodeAffinityPreset:
+  ## @param nodeAffinityPreset.type Node affinity preset type. Ignored if `affinity` is set. Allowed values: `soft` or `hard`
+  type: ""
+  ## @param nodeAffinityPreset.key Node label key to match. Ignored if `affinity` is set
+  key: ""
+  ## @param nodeAffinityPreset.values Node label values to match. Ignored if `affinity` is set
+  values: []
+
+## @param affinity Affinity for pod assignment
+affinity: {}
+
+## @param nodeSelector Node labels for pod assignment
+nodeSelector: {}
+
+## @param tolerations Tolerations for pod assignment
+tolerations: []
+
+## @param topologySpreadConstraints Topology Spread Constraints for pod assignment
+topologySpreadConstraints: []
+
+## @param priorityClassName Database Intelligence pods' priorityClassName
+priorityClassName: ""
+
+## @param schedulerName Name of the k8s scheduler (other than default)
+schedulerName: ""
+
+## @param terminationGracePeriodSeconds In seconds, time given to the Database Intelligence pod to terminate gracefully
+terminationGracePeriodSeconds: 30
+
+## @param lifecycleHooks for the Database Intelligence container(s) to automate configuration before or after startup
+lifecycleHooks: {}
+
+## @param extraEnvVars Array with extra environment variables to add to Database Intelligence container
+extraEnvVars: []
+
+## @param extraEnvVarsCM Name of existing ConfigMap containing extra env vars for Database Intelligence container
+extraEnvVarsCM: ""
+
+## @param extraEnvVarsSecret Name of existing Secret containing extra env vars for Database Intelligence container
+extraEnvVarsSecret: ""
+
+## @param extraVolumes Optionally specify extra list of additional volumes for the Database Intelligence pod(s)
+extraVolumes: []
+
+## @param extraVolumeMounts Optionally specify extra list of additional volumeMounts for the Database Intelligence container(s)
+extraVolumeMounts: []
+
+## @param sidecars Add additional sidecar containers to the Database Intelligence pod(s)
+sidecars: []
+
+## @param initContainers Add additional init containers to the Database Intelligence pod(s)
+initContainers: []
+
+## @section Database Intelligence Collector Configuration
+##
+config:
+  ## @param config.postgres.enabled Enable PostgreSQL monitoring
+  ## @param config.postgres.endpoint PostgreSQL endpoint
+  ## @param config.postgres.port PostgreSQL port
+  ## @param config.postgres.username PostgreSQL username
+  ## @param config.postgres.password PostgreSQL password
+  ## @param config.postgres.database PostgreSQL database
+  ## @param config.postgres.sslmode PostgreSQL SSL mode
+  ## @param config.postgres.collectionInterval Collection interval for PostgreSQL metrics
+  ##
+  postgres:
+    enabled: true
+    endpoint: postgresql.default.svc.cluster.local
+    port: 5432
+    username: monitoring
+    password: changeme
+    database: postgres
+    sslmode: disable
+    collectionInterval: 10s
+  
+  ## @param config.querylens.enabled Enable pg_querylens integration
+  ## @param config.querylens.collectionInterval Collection interval for pg_querylens metrics
+  ## @param config.querylens.planHistoryHours Hours of plan history to retain
+  ## @param config.querylens.regressionDetection.enabled Enable regression detection
+  ## @param config.querylens.regressionDetection.timeIncrease Time increase threshold for regression
+  ## @param config.querylens.regressionDetection.ioIncrease I/O increase threshold for regression
+  ## @param config.querylens.regressionDetection.costIncrease Cost increase threshold for regression
+  ## @param config.querylens.alertOnRegression Alert when regression detected
+  ##
+  querylens:
+    enabled: false
+    collectionInterval: 30s
+    planHistoryHours: 24
+    regressionDetection:
+      enabled: true
+      timeIncrease: 1.5
+      ioIncrease: 2.0
+      costIncrease: 2.0
+    alertOnRegression: true
+
+  ## @param config.mysql.enabled Enable MySQL monitoring
+  ## @param config.mysql.endpoint MySQL endpoint
+  ## @param config.mysql.port MySQL port
+  ## @param config.mysql.username MySQL username
+  ## @param config.mysql.password MySQL password
+  ## @param config.mysql.database MySQL database
+  ## @param config.mysql.collectionInterval Collection interval for MySQL metrics
+  ##
+  mysql:
+    enabled: false
+    endpoint: mysql.default.svc.cluster.local
+    port: 3306
+    username: monitoring
+    password: changeme
+    database: mysql
+    collectionInterval: 10s
+
+  ## @param config.newrelic.licenseKey New Relic license key
+  ## @param config.newrelic.endpoint New Relic OTLP endpoint
+  ## @param config.newrelic.environment Environment name for New Relic
+  ##
+  newrelic:
+    licenseKey: ""
+    endpoint: otlp.nr-data.net:4317
+    environment: production
+
+  ## @param config.sampling.defaultRate Default sampling rate
+  ## @param config.sampling.rules Sampling rules
+  ##
+  sampling:
+    defaultRate: 0.5
+    rules:
+      - name: slow_queries
+        expression: 'attributes["db.statement.duration"] > 1000'
+        sampleRate: 1.0
+      - name: error_queries
+        expression: 'attributes["db.statement.error"] != nil'
+        sampleRate: 1.0
+
+  ## @param config.circuitBreaker.enabled Enable circuit breaker
+  ## @param config.circuitBreaker.failureThreshold Failure threshold
+  ## @param config.circuitBreaker.timeout Timeout duration
+  ##
+  circuitBreaker:
+    enabled: true
+    failureThreshold: 5
+    timeout: 30s
+
+  ## @param config.piiDetection.enabled Enable PII detection
+  ## @param config.piiDetection.action Action on PII detection (redact/drop)
+  ##
+  piiDetection:
+    enabled: true
+    action: redact
+
+  ## @param config.logLevel Log level (debug/info/warn/error)
+  logLevel: info
+
+## @section Container Security Context
+## https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+## @param containerSecurityContext.enabled Enabled Database Intelligence container Security Context
+## @param containerSecurityContext.runAsUser Set Database Intelligence container Security Context runAsUser
+## @param containerSecurityContext.runAsNonRoot Set Database Intelligence container Security Context runAsNonRoot
+## @param containerSecurityContext.readOnlyRootFilesystem Set Database Intelligence container Security Context readOnlyRootFilesystem
+## @param containerSecurityContext.allowPrivilegeEscalation Set Database Intelligence container Security Context allowPrivilegeEscalation
+## @param containerSecurityContext.capabilities.drop List of capabilities to be dropped
+##
+containerSecurityContext:
+  enabled: true
+  runAsUser: 10001
+  runAsNonRoot: true
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+## @section Pod Security Context
+## @param podSecurityContext.enabled Enabled Database Intelligence pod Security Context
+## @param podSecurityContext.fsGroup Set Database Intelligence pod Security Context fsGroup
+##
+podSecurityContext:
+  enabled: true
+  fsGroup: 10001
+
+## @section Resources
+## @param resources.limits The resources limits for the Database Intelligence container
+## @param resources.requests The requested resources for the Database Intelligence container
+##
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+## @section Probes
+## Configure liveness, readiness and startup probes
+## ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+##
+## @param livenessProbe.enabled Enable livenessProbe
+## @param livenessProbe.initialDelaySeconds Initial delay seconds for livenessProbe
+## @param livenessProbe.periodSeconds Period seconds for livenessProbe
+## @param livenessProbe.timeoutSeconds Timeout seconds for livenessProbe
+## @param livenessProbe.failureThreshold Failure threshold for livenessProbe
+## @param livenessProbe.successThreshold Success threshold for livenessProbe
+##
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+
+## @param readinessProbe.enabled Enable readinessProbe
+## @param readinessProbe.initialDelaySeconds Initial delay seconds for readinessProbe
+## @param readinessProbe.periodSeconds Period seconds for readinessProbe
+## @param readinessProbe.timeoutSeconds Timeout seconds for readinessProbe
+## @param readinessProbe.failureThreshold Failure threshold for readinessProbe
+## @param readinessProbe.successThreshold Success threshold for readinessProbe
+##
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+  successThreshold: 1
+
+## @param startupProbe.enabled Enable startupProbe
+## @param startupProbe.initialDelaySeconds Initial delay seconds for startupProbe
+## @param startupProbe.periodSeconds Period seconds for startupProbe
+## @param startupProbe.timeoutSeconds Timeout seconds for startupProbe
+## @param startupProbe.failureThreshold Failure threshold for startupProbe
+## @param startupProbe.successThreshold Success threshold for startupProbe
+##
+startupProbe:
+  enabled: false
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+  successThreshold: 1
+
+## @param customLivenessProbe Custom livenessProbe that overrides the default one
+customLivenessProbe: {}
+
+## @param customReadinessProbe Custom readinessProbe that overrides the default one
+customReadinessProbe: {}
+
+## @param customStartupProbe Custom startupProbe that overrides the default one
+customStartupProbe: {}
+
+## @section Service parameters
+##
+service:
+  ## @param service.type Database Intelligence service type
+  type: ClusterIP
+  ## @param service.ports.metrics Database Intelligence metrics port
+  ## @param service.ports.prometheus Database Intelligence prometheus port
+  ## @param service.ports.health Database Intelligence health port
+  ##
+  ports:
+    metrics: 8888
+    prometheus: 8889
+    health: 13133
+  ## @param service.nodePorts.metrics Node port for metrics
+  ## @param service.nodePorts.prometheus Node port for prometheus
+  ## @param service.nodePorts.health Node port for health
+  ##
+  nodePorts:
+    metrics: ""
+    prometheus: ""
+    health: ""
+  ## @param service.clusterIP Database Intelligence service Cluster IP
+  clusterIP: ""
+  ## @param service.loadBalancerIP Database Intelligence service Load Balancer IP
+  loadBalancerIP: ""
+  ## @param service.loadBalancerSourceRanges Database Intelligence service Load Balancer sources
+  loadBalancerSourceRanges: []
+  ## @param service.externalTrafficPolicy Database Intelligence service external traffic policy
+  externalTrafficPolicy: Cluster
+  ## @param service.annotations Additional custom annotations for Database Intelligence service
+  annotations: {}
+  ## @param service.extraPorts Extra ports to expose in the Database Intelligence service
+  extraPorts: []
+  ## @param service.sessionAffinity Session Affinity for Kubernetes service, can be "None" or "ClientIP"
+  sessionAffinity: None
+  ## @param service.sessionAffinityConfig Additional settings for the sessionAffinity
+  sessionAffinityConfig: {}
+
+## @section ServiceAccount configuration
+##
+serviceAccount:
+  ## @param serviceAccount.create Specifies whether a ServiceAccount should be created
+  create: true
+  ## @param serviceAccount.name The name of the ServiceAccount to use.
+  name: ""
+  ## @param serviceAccount.annotations Additional Service Account annotations (evaluated as a template)
+  annotations: {}
+  ## @param serviceAccount.automountServiceAccountToken Automount service account token for the server service account
+  automountServiceAccountToken: true
+
+## @section RBAC configuration
+##
+rbac:
+  ## @param rbac.create Specifies whether RBAC resources should be created
+  create: true
+  ## @param rbac.rules Custom RBAC rules to set
+  rules: []
+
+## @section Autoscaling
+##
+autoscaling:
+  ## @param autoscaling.enabled Enable autoscaling for Database Intelligence
+  enabled: false
+  ## @param autoscaling.minReplicas Minimum number of Database Intelligence replicas
+  minReplicas: 1
+  ## @param autoscaling.maxReplicas Maximum number of Database Intelligence replicas
+  maxReplicas: 10
+  ## @param autoscaling.targetCPU Target CPU utilization percentage
+  targetCPU: 80
+  ## @param autoscaling.targetMemory Target Memory utilization percentage
+  targetMemory: 80
+
+## @section Network Policy
+##
+networkPolicy:
+  ## @param networkPolicy.enabled Enable NetworkPolicy
+  enabled: false
+  ## @param networkPolicy.allowExternal Don't require client label for connections
+  allowExternal: true
+  ## @param networkPolicy.additionalIngress Additional ingress rules
+  additionalIngress: []
+  ## @param networkPolicy.additionalEgress Additional egress rules
+  additionalEgress: []
+
+## @section Persistence Parameters
+## ref: https://kubernetes.io/docs/user-guide/persistent-volumes/
+##
+persistence:
+  ## @param persistence.enabled Enable persistence using Persistent Volume Claims
+  enabled: false
+  ## @param persistence.storageClass Persistent Volume storage class
+  storageClass: ""
+  ## @param persistence.accessModes Persistent Volume access modes
+  accessModes:
+    - ReadWriteOnce
+  ## @param persistence.size Persistent Volume size
+  size: 8Gi
+  ## @param persistence.annotations Additional custom annotations for the PVC
+  annotations: {}
+  ## @param persistence.selector Additional labels to match for the PVC
+  selector: {}
+  ## @param persistence.existingClaim Use a existing PVC which must be created manually before bound
+  existingClaim: ""
+
+## @section Init Container Parameters
+##
+volumePermissions:
+  ## @param volumePermissions.enabled Enable init container that changes the owner/group of the PV mount point
+  enabled: false
+  ## @param volumePermissions.image.registry Init container volume-permissions image registry
+  ## @param volumePermissions.image.repository Init container volume-permissions image repository
+  ## @param volumePermissions.image.tag Init container volume-permissions image tag
+  ## @param volumePermissions.image.pullPolicy Init container volume-permissions image pull policy
+  ## @param volumePermissions.image.pullSecrets Init container volume-permissions image pull secrets
+  ##
+  image:
+    registry: docker.io
+    repository: bitnami/bitnami-shell
+    tag: 11-debian-11
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  ## @param volumePermissions.resources.limits The resources limits for the init container
+  ## @param volumePermissions.resources.requests The requested resources for the init container
+  ##
+  resources:
+    limits: {}
+    requests: {}
+  ## @param volumePermissions.containerSecurityContext.runAsUser Set init container's Security Context runAsUser
+  ##
+  containerSecurityContext:
+    runAsUser: 0
+
+## @section Metrics Parameters
+##
+metrics:
+  ## @param metrics.enabled Enable metrics
+  enabled: true
+  ## @param metrics.serviceMonitor.enabled Create ServiceMonitor Resource for scraping metrics using Prometheus Operator
+  ## @param metrics.serviceMonitor.namespace Namespace for the ServiceMonitor Resource
+  ## @param metrics.serviceMonitor.interval Interval at which metrics should be scraped.
+  ## @param metrics.serviceMonitor.scrapeTimeout Timeout after which the scrape is ended
+  ## @param metrics.serviceMonitor.labels Additional labels that can be used so ServiceMonitor will be discovered by Prometheus
+  ## @param metrics.serviceMonitor.selector Selector to select Endpoints
+  ## @param metrics.serviceMonitor.relabelings RelabelConfigs to apply to samples before scraping
+  ## @param metrics.serviceMonitor.metricRelabelings MetricRelabelConfigs to apply to samples before ingestion
+  ## @param metrics.serviceMonitor.honorLabels Specify honorLabels parameter to add the scrape endpoint
+  ## @param metrics.serviceMonitor.jobLabel The name of the label on the target service to use as the job name in prometheus.
+  ##
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    selector: {}
+    relabelings: []
+    metricRelabelings: []
+    honorLabels: false
+    jobLabel: ""

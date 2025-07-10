@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-root-password
+  namespace: db-intelligence
+type: Opaque
+stringData:
+  mysql-root-password: mysql123
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-primary
+  namespace: db-intelligence
+  labels:
+    app: mysql
+    role: primary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+      role: primary
+  template:
+    metadata:
+      labels:
+        app: mysql
+        role: primary
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-root-password
+              key: mysql-root-password
+        - name: MYSQL_DATABASE
+          value: testdb
+        - name: MYSQL_USER
+          value: testuser
+        - name: MYSQL_PASSWORD
+          value: testpass
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        
+      volumes:
+      - name: mysql-data
+        persistentVolumeClaim:
+          claimName: mysql-primary-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-primary
+  namespace: db-intelligence
+  labels:
+    app: mysql
+    role: primary
+spec:
+  selector:
+    app: mysql
+    role: primary
+  ports:
+  - protocol: TCP
+    port: 3306
+    targetPort: 3306
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-primary-pvc
+  namespace: db-intelligence
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

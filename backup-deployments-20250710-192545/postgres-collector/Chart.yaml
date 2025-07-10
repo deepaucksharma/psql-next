@@ -1,0 +1,45 @@
+apiVersion: v2
+name: postgres-collector
+description: PostgreSQL Unified Collector for comprehensive database telemetry
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - postgresql
+  - monitoring
+  - telemetry
+  - opentelemetry
+  - observability
+home: https://github.com/newrelic/postgres-collector
+sources:
+  - https://github.com/newrelic/postgres-collector
+maintainers:
+  - name: New Relic Database Team
+    email: database-team@newrelic.com
+dependencies:
+  - name: opentelemetry-collector
+    version: "0.96.0"
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+    condition: opentelemetry-collector.enabled
+annotations:
+  catalog.newrelic.com/description: |
+    The PostgreSQL Unified Collector provides comprehensive telemetry collection
+    for PostgreSQL databases with minimal performance impact. Features include:
+    - Active Session History (ASH) sampling
+    - Query plan analysis and regression detection
+    - Adaptive sampling based on system load
+    - Multi-database support with connection pooling
+    - Cloud provider optimization (RDS, Aurora, Azure, GCP)
+    - Circuit breaker for safety
+    - OTLP export to New Relic
+
+# Common labels
+commonLabels:
+  app.kubernetes.io/name: postgres-collector
+  app.kubernetes.io/instance: {{ .Release.Name }}
+  app.kubernetes.io/managed-by: {{ .Release.Service }}
+
+# Selector labels
+selectorLabels:
+  app.kubernetes.io/name: postgres-collector
+  app.kubernetes.io/instance: {{ .Release.Name }}

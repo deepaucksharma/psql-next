@@ -83,7 +83,7 @@ processors:
         sampling_percentage: 75
 
   # Circuit breaker with test thresholds
-  circuitbreaker:
+  circuit_breaker:
     max_failures: 3
     failure_threshold_percentage: 30
     timeout: 10s

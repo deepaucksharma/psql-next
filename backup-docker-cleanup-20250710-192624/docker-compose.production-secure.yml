@@ -1,0 +1,254 @@
+services:
+  # PostgreSQL with monitoring user - Secure Production Configuration
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-monitored
+    environment:
+      POSTGRES_DB: production
+      POSTGRES_USER_FILE: /run/secrets/postgres_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=pg_stat_statements"
+    ports:
+      - "127.0.0.1:5432:5432"  # Bind to localhost only
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres_logs:/var/log/postgresql
+    secrets:
+      - postgres_user
+      - postgres_password
+    command: >
+      postgres
+      -c logging_collector=on
+      -c log_directory='/var/log/postgresql'
+      -c log_filename='postgresql-%Y-%m-%d_%H%M%S.log'
+      -c log_statement='ddl'
+      -c log_duration=on
+      -c log_min_duration_statement=1000
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c ssl=on
+      -c ssl_cert_file='/var/lib/postgresql/server.crt'
+      -c ssl_key_file='/var/lib/postgresql/server.key'
+      -c password_encryption=scram-sha-256
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$(cat /run/secrets/postgres_user)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    user: "999:999"
+    restart: unless-stopped
+
+  # MySQL with performance schema - Secure Production Configuration
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-monitored
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_DATABASE: production
+      MYSQL_USER_FILE: /run/secrets/mysql_user
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_password
+    ports:
+      - "127.0.0.1:3306:3306"  # Bind to localhost only
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mysql_logs:/var/log/mysql
+    secrets:
+      - mysql_root_password
+      - mysql_user
+      - mysql_password
+    command: >
+      --default-authentication-plugin=caching_sha2_password
+      --require_secure_transport=ON
+      --ssl-cert=/var/lib/mysql/server-cert.pem
+      --ssl-key=/var/lib/mysql/server-key.pem
+      --slow_query_log=1
+      --slow_query_log_file=/var/log/mysql/slow.log
+      --long_query_time=5
+      --log-queries-not-using-indexes=1
+      --general_log=0
+      --performance_schema=ON
+      --performance_schema_instrument='statement/%=ON'
+      --max_connections=100
+      --innodb_buffer_pool_size=256M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    user: "999:999"
+    restart: unless-stopped
+
+  # Database Intelligence Collector - Secure Production Configuration
+  otel-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: database-intelligence-collector:latest
+    container_name: db-intelligence-collector
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    environment:
+      # PostgreSQL settings - Using secrets
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: production
+      POSTGRES_SSL_MODE: require
+      
+      # MySQL settings - Using secrets
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: production
+      MYSQL_TLS_MODE: REQUIRED
+      
+      # New Relic settings - Using secrets
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net:4318}
+      
+      # Collector settings
+      ENVIRONMENT: production
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      DEPLOYMENT_TYPE: docker-compose-secure
+      SERVICE_VERSION: "1.0.0"
+      
+      # Security settings
+      SECURITY_MODE: enabled
+      ENABLE_TLS: "true"
+      VERIFY_CERTIFICATES: "true"
+      
+      # Performance settings - Conservative for production
+      COLLECTION_INTERVAL: 60s
+      MEMORY_LIMIT_PERCENT: "70"
+      BATCH_SIZE: "500"
+      BATCH_TIMEOUT: 15s
+      
+      # Logging - Reduced verbosity for production
+      LOG_LEVEL: warn
+      DEBUG_VERBOSITY: none
+      
+    ports:
+      - "127.0.0.1:8888:8888"   # Prometheus metrics - localhost only
+      - "127.0.0.1:13133:13133" # Health check - localhost only
+    volumes:
+      - ./config/production-secure.yaml:/etc/otel/config.yaml:ro
+      - postgres_logs:/var/log/postgresql:ro
+      - mysql_logs:/var/log/mysql:ro
+      - otel_logs:/var/log/otel
+    secrets:
+      - postgres_user
+      - postgres_password
+      - mysql_user
+      - mysql_password
+      - new_relic_license_key
+    command: ["--config=/etc/otel/config.yaml"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+  # Secure monitoring dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-secure
+    ports:
+      - "127.0.0.1:3000:3000"  # Localhost only
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: "strict"
+      GF_SECURITY_STRICT_TRANSPORT_SECURITY: "true"
+      GF_SECURITY_CONTENT_TYPE_PROTECTION: "true"
+      GF_SECURITY_X_CONTENT_TYPE_OPTIONS: "true"
+      GF_SECURITY_X_XSS_PROTECTION: "true"
+      GF_SERVER_PROTOCOL: https
+      GF_SERVER_CERT_FILE: /etc/ssl/certs/grafana.crt
+      GF_SERVER_CERT_KEY: /etc/ssl/private/grafana.key
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana-datasources-secure.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    secrets:
+      - grafana_admin_password
+    depends_on:
+      - otel-collector
+    security_opt:
+      - no-new-privileges:true
+    user: "472:472"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+secrets:
+  postgres_user:
+    file: ./secrets/postgres_user.txt
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  mysql_root_password:
+    file: ./secrets/mysql_root_password.txt
+  mysql_user:
+    file: ./secrets/mysql_user.txt
+  mysql_password:
+    file: ./secrets/mysql_password.txt
+  new_relic_license_key:
+    file: ./secrets/new_relic_license_key.txt
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt
+
+volumes:
+  postgres_data:
+    driver: local
+  postgres_logs:
+    driver: local
+  mysql_data:
+    driver: local
+  mysql_logs:
+    driver: local
+  otel_logs:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  default:
+    name: db-intelligence-network-secure
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+      com.docker.network.driver.mtu: "1500"

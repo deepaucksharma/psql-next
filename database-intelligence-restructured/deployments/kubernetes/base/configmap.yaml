@@ -1,0 +1,318 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: database-intelligence-config
+  namespace: database-intelligence
+  labels:
+    app.kubernetes.io/name: database-intelligence
+    app.kubernetes.io/component: configuration
+data:
+  collector-config.yaml: |
+    receivers:
+      postgresql:
+        endpoint: ${POSTGRES_HOST}:${POSTGRES_PORT}
+        username: ${POSTGRES_USER}
+        password: ${POSTGRES_PASSWORD}
+        databases:
+          - ${POSTGRES_DB}
+        collection_interval: 10s
+        tls:
+          insecure: true
+        metrics:
+          postgresql.database.size:
+            enabled: true
+          postgresql.backends:
+            enabled: true
+          postgresql.connections:
+            enabled: true
+          postgresql.commits:
+            enabled: true
+          postgresql.rollbacks:
+            enabled: true
+          postgresql.blocks.read:
+            enabled: true
+          postgresql.blocks.hit:
+            enabled: true
+          postgresql.deadlocks:
+            enabled: true
+          postgresql.temp.files:
+            enabled: true
+          postgresql.bgwriter:
+            enabled: true
+          postgresql.locks:
+            enabled: true
+          postgresql.replication:
+            enabled: true
+          postgresql.wal:
+            enabled: true
+
+      sqlquery:
+        driver: postgres
+        datasource: "host=${POSTGRES_HOST} port=${POSTGRES_PORT} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB} sslmode=disable"
+        collection_interval: 10s
+        queries:
+          # pg_stat_statements query
+          - query: |
+              SELECT 
+                query,
+                calls,
+                total_exec_time,
+                mean_exec_time,
+                stddev_exec_time,
+                min_exec_time,
+                max_exec_time,
+                rows
+              FROM pg_stat_statements
+              WHERE query NOT LIKE '%pg_stat_statements%'
+              ORDER BY total_exec_time DESC
+              LIMIT 100
+            metrics:
+              - metric_name: postgresql.query.calls
+                value_column: calls
+                value_type: int
+                attribute_columns:
+                  - query
+              - metric_name: postgresql.query.total_time
+                value_column: total_exec_time
+                value_type: double
+                attribute_columns:
+                  - query
+              - metric_name: postgresql.query.mean_time
+                value_column: mean_exec_time
+                value_type: double
+                attribute_columns:
+                  - query
+          
+          # pg_querylens current plans
+          - query: |
+              SELECT 
+                queryid,
+                plan_id,
+                plan_text,
+                mean_exec_time_ms,
+                calls,
+                rows,
+                shared_blks_hit,
+                shared_blks_read,
+                planning_time_ms,
+                last_execution
+              FROM pg_querylens.current_plans
+              WHERE last_execution > NOW() - INTERVAL '5 minutes'
+            metrics:
+              - metric_name: db.querylens.query.execution_time_mean
+                value_column: mean_exec_time_ms
+                value_type: double
+                attribute_columns:
+                  - queryid
+                  - plan_id
+              - metric_name: db.querylens.query.calls
+                value_column: calls
+                value_type: int
+                attribute_columns:
+                  - queryid
+                  - plan_id
+              - metric_name: db.querylens.query.blocks_hit
+                value_column: shared_blks_hit
+                value_type: int
+                attribute_columns:
+                  - queryid
+                  - plan_id
+              - metric_name: db.querylens.query.blocks_read
+                value_column: shared_blks_read
+                value_type: int
+                attribute_columns:
+                  - queryid
+                  - plan_id
+          
+          # pg_querylens plan changes
+          - query: |
+              SELECT 
+                queryid,
+                plan_id,
+                previous_plan_id,
+                change_timestamp,
+                mean_exec_time_ms,
+                previous_mean_exec_time_ms,
+                mean_exec_time_ms / NULLIF(previous_mean_exec_time_ms, 0) as time_change_ratio
+              FROM pg_querylens.plan_history
+              WHERE change_timestamp > NOW() - INTERVAL '1 hour'
+            metrics:
+              - metric_name: db.querylens.plan.change_detected
+                value_column: time_change_ratio
+                value_type: double
+                attribute_columns:
+                  - queryid
+                  - plan_id
+                  - previous_plan_id
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+        spike_limit_mib: 128
+        limit_percentage: 75
+        spike_limit_percentage: 20
+
+      adaptive_sampler:
+        rules:
+          - name: slow_queries
+            expression: 'attributes["db.statement.duration"] > 1000'
+            sample_rate: 1.0
+          - name: error_queries
+            expression: 'attributes["db.statement.error"] != nil'
+            sample_rate: 1.0
+          - name: high_frequency
+            expression: 'attributes["db.statement.calls"] > 1000'
+            sample_rate: 0.1
+        default_sampling_rate: 0.5
+        in_memory_only: true
+        max_cache_size: 10000
+        cache_ttl: 5m
+
+      circuit_breaker:
+        failure_threshold: 5
+        success_threshold: 2
+        timeout: 30s
+        half_open_max_requests: 3
+        backoff_multiplier: 2.0
+        max_backoff: 5m
+        error_patterns:
+          - "connection refused"
+          - "too many connections"
+          - "database is shutting down"
+        cardinality_limits:
+          max_unique_queries: 10000
+          max_unique_users: 1000
+          window_duration: 5m
+
+      batch:
+        send_batch_size: 500
+        send_batch_max_size: 1000
+        timeout: 200ms
+
+      plan_attribute_extractor:
+        safe_mode: true
+        timeout: 100ms
+        max_plan_size: 10240
+        anonymize_plans: true
+        plan_anonymization:
+          enabled: true
+          anonymize_filters: true
+          anonymize_join_conditions: true
+          remove_cost_estimates: false
+          sensitive_node_types:
+            - "Function Scan"
+            - "CTE Scan"
+        error_mode: ignore
+        querylens:
+          enabled: true
+          plan_history_hours: 24
+          regression_detection:
+            enabled: true
+            time_increase: 1.5      # 50% slower
+            io_increase: 2.0        # 100% more I/O
+            cost_increase: 2.0      # 100% higher cost
+          alert_on_regression: true
+
+      verification:
+        pii_detection:
+          enabled: true
+          patterns:
+            credit_card: '\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'
+            ssn: '\b\d{3}-\d{2}-\d{4}\b'
+            email: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            phone: '\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'
+          scan_query_text: true
+          scan_plan_json: true
+          action_on_detection: redact
+        data_quality:
+          enabled: true
+          required_attributes:
+            - db.system
+            - db.name
+          max_attribute_length: 1000
+          max_metric_value: 1e9
+        cardinality_protection:
+          enabled: true
+          max_unique_queries: 10000
+          max_unique_plans: 5000
+          max_unique_users: 1000
+          window_duration: 5m
+        auto_tuning:
+          enabled: true
+          target_false_positive_rate: 0.01
+          adjustment_interval: 5m
+
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: ${ENVIRONMENT}
+            action: upsert
+          - key: service.name
+            value: postgresql-database-intelligence
+            action: upsert
+          - key: service.version
+            value: ${VERSION}
+            action: upsert
+          - key: collector.name
+            value: database-intelligence-collector
+            action: insert
+
+      transform:
+        metric_statements:
+          - context: metric
+            statements:
+              - set(attributes["db.system"], "postgresql")
+              - set(attributes["db.deployment.environment"], "${ENVIRONMENT}")
+
+    exporters:
+      otlp:
+        endpoint: ${OTLP_ENDPOINT}
+        headers:
+          api-key: ${NEW_RELIC_LICENSE_KEY}
+        compression: gzip
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        namespace: dbintel
+        const_labels:
+          environment: ${ENVIRONMENT}
+
+      debug:
+        verbosity: detailed
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: /health
+        check_collector_pipeline:
+          enabled: true
+          interval: 5s
+          exporter_failure_threshold: 3
+
+      pprof:
+        endpoint: 0.0.0.0:1777
+
+      zpages:
+        endpoint: 0.0.0.0:55679
+
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        metrics:
+          receivers: [postgresql, sqlquery]
+          processors: [memory_limiter, adaptive_sampler, circuit_breaker, batch, plan_attribute_extractor, verification, resource, transform]
+          exporters: [otlp, prometheus]
+      telemetry:
+        logs:
+          level: ${LOG_LEVEL}
+          development: false
+          encoding: json
+        metrics:
+          level: detailed
+          address: 0.0.0.0:8888

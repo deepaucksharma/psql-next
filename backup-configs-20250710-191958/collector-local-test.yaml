@@ -1,0 +1,122 @@
+extensions:
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  # PostgreSQL receiver for local testing
+  postgresql:
+    endpoint: localhost:5432
+    username: postgres
+    password: postgres
+    databases:
+      - postgres
+    tls:
+      insecure: true
+    collection_interval: 30s
+
+  mysql:
+    endpoint: localhost:3306
+    username: root
+    password: mysql
+    database: mysql
+    collection_interval: 30s
+
+  # SQL query receiver for PostgreSQL query statistics
+  sqlquery/postgresql:
+    driver: postgres
+    datasource: "host=localhost port=5432 user=postgres password=postgres dbname=postgres sslmode=disable"
+    collection_interval: 60s
+    queries:
+      - sql: |
+          SELECT
+            'test_query_' || generate_series as query_id,
+            'SELECT * FROM table_' || generate_series as query_text,
+            random() * 100 as avg_duration_ms,
+            (random() * 100)::int as execution_count,
+            random() * 10000 as total_duration_ms,
+            'postgres' as database_name
+          FROM generate_series(1, 5)
+        logs:
+          - body_column: query_text
+            attributes:
+              query_id: query_id
+              avg_duration_ms: avg_duration_ms
+              execution_count: execution_count
+              total_duration_ms: total_duration_ms
+              database_name: database_name
+
+  sqlquery/mysql:
+    driver: mysql
+    datasource: "root:mysql@tcp(localhost:3306)/mysql"
+    collection_interval: 60s
+    queries:
+      - sql: |
+          SELECT 
+            'mysql_test_1' as query_id,
+            'SELECT * FROM users' as query_text,
+            50.5 as avg_duration_ms,
+            100 as execution_count,
+            5050 as total_duration_ms,
+            'mysql' as database_name
+        logs:
+          - body_column: query_text
+            attributes:
+              query_id: query_id
+              avg_duration_ms: avg_duration_ms
+              execution_count: execution_count
+              total_duration_ms: total_duration_ms
+              database_name: database_name
+
+processors:
+  memory_limiter:
+    check_interval: 2s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  resource:
+    attributes:
+      - key: "collector.name"
+        value: "otelcol"
+        action: upsert
+      - key: "test.environment"
+        value: "e2e"
+        action: upsert
+
+  batch:
+    timeout: 10s
+    send_batch_size: 50
+
+exporters:
+  # Debug exporter for local testing
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # OTLP exporter to New Relic
+  otlp/newrelic:
+    endpoint: "otlp.nr-data.net:4317"
+    headers:
+      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    timeout: 30s
+
+service:
+  extensions: [zpages]
+  pipelines:
+    metrics/databases:
+      receivers: [postgresql, mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug]
+    
+    logs/queries:
+      receivers: [sqlquery/postgresql, sqlquery/mysql]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug]
+      
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

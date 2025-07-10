@@ -127,7 +127,7 @@ processors:
     max_records_per_second: 1000
     enable_debug_logging: true
 
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     success_threshold: 3
     open_state_timeout: 30s

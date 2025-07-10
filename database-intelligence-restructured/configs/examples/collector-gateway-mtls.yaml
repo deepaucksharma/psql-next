@@ -1,0 +1,126 @@
+# Enterprise Gateway with mTLS Configuration
+# Secure internal communication between agents and gateway
+
+receivers:
+  # OTLP receiver with mTLS for agent connections
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        tls:
+          cert_file: /etc/otel/certs/gateway-cert.pem
+          key_file: /etc/otel/certs/gateway-key.pem
+          ca_file: /etc/otel/certs/ca-cert.pem
+          client_ca_file: /etc/otel/certs/ca-cert.pem
+          # Require and verify client certificates
+          client_auth_type: RequireAndVerifyClientCert
+          # Reload certificates when they change
+          reload_interval: 1h
+          # Minimum TLS version for security
+          min_version: "1.2"
+          # Cipher suites for forward secrecy
+          cipher_suites:
+            - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+            - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+            - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+            - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+      http:
+        endpoint: 0.0.0.0:4318
+        tls:
+          cert_file: /etc/otel/certs/gateway-cert.pem
+          key_file: /etc/otel/certs/gateway-key.pem
+          ca_file: /etc/otel/certs/ca-cert.pem
+          client_ca_file: /etc/otel/certs/ca-cert.pem
+          client_auth_type: RequireAndVerifyClientCert
+
+processors:
+  # Standard processors from gateway configuration
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  resource:
+    attributes:
+      - key: collector.name
+        value: "gateway-mtls"
+        action: upsert
+
+  batch:
+    send_batch_size: 1024
+    timeout: 200ms
+
+exporters:
+  # OTLP to New Relic (uses standard TLS, not mTLS)
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    tls:
+      insecure: false
+      # Optionally pin New Relic's certificate
+      ca_file: /etc/otel/certs/newrelic-ca.pem
+
+  # For routing to other collectors (with mTLS)
+  otlp/internal:
+    endpoint: internal-collector:4317
+    tls:
+      cert_file: /etc/otel/certs/gateway-client-cert.pem
+      key_file: /etc/otel/certs/gateway-client-key.pem
+      ca_file: /etc/otel/certs/ca-cert.pem
+      # Verify the server's certificate
+      insecure: false
+      # Server name for certificate validation
+      server_name_override: internal-collector.otel.svc.cluster.local
+
+extensions:
+  healthcheck:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    # Health check can use TLS too
+    tls:
+      cert_file: /etc/otel/certs/gateway-cert.pem
+      key_file: /etc/otel/certs/gateway-key.pem
+
+service:
+  extensions: [healthcheck]
+  
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/newrelic]
+    
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/newrelic]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/newrelic]
+
+---
+# Agent configuration snippet for mTLS connection to gateway
+# This would be added to the agent collector configuration
+
+exporters:
+  otlp/gateway:
+    endpoint: otel-gateway:4317
+    tls:
+      # Agent's client certificate
+      cert_file: /etc/otel/certs/agent-cert.pem
+      key_file: /etc/otel/certs/agent-key.pem
+      # CA certificate to verify gateway
+      ca_file: /etc/otel/certs/ca-cert.pem
+      # Don't skip verification
+      insecure: false
+      # Expected server name (must match gateway cert)
+      server_name_override: otel-gateway.otel.svc.cluster.local
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s

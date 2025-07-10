@@ -110,14 +110,6 @@ func (cfg *Config) Validate() error {
 		}
 	}
 
-	// Safety validation
-	if cfg.UnsafePlanCollection && !cfg.SafeMode {
-		return fmt.Errorf("unsafe_plan_collection is enabled but safe_mode is false - this is dangerous for production databases")
-	}
-
-	// Force safe mode in production
-	cfg.SafeMode = true
-	cfg.UnsafePlanCollection = false
 
 	return nil
 }

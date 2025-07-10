@@ -1,0 +1,330 @@
+# SQL Query Receiver Configuration for OHI Feature Parity
+# Implements query performance monitoring with anonymization
+
+receivers:
+  # PostgreSQL query performance monitoring
+  sqlquery/postgresql_queries:
+    driver: postgres
+    datasource: "host=${POSTGRES_HOST} port=${POSTGRES_PORT} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=postgres sslmode=disable"
+    collection_interval: 60s
+    
+    queries:
+      # pg_stat_statements - Main query performance data
+      - sql: |
+          SELECT 
+            queryid,
+            LEFT(query, 100) as query_text,
+            calls as execution_count,
+            total_exec_time,
+            mean_exec_time as avg_elapsed_time_ms,
+            stddev_exec_time,
+            rows,
+            shared_blks_hit + shared_blks_read as total_blocks,
+            shared_blks_hit,
+            shared_blks_read,
+            shared_blks_dirtied,
+            shared_blks_written,
+            local_blks_hit + local_blks_read as local_blocks,
+            temp_blks_read + temp_blks_written as temp_blocks,
+            blk_read_time + blk_write_time as io_time,
+            userid,
+            dbid,
+            datname as database_name
+          FROM pg_stat_statements 
+          JOIN pg_database ON pg_database.oid = pg_stat_statements.dbid
+          WHERE 
+            calls > 20  -- OHI threshold for query count
+            AND mean_exec_time > 500  -- OHI threshold for slow queries (500ms)
+            AND query NOT LIKE '%pg_stat%'  -- Exclude monitoring queries
+          ORDER BY mean_exec_time DESC
+          LIMIT 100
+        metrics:
+          - metric_name: db.query.count
+            value_column: execution_count
+            value_type: int
+            attributes:
+              - queryid
+              - database_name
+              - query_text
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.query.duration
+            value_column: total_exec_time
+            value_type: double
+            unit: ms
+            attributes:
+              - queryid
+              - database_name
+              - query_text
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.query.mean_duration
+            value_column: avg_elapsed_time_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - queryid
+              - database_name
+              - query_text
+            data_point_type: gauge
+            
+          - metric_name: db.query.rows
+            value_column: rows
+            value_type: int
+            attributes:
+              - queryid
+              - database_name
+              - query_text
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.io.disk_reads
+            value_column: shared_blks_read
+            value_type: int
+            attributes:
+              - queryid
+              - database_name
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.io.disk_writes
+            value_column: shared_blks_written
+            value_type: int
+            attributes:
+              - queryid
+              - database_name
+            data_point_type: sum
+            monotonic: true
+            
+      # Wait events monitoring
+      - sql: |
+          SELECT 
+            wait_event_type,
+            wait_event,
+            count(*) as session_count,
+            datname as database_name
+          FROM pg_stat_activity
+          WHERE wait_event IS NOT NULL
+          GROUP BY wait_event_type, wait_event, datname
+        metrics:
+          - metric_name: db.wait_events
+            value_column: session_count
+            value_type: int
+            attributes:
+              - wait_event_type
+              - wait_event
+              - database_name
+            data_point_type: gauge
+            
+      # Blocking sessions
+      - sql: |
+          WITH blocking AS (
+            SELECT 
+              blocked.pid AS blocked_pid,
+              blocked.usename AS blocked_user,
+              blocking.pid AS blocking_pid,
+              blocking.usename AS blocking_user,
+              blocked.query AS blocked_query,
+              blocking.query AS blocking_query,
+              blocked.datname as database_name
+            FROM pg_stat_activity AS blocked
+            JOIN pg_stat_activity AS blocking 
+              ON blocking.pid = ANY(pg_blocking_pids(blocked.pid))
+          )
+          SELECT 
+            database_name,
+            COUNT(DISTINCT blocked_pid) as blocked_sessions,
+            COUNT(DISTINCT blocking_pid) as blocking_sessions
+          FROM blocking
+          GROUP BY database_name
+        metrics:
+          - metric_name: db.connections.blocked
+            value_column: blocked_sessions
+            value_type: int
+            attributes:
+              - database_name
+            data_point_type: gauge
+            
+          - metric_name: db.connections.blocking
+            value_column: blocking_sessions
+            value_type: int
+            attributes:
+              - database_name
+            data_point_type: gauge
+            
+  # MySQL query performance monitoring
+  sqlquery/mysql_queries:
+    driver: mysql
+    datasource: "${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(${MYSQL_HOST}:${MYSQL_PORT})/"
+    collection_interval: 60s
+    
+    queries:
+      # Performance schema query statistics
+      - sql: |
+          SELECT 
+            DIGEST,
+            SCHEMA_NAME as database_name,
+            LEFT(DIGEST_TEXT, 100) as query_text,
+            COUNT_STAR as execution_count,
+            SUM_TIMER_WAIT/1000000000 as total_exec_time_ms,
+            AVG_TIMER_WAIT/1000000000 as avg_elapsed_time_ms,
+            SUM_ROWS_SENT as rows_sent,
+            SUM_ROWS_EXAMINED as rows_examined,
+            SUM_CREATED_TMP_DISK_TABLES as tmp_disk_tables,
+            SUM_CREATED_TMP_TABLES as tmp_tables,
+            SUM_SELECT_FULL_JOIN as full_joins,
+            SUM_SELECT_SCAN as full_scans
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE 
+            COUNT_STAR > 20  -- OHI threshold
+            AND AVG_TIMER_WAIT/1000000000 > 500  -- 500ms threshold
+            AND SCHEMA_NAME IS NOT NULL
+          ORDER BY AVG_TIMER_WAIT DESC
+          LIMIT 100
+        metrics:
+          - metric_name: db.query.count
+            value_column: execution_count
+            value_type: int
+            attributes:
+              - database_name
+              - query_text
+              - digest
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.query.duration
+            value_column: total_exec_time_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - database_name
+              - query_text
+              - digest
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.query.mean_duration
+            value_column: avg_elapsed_time_ms
+            value_type: double
+            unit: ms
+            attributes:
+              - database_name
+              - query_text
+              - digest
+            data_point_type: gauge
+            
+          - metric_name: db.query.rows_sent
+            value_column: rows_sent
+            value_type: int
+            attributes:
+              - database_name
+              - digest
+            data_point_type: sum
+            monotonic: true
+            
+          - metric_name: db.query.rows_examined
+            value_column: rows_examined
+            value_type: int
+            attributes:
+              - database_name
+              - digest
+            data_point_type: sum
+            monotonic: true
+            
+# Query text anonymization processor
+processors:
+  # Anonymize query text to prevent PII leakage
+  transform/query_anonymization:
+    error_mode: ignore
+    log_statements:
+      - context: datapoint
+        statements:
+          # Remove numeric literals
+          - replace_pattern(attributes["query_text"], "\\b\\d+\\b", "?")
+          
+          # Remove string literals (single quotes)
+          - replace_pattern(attributes["query_text"], "'[^']*'", "'?'")
+          
+          # Remove string literals (double quotes)
+          - replace_pattern(attributes["query_text"], "\"[^\"]*\"", "\"?\"")
+          
+          # Remove potential email addresses
+          - replace_pattern(attributes["query_text"], "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "[EMAIL]")
+          
+          # Remove potential SSNs
+          - replace_pattern(attributes["query_text"], "\\b\\d{3}-\\d{2}-\\d{4}\\b", "[SSN]")
+          
+          # Remove potential credit card numbers
+          - replace_pattern(attributes["query_text"], "\\b(?:\\d{4}[\\s-]?){3}\\d{4}\\b", "[CC]")
+          
+          # Normalize whitespace
+          - replace_pattern(attributes["query_text"], "\\s+", " ")
+          
+          # Truncate to reasonable length
+          - truncate_all(attributes["query_text"], 500)
+          
+  # Generate query fingerprints for correlation
+  attributes/query_fingerprint:
+    actions:
+      # Add query fingerprint for deduplication
+      - key: query_fingerprint
+        from_attribute: query_text
+        action: hash
+        
+      # Categorize query types
+      - key: statement_type
+        from_attribute: query_text
+        action: extract
+        pattern: "^\\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE)"
+        
+      # Add query complexity indicators
+      - key: has_join
+        from_attribute: query_text
+        action: extract
+        pattern: "\\bJOIN\\b"
+        
+      - key: has_subquery
+        from_attribute: query_text
+        action: extract
+        pattern: "\\bSELECT.*FROM.*SELECT\\b"
+        
+  # Rate limiting for high-cardinality queries
+  tailsampling/query_sampling:
+    decision_wait: 10s
+    num_traces: 10000
+    expected_new_traces_per_sec: 1000
+    policies:
+      # Always sample slow queries
+      - name: slow_queries
+        type: numeric_attribute
+        numeric_attribute:
+          key: avg_elapsed_time_ms
+          min_value: 1000  # Sample all queries > 1s
+      
+      # Sample a percentage of normal queries
+      - name: normal_queries
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10  # 10% of normal queries
+          
+      # Always sample queries with errors
+      - name: error_queries
+        type: string_attribute
+        string_attribute:
+          key: query_text
+          values: ["ERROR", "FATAL", "PANIC"]
+          
+# Example pipeline configuration
+service:
+  pipelines:
+    metrics/queries:
+      receivers: [sqlquery/postgresql_queries, sqlquery/mysql_queries]
+      processors:
+        - memory_limiter
+        - transform/query_anonymization
+        - attributes/query_fingerprint
+        - tailsampling/query_sampling
+        - batch
+      exporters: [otlp/newrelic, debug]

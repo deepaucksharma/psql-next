@@ -1,6 +1,6 @@
 module github.com/database-intelligence-mvp
 
-go 1.24.3
+go 1.21
 
 require (
 	github.com/database-intelligence-mvp/processors/adaptivesampler v0.0.0-00010101000000-000000000000

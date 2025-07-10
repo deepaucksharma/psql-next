@@ -125,7 +125,7 @@ processors:
   # Custom Database Intelligence processors
   
   # Circuit breaker for database protection
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     success_threshold: 2
     timeout: 30s
@@ -298,7 +298,7 @@ service:
         - memory_limiter
         - resource
         - transform
-        - circuitbreaker
+        - circuit_breaker
         - planattributeextractor
         - verification
         - adaptivesampler

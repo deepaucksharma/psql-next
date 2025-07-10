@@ -139,7 +139,7 @@ service:
       receivers: [otlp]
       processors: 
         - memory_limiter
-        - circuitbreaker/logs
+        - circuit_breaker/logs
         - planattributeextractor
         - verification
         - adaptivesampler

@@ -1,0 +1,55 @@
+receivers:
+  postgresql:
+    endpoint: postgres:5432
+    username: postgres
+    password: postgres
+    databases:
+      - testdb
+    collection_interval: 10s
+    tls:
+      insecure: true
+    
+  mysql:
+    endpoint: mysql:3306
+    username: root
+    password: mysql
+    database: testdb
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 100
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 20
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, zpages]
+  pipelines:
+    metrics/postgresql:
+      receivers: [postgresql]
+      processors: [batch]
+      exporters: [debug]
+    metrics/mysql:
+      receivers: [mysql]
+      processors: [batch]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: debug
+      development: true
+      encoding: console

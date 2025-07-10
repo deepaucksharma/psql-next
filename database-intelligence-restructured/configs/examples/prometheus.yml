@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Scrape OpenTelemetry Collector metrics
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8888']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: '.*grpc_io.*'
+        action: drop
+
+  # Scrape OpenTelemetry Collector internal metrics
+  - job_name: 'otel-collector-internal'
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  # Database metrics from collector
+  - job_name: 'database-metrics'
+    static_configs:
+      - targets: ['otel-collector:8888']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'db_.*|postgresql_.*|mysql_.*'
+        action: keep

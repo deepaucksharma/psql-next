@@ -1,0 +1,260 @@
+# Enterprise Gateway Collector Configuration
+# This configuration implements the centralized gateway pattern for enterprise deployments
+# It receives data from agent collectors and applies enterprise-wide policies
+
+receivers:
+  # OTLP receiver for agent collectors
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+        auth:
+          authenticator: bearer_token
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins: ["*"]
+
+  # Prometheus receiver for self-monitoring
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['localhost:8888']
+
+processors:
+  # Memory limiter MUST be first - protects against OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  # Resource processor for entity synthesis
+  resource:
+    attributes:
+      - key: collector.name
+        value: "gateway"
+        action: upsert
+      - key: collector.type
+        value: "enterprise-gateway"
+        action: upsert
+      - key: environment
+        value: ${env:ENVIRONMENT:-production}
+        action: upsert
+
+  # Batch processor for efficiency
+  batch:
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+    timeout: 200ms
+
+  # Transform processor for cost control - remove high cardinality attributes
+  transform/metrics:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Remove high-cardinality attributes from metrics
+          - delete_key(attributes, "user.id")
+          - delete_key(attributes, "session.id")
+          - delete_key(attributes, "request.id")
+          - delete_key(attributes, "trace.id") where IsMatch(name, "^(?!trace\\.)")
+
+  # Advanced PII redaction for compliance
+  transform/logs:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Redact credit card numbers
+          - replace_pattern(body, "\\b(?:\\d{4}[\\s-]?){3}\\d{4}\\b", "****-****-****-****")
+          - replace_pattern(attributes["message"], "\\b(?:\\d{4}[\\s-]?){3}\\d{4}\\b", "****-****-****-****")
+          # Redact SSN
+          - replace_pattern(body, "\\b\\d{3}-\\d{2}-\\d{4}\\b", "***-**-****")
+          - replace_pattern(attributes["message"], "\\b\\d{3}-\\d{2}-\\d{4}\\b", "***-**-****")
+          # Redact email addresses
+          - replace_pattern(body, "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b", "****@****.***")
+          # Redact API keys and tokens
+          - replace_pattern(body, "(api[_-]?key|token)\\s*[:=]\\s*[\"']?([^\"'\\s]+)", "$1=****")
+
+  # Tail-based sampling for intelligent trace sampling
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 1000
+    policies:
+      # Keep all traces with errors
+      - name: errors-policy
+        type: status_code
+        status_code: {status_codes: [ERROR]}
+      # Keep all slow traces (>2s)
+      - name: latency-policy
+        type: latency
+        latency: {threshold_ms: 2000}
+      # Keep traces from critical services at higher rate
+      - name: critical-services
+        type: and
+        and:
+          and_sub_policy:
+            - name: service-name-filter
+              type: string_attribute
+              string_attribute:
+                key: service.name
+                values: ["payment-service", "auth-service", "order-service"]
+            - name: probabilistic-critical
+              type: probabilistic
+              probabilistic: {sampling_percentage: 50}
+      # Sample everything else at 10%
+      - name: default-probabilistic
+        type: probabilistic
+        probabilistic: {sampling_percentage: 10}
+
+  # Filter processor to drop low-value data
+  filter/logs:
+    logs:
+      log_record:
+        # Drop debug and trace logs
+        - 'severity_number < SEVERITY_NUMBER_INFO'
+        # Drop health check logs
+        - 'IsMatch(body, ".*health.*check.*") == true'
+        - 'IsMatch(attributes["http.target"], "^/health") == true'
+
+  # Attributes processor for data governance
+  attributes/security:
+    actions:
+      # Hash sensitive attributes instead of removing
+      - key: user.email
+        action: hash
+      - key: client.address
+        action: hash
+      # Remove internal attributes
+      - pattern: internal\.*
+        action: delete
+
+  # Custom processors from our implementation
+  adaptivesampler:
+    in_memory_only: true
+    default_sample_rate: 0.1
+    rules:
+      - name: database_errors
+        conditions:
+          - attribute: db.system
+            operator: exists
+          - attribute: error
+            operator: eq
+            value: true
+        sample_rate: 1.0
+      - name: slow_database_queries
+        conditions:
+          - attribute: db.system
+            operator: exists
+          - attribute: duration_ms
+            operator: gt
+            value: 1000
+        sample_rate: 0.5
+
+  circuit_breaker:
+    failure_threshold: 10
+    timeout_duration: 30s
+    half_open_requests: 5
+
+  planattributeextractor:
+    safe_mode: true
+    timeout_ms: 5000
+    query_anonymization:
+      enabled: true
+      generate_fingerprint: true
+
+  verification:
+    enabled: true
+    pii_detection:
+      enabled: true
+      sensitivity: high
+
+exporters:
+  # Primary New Relic OTLP export
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # Prometheus exporter for self-monitoring
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    metric_expiration: 5m
+
+extensions:
+  # Health check endpoint
+  healthcheck:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: 5s
+      exporter_failure_threshold: 5
+
+  # Bearer token auth for agent connections
+  bearertokenauth:
+    token: ${env:GATEWAY_AUTH_TOKEN}
+
+  # Memory monitoring
+  memory_ballast:
+    size_mib: 512
+
+  # zPages for live debugging
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+  # Performance profiling
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+service:
+  extensions: [healthcheck, bearertokenauth, memory_ballast, zpages, pprof]
+  
+  pipelines:
+    # Trace pipeline with tail sampling
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, tail_sampling, circuit_breaker, verification, batch]
+      exporters: [otlphttp/newrelic, debug]
+    
+    # Metrics pipeline with cardinality control
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, resource, transform/metrics, adaptivesampler, batch]
+      exporters: [otlphttp/newrelic, prometheus]
+    
+    # Logs pipeline with PII redaction
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, filter/logs, transform/logs, planattributeextractor, attributes/security, batch]
+      exporters: [otlphttp/newrelic]
+  
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: otel-gateway
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

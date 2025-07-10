@@ -67,7 +67,7 @@ processors:
         action: upsert
   
   # Circuit breaker with monitoring
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     timeout: 30s
     cooldown_period: 1m

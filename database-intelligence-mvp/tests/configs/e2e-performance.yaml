@@ -99,7 +99,7 @@ processors:
         sampling_percentage: 0.1
 
   # Performance-tuned circuit breaker
-  circuitbreaker:
+  circuit_breaker:
     max_failures: 20
     failure_threshold_percentage: 75
     timeout: 5s

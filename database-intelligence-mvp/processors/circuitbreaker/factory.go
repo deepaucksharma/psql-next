@@ -11,7 +11,7 @@ import (
 )
 
 // ComponentType is the name of this processor
-var componentType = component.MustNewType("circuitbreaker")
+var componentType = component.MustNewType("circuit_breaker")
 
 // NewFactory creates a new factory for the circuit breaker processor
 func NewFactory() processor.Factory {

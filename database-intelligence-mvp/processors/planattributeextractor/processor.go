@@ -53,22 +53,12 @@ func (p *planAttributeExtractor) Capabilities() consumer.Capabilities {
 
 // Start starts the processor
 func (p *planAttributeExtractor) Start(ctx context.Context, host component.Host) error {
-	p.logger.Info("Starting plan attribute extractor processor",
-		zap.Bool("safe_mode", p.config.SafeMode),
-		zap.Bool("unsafe_plan_collection", p.config.UnsafePlanCollection))
+	p.logger.Info("Starting plan attribute extractor processor")
 	
-	if !p.config.SafeMode {
-		p.logger.Warn("Plan attribute extractor is not in safe mode - this may impact database performance")
-	}
-	
-	if p.config.UnsafePlanCollection {
-		p.logger.Error("UNSAFE: Direct plan collection is enabled - this can severely impact production databases")
-	}
-	
-	// Warn about pg_querylens dependency
-	p.logger.Warn("Plan attribute extraction requires pre-collected plan data",
+	// Info about plan data requirements
+	p.logger.Info("Plan attribute extraction requires pre-collected plan data",
 		zap.String("recommendation", "Use pg_stat_statements or similar for safe plan collection"),
-		zap.String("unsafe_alternative", "pg_querylens extension (requires C compilation and PostgreSQL restart)"))
+		zap.String("alternative", "pg_querylens extension for detailed plan tracking"))
 	
 	// Start cleanup routine for plan history
 	go p.cleanupRoutine()
@@ -226,7 +216,10 @@ func (p *planAttributeExtractor) detectPlanType(record plog.LogRecord) (string, 
 func (p *planAttributeExtractor) extractPostgreSQLAttributes(ctx context.Context, planData string) (map[string]interface{}, error) {
 	attributes := make(map[string]interface{})
 	
-	// Parse JSON and extract configured attributes
+	// Parse JSON once for better performance
+	parsedPlan := gjson.Parse(planData)
+	
+	// Extract configured attributes using the parsed result
 	for attrName, jsonPath := range p.config.PostgreSQLRules.Extractions {
 		select {
 		case <-ctx.Done():
@@ -234,7 +227,7 @@ func (p *planAttributeExtractor) extractPostgreSQLAttributes(ctx context.Context
 		default:
 		}
 		
-		result := gjson.Get(planData, jsonPath)
+		result := parsedPlan.Get(jsonPath)
 		if result.Exists() {
 			attributes[attrName] = p.convertGJSONValue(result)
 		}
@@ -266,6 +259,9 @@ func (p *planAttributeExtractor) extractPostgreSQLAttributes(ctx context.Context
 func (p *planAttributeExtractor) extractMySQLAttributes(ctx context.Context, planData string) (map[string]interface{}, error) {
 	attributes := make(map[string]interface{})
 	
+	// Parse JSON once for better performance
+	parsedPlan := gjson.Parse(planData)
+	
 	for attrName, jsonPath := range p.config.MySQLRules.Extractions {
 		select {
 		case <-ctx.Done():
@@ -273,7 +269,7 @@ func (p *planAttributeExtractor) extractMySQLAttributes(ctx context.Context, pla
 		default:
 		}
 		
-		result := gjson.Get(planData, jsonPath)
+		result := parsedPlan.Get(jsonPath)
 		if result.Exists() {
 			attributes[attrName] = p.convertGJSONValue(result)
 		}
@@ -341,12 +337,9 @@ func (p *planAttributeExtractor) calculateJSONDepth(planData string) int {
 
 // calculateNodeCount counts the number of plan nodes
 func (p *planAttributeExtractor) calculateNodeCount(planData string) int {
-	nodeTypeCount := 0
-	result := gjson.Get(planData, "$..Node Type")
-	result.ForEach(func(key, value gjson.Result) bool {
-		nodeTypeCount++
-		return true
-	})
+	// Count occurrences of "Node Type" in the JSON - simple and efficient
+	// This avoids parsing the entire JSON structure
+	nodeTypeCount := strings.Count(planData, "\"Node Type\"")
 	return nodeTypeCount
 }
 

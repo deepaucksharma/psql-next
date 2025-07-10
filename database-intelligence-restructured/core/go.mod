@@ -1,6 +1,6 @@
 module github.com/database-intelligence/core
 
-go 1.22
+go 1.23
 
 require (
 	github.com/database-intelligence/processors/adaptivesampler v0.0.0
@@ -11,6 +11,10 @@ require (
 	github.com/database-intelligence/processors/querycorrelator v0.0.0
 	github.com/database-intelligence/processors/verification v0.0.0
 	github.com/database-intelligence/extensions/healthcheck v0.0.0
+	github.com/database-intelligence/exporters/nri v0.0.0
+	github.com/database-intelligence/receivers/ash v0.0.0
+	github.com/database-intelligence/receivers/enhancedsql v0.0.0
+	github.com/database-intelligence/receivers/kernelmetrics v0.0.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter v0.129.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter v0.129.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.129.0
@@ -45,4 +49,11 @@ replace (
 	github.com/database-intelligence/processors/querycorrelator => ../processors/querycorrelator
 	github.com/database-intelligence/processors/verification => ../processors/verification
 	github.com/database-intelligence/extensions/healthcheck => ../extensions/healthcheck
+	github.com/database-intelligence/exporters/nri => ../exporters/nri
+	github.com/database-intelligence/receivers/ash => ../receivers/ash
+	github.com/database-intelligence/receivers/enhancedsql => ../receivers/enhancedsql
+	github.com/database-intelligence/receivers/kernelmetrics => ../receivers/kernelmetrics
+	github.com/database-intelligence/common => ../common
+	github.com/database-intelligence/common/featuredetector => ../common/featuredetector
+	github.com/database-intelligence/common/queryselector => ../common/queryselector
 )

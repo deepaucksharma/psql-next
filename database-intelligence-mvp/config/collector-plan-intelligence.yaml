@@ -153,7 +153,7 @@ processors:
       alert_on_regression: true
 
   # Circuit breaker with plan-aware protection
-  circuitbreaker:
+  circuit_breaker:
     failure_threshold: 5
     timeout: 30s
     

@@ -1,0 +1,398 @@
+# MySQL Detailed Monitoring Configuration
+# Provides OHI-compatible InnoDB and performance metrics
+
+receivers:
+  # MySQL receiver for standard metrics
+  mysql/detailed:
+    endpoint: ${MYSQL_HOST}:${MYSQL_PORT}
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+    database: ${MYSQL_DB}
+    collection_interval: 15s  # Match OHI interval
+    transport: tcp
+    tls:
+      insecure: true
+    
+  # Detailed MySQL performance and InnoDB metrics
+  sqlquery/mysql_innodb:
+    driver: mysql
+    datasource: "${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(${MYSQL_HOST}:${MYSQL_PORT})/${MYSQL_DB}"
+    collection_interval: 60s
+    
+    queries:
+      # InnoDB Buffer Pool Statistics
+      - sql: |
+          SELECT 
+            VARIABLE_NAME,
+            VARIABLE_VALUE
+          FROM performance_schema.global_status
+          WHERE VARIABLE_NAME IN (
+            'Innodb_buffer_pool_pages_total',
+            'Innodb_buffer_pool_pages_data',
+            'Innodb_buffer_pool_pages_dirty',
+            'Innodb_buffer_pool_pages_free',
+            'Innodb_buffer_pool_pages_misc',
+            'Innodb_buffer_pool_read_requests',
+            'Innodb_buffer_pool_reads',
+            'Innodb_buffer_pool_write_requests',
+            'Innodb_buffer_pool_pages_flushed',
+            'Innodb_buffer_pool_bytes_data',
+            'Innodb_buffer_pool_bytes_dirty'
+          )
+        metrics:
+          - metric_name: mysql.innodb.buffer_pool.pages
+            value_column: VARIABLE_VALUE
+            value_type: int
+            attributes:
+              - column_name: VARIABLE_NAME
+                name: metric_type
+            static_attributes:
+              component: innodb
+            data_point_type: gauge
+            
+      # InnoDB Row Operations
+      - sql: |
+          SELECT 
+            VARIABLE_NAME,
+            VARIABLE_VALUE
+          FROM performance_schema.global_status
+          WHERE VARIABLE_NAME IN (
+            'Innodb_rows_read',
+            'Innodb_rows_inserted',
+            'Innodb_rows_updated',
+            'Innodb_rows_deleted'
+          )
+        metrics:
+          - metric_name: mysql.innodb.rows
+            value_column: VARIABLE_VALUE
+            value_type: int
+            attributes:
+              - column_name: VARIABLE_NAME
+                name: operation
+            data_point_type: sum
+            monotonic: true
+            
+      # InnoDB Data Operations
+      - sql: |
+          SELECT 
+            VARIABLE_NAME,
+            VARIABLE_VALUE
+          FROM performance_schema.global_status
+          WHERE VARIABLE_NAME IN (
+            'Innodb_data_reads',
+            'Innodb_data_writes',
+            'Innodb_data_fsyncs',
+            'Innodb_data_pending_reads',
+            'Innodb_data_pending_writes',
+            'Innodb_data_pending_fsyncs'
+          )
+        metrics:
+          - metric_name: mysql.innodb.data_operations
+            value_column: VARIABLE_VALUE
+            value_type: int
+            attributes:
+              - column_name: VARIABLE_NAME
+                name: operation_type
+            data_point_type: sum
+            monotonic: true
+            
+      # InnoDB Log Writes
+      - sql: |
+          SELECT 
+            VARIABLE_NAME,
+            VARIABLE_VALUE
+          FROM performance_schema.global_status
+          WHERE VARIABLE_NAME IN (
+            'Innodb_log_waits',
+            'Innodb_log_write_requests',
+            'Innodb_log_writes',
+            'Innodb_os_log_written',
+            'Innodb_os_log_fsyncs',
+            'Innodb_os_log_pending_fsyncs',
+            'Innodb_os_log_pending_writes'
+          )
+        metrics:
+          - metric_name: mysql.innodb.log
+            value_column: VARIABLE_VALUE
+            value_type: int
+            attributes:
+              - column_name: VARIABLE_NAME
+                name: log_operation
+            data_point_type: sum
+            monotonic: true
+            
+      # Query Cache Statistics
+      - sql: |
+          SELECT 
+            VARIABLE_NAME,
+            VARIABLE_VALUE
+          FROM performance_schema.global_status
+          WHERE VARIABLE_NAME IN (
+            'Qcache_free_blocks',
+            'Qcache_free_memory',
+            'Qcache_hits',
+            'Qcache_inserts',
+            'Qcache_lowmem_prunes',
+            'Qcache_not_cached',
+            'Qcache_queries_in_cache',
+            'Qcache_total_blocks'
+          )
+        metrics:
+          - metric_name: mysql.query_cache
+            value_column: VARIABLE_VALUE
+            value_type: int
+            attributes:
+              - column_name: VARIABLE_NAME
+                name: cache_metric
+            data_point_type: gauge
+            
+      # Handler Statistics (OHI compatibility)
+      - sql: |
+          SELECT 
+            VARIABLE_NAME,
+            VARIABLE_VALUE
+          FROM performance_schema.global_status
+          WHERE VARIABLE_NAME IN (
+            'Handler_commit',
+            'Handler_delete',
+            'Handler_discover',
+            'Handler_external_lock',
+            'Handler_mrr_init',
+            'Handler_prepare',
+            'Handler_read_first',
+            'Handler_read_key',
+            'Handler_read_last',
+            'Handler_read_next',
+            'Handler_read_prev',
+            'Handler_read_rnd',
+            'Handler_read_rnd_next',
+            'Handler_rollback',
+            'Handler_savepoint',
+            'Handler_savepoint_rollback',
+            'Handler_update',
+            'Handler_write'
+          )
+        metrics:
+          - metric_name: mysql.handlers
+            value_column: VARIABLE_VALUE
+            value_type: int
+            attributes:
+              - column_name: VARIABLE_NAME
+                name: handler_type
+            data_point_type: sum
+            monotonic: true
+            
+      # Table Lock Statistics
+      - sql: |
+          SELECT 
+            VARIABLE_NAME,
+            VARIABLE_VALUE
+          FROM performance_schema.global_status
+          WHERE VARIABLE_NAME IN (
+            'Table_locks_immediate',
+            'Table_locks_waited',
+            'Table_open_cache_hits',
+            'Table_open_cache_misses',
+            'Table_open_cache_overflows'
+          )
+        metrics:
+          - metric_name: mysql.table.locks
+            value_column: VARIABLE_VALUE
+            value_type: int
+            attributes:
+              - column_name: VARIABLE_NAME
+                name: lock_type
+            data_point_type: sum
+            monotonic: true
+            
+      # Thread Statistics
+      - sql: |
+          SELECT 
+            VARIABLE_NAME,
+            VARIABLE_VALUE
+          FROM performance_schema.global_status
+          WHERE VARIABLE_NAME IN (
+            'Threads_cached',
+            'Threads_connected',
+            'Threads_created',
+            'Threads_running'
+          )
+        metrics:
+          - metric_name: mysql.threads
+            value_column: VARIABLE_VALUE
+            value_type: int
+            attributes:
+              - column_name: VARIABLE_NAME
+                name: thread_state
+            data_point_type: gauge
+            
+      # Replication Status
+      - sql: |
+          SELECT 
+            CHANNEL_NAME,
+            SERVICE_STATE as IO_RUNNING,
+            LAST_ERROR_NUMBER,
+            LAST_ERROR_MESSAGE,
+            LAST_ERROR_TIMESTAMP
+          FROM performance_schema.replication_connection_status
+        metrics:
+          - metric_name: mysql.replication.io_running
+            value_column: IO_RUNNING
+            value_type: string
+            attributes:
+              - CHANNEL_NAME
+              - LAST_ERROR_NUMBER
+              - LAST_ERROR_MESSAGE
+            data_point_type: gauge
+            
+      - sql: |
+          SELECT 
+            CHANNEL_NAME,
+            SERVICE_STATE as SQL_RUNNING,
+            LAST_ERROR_NUMBER,
+            LAST_ERROR_MESSAGE,
+            LAST_ERROR_TIMESTAMP
+          FROM performance_schema.replication_applier_status
+        metrics:
+          - metric_name: mysql.replication.sql_running
+            value_column: SQL_RUNNING
+            value_type: string
+            attributes:
+              - CHANNEL_NAME
+              - LAST_ERROR_NUMBER
+              - LAST_ERROR_MESSAGE
+            data_point_type: gauge
+            
+      # Replication Lag
+      - sql: |
+          SELECT 
+            CHANNEL_NAME,
+            SOURCE_UUID,
+            LAST_QUEUED_TRANSACTION_IMMEDIATE_COMMIT_TIMESTAMP,
+            LAST_APPLIED_TRANSACTION_IMMEDIATE_COMMIT_TIMESTAMP,
+            TIMESTAMPDIFF(SECOND, 
+              LAST_APPLIED_TRANSACTION_IMMEDIATE_COMMIT_TIMESTAMP,
+              LAST_QUEUED_TRANSACTION_IMMEDIATE_COMMIT_TIMESTAMP
+            ) as SECONDS_BEHIND_MASTER
+          FROM performance_schema.replication_applier_status_by_worker
+          WHERE LAST_APPLIED_TRANSACTION_IMMEDIATE_COMMIT_TIMESTAMP IS NOT NULL
+        metrics:
+          - metric_name: mysql.replication.seconds_behind_master
+            value_column: SECONDS_BEHIND_MASTER
+            value_type: int
+            unit: s
+            attributes:
+              - CHANNEL_NAME
+              - SOURCE_UUID
+            data_point_type: gauge
+            
+      # Table Sizes (Similar to OHI)
+      - sql: |
+          SELECT 
+            TABLE_SCHEMA as database_name,
+            TABLE_NAME as table_name,
+            TABLE_TYPE as table_type,
+            ENGINE as storage_engine,
+            TABLE_ROWS as row_count,
+            DATA_LENGTH as data_size,
+            INDEX_LENGTH as index_size,
+            DATA_FREE as free_space
+          FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+            AND TABLE_TYPE = 'BASE TABLE'
+          ORDER BY DATA_LENGTH + INDEX_LENGTH DESC
+          LIMIT 100
+        metrics:
+          - metric_name: mysql.table.size
+            value_column: data_size
+            value_type: int
+            unit: By
+            attributes:
+              - database_name
+              - table_name
+              - storage_engine
+            data_point_type: gauge
+            
+          - metric_name: mysql.table.index_size
+            value_column: index_size
+            value_type: int
+            unit: By
+            attributes:
+              - database_name
+              - table_name
+              - storage_engine
+            data_point_type: gauge
+            
+          - metric_name: mysql.table.rows
+            value_column: row_count
+            value_type: int
+            attributes:
+              - database_name
+              - table_name
+              - storage_engine
+            data_point_type: gauge
+
+processors:
+  # Transform raw InnoDB metrics to OHI-compatible names
+  metricstransform/mysql_innodb_ohi:
+    transforms:
+      # Buffer pool pages
+      - include: mysql.innodb.buffer_pool.pages
+        match_type: strict
+        action: update
+        operations:
+          - action: add_label
+            new_label: page_type
+            new_value: data
+            label_value: Innodb_buffer_pool_pages_data
+          - action: add_label
+            new_label: page_type
+            new_value: dirty
+            label_value: Innodb_buffer_pool_pages_dirty
+          - action: add_label
+            new_label: page_type
+            new_value: free
+            label_value: Innodb_buffer_pool_pages_free
+            
+      # Map to OHI metric names
+      - include: mysql.innodb.buffer_pool.pages
+        match_type: regexp
+        regexp: "^mysql\\.innodb\\.buffer_pool\\.pages$"
+        action: update
+        new_name: db.innodb.bufferPoolPages
+        
+      # Handler operations to OHI format
+      - include: mysql.handlers
+        match_type: regexp
+        regexp: "^mysql\\.handlers$"
+        action: update
+        operations:
+          - action: extract_label_value
+            label: handler_type
+            pattern: "Handler_(.*)"
+            
+      # Query cache to OHI format
+      - include: mysql.query_cache
+        match_type: regexp
+        regexp: ".*Qcache_hits.*"
+        action: update
+        new_name: db.queryCacheHitsPerSecond
+        
+      - include: mysql.query_cache
+        match_type: regexp
+        regexp: ".*Qcache_free_memory.*"
+        action: update
+        new_name: db.queryCacheSizeInBytes
+        
+  # Add resource attributes for entity synthesis
+  resource/mysql_entity:
+    attributes:
+      - key: db.system
+        value: mysql
+        action: insert
+      - key: mysql.version
+        from_attribute: mysql.version
+        action: insert
+      - key: service.name
+        value: mysql-database
+        action: insert

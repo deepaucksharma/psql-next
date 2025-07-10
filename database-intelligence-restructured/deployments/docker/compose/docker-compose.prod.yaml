@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-dbtelemetry}
+    ports:
+      - "${DB_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-mysql}
+      MYSQL_DATABASE: ${DB_NAME:-dbtelemetry}
+      MYSQL_USER: ${DB_USERNAME:-mysql}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-mysql}
+    ports:
+      - "${DB_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Database Intelligence Collector
+  collector:
+    image: database-intelligence:latest
+    environment:
+      # Database connections
+      DB_POSTGRES_HOST: postgres
+      DB_POSTGRES_PORT: 5432
+      DB_MYSQL_HOST: mysql
+      DB_MYSQL_PORT: 3306
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-dbtelemetry}
+      
+      # New Relic configuration
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      
+      # Performance tuning
+      MEMORY_LIMIT_MIB: ${MEMORY_LIMIT_MIB:-512}
+      DEBUG_VERBOSITY: ${DEBUG_VERBOSITY:-normal}
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "13133:13133" # Health check
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13133/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+  mysql_data:

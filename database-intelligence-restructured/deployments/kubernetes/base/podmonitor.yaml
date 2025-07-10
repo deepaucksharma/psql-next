@@ -1,0 +1,32 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: database-intelligence-collector
+  namespace: database-intelligence
+  labels:
+    app: database-intelligence-collector
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: database-intelligence-collector
+  podMetricsEndpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    metricRelabelings:
+    # Drop high cardinality metrics
+    - sourceLabels: [__name__]
+      regex: 'otelcol_rpc_.*'
+      action: drop
+    # Keep only important metrics
+    - sourceLabels: [__name__]
+      regex: 'otelcol_(processor|receiver|exporter)_.*'
+      action: keep

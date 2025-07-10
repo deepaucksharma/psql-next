@@ -1,0 +1,1202 @@
+# Code Review Report - Thu Jul 10 20:03:40 IST 2025
+
+## Unused Imports
+
+- ./tools/minimal-db-check/minimal_db_check.go
+- ./core/cmd/collector/main.go
+- ./core/internal/database/connection_pool.go
+- ./core/internal/secrets/manager.go
+- ./core/internal/health/checker.go
+- ./core/internal/ratelimit/limiter.go
+- ./core/internal/conventions/validator.go
+- ./core/internal/performance/optimizer.go
+- ./build-official/main_windows.go
+- ./build-official/main_others.go
+- ./build-official/main.go
+- ./build-official/components.go
+- ./exporters/registry.go
+- ./exporters/nri/config.go
+- ./exporters/nri/factory.go
+- ./exporters/nri/exporter.go
+- ./tests/integration/full_integration_test.go
+- ./tests/integration/full_pipeline_test.go
+- ./tests/integration/config_validation_test.go
+- ./tests/integration/feature_detection_test.go
+- ./tests/testconfig/config.go
+- ./tests/benchmarks/benchmarks_test.go
+- ./tests/benchmarks/processor_bench_test.go
+- ./tests/test-collector/main.go
+- ./tests/performance/load_test.go
+- ./tests/performance/resource_test.go
+- ./tests/performance/processor_bench_test.go
+- ./tests/e2e/config_hotreload_test.go
+- ./tests/e2e/verify_postgres_metrics_test.go
+- ./tests/e2e/cmd/simple_validation/main.go
+- ./tests/e2e/cmd/verify_newrelic_main/main.go
+- ./tests/e2e/cmd/e2e_verification/main.go
+- ./tests/e2e/cmd/verify/main.go
+- ./tests/e2e/cmd/validate_dashboard/main.go
+- ./tests/e2e/cmd/create_otel_dashboard/main.go
+- ./tests/e2e/cmd/test_connectivity/main.go
+- ./tests/e2e/cmd/validate_ohi_mapping/main.go
+- ./tests/e2e/cmd/test_connectivity_with_env/main.go
+- ./tests/e2e/cmd/check_newrelic_data/main.go
+- ./tests/e2e/cmd/nrdb_test/main.go
+- ./tests/e2e/cmd/validate_otel_queries/main.go
+- ./tests/e2e/cmd/run_validation/main.go
+- ./tests/e2e/ssl_tls_connection_test.go
+- ./tests/e2e/processor_behavior_test.go
+- ./tests/e2e/multi_instance_postgres_test.go
+- ./tests/e2e/schema_change_test.go
+- ./tests/e2e/suites/adapter_integration_test.go
+- ./tests/e2e/suites/newrelic_verification_test.go
+- ./tests/e2e/suites/otel_dimensional_metrics_test.go
+- ./tests/e2e/suites/comprehensive_e2e_test.go
+- ./tests/e2e/suites/ohi_parity_validation_test.go
+- ./tests/e2e/suites/otlp_compliance_test.go
+- ./tests/e2e/suites/otlp_format_validation_test.go
+- ./tests/e2e/suites/simple_db_test.go
+- ./tests/e2e/suites/database_to_nrdb_verification_test.go
+- ./tests/e2e/dist/main_windows.go
+- ./tests/e2e/dist/components_test.go
+- ./tests/e2e/dist/main_others.go
+- ./tests/e2e/dist/main.go
+- ./tests/e2e/dist/components.go
+- ./tests/e2e/framework/test_utils.go
+- ./tests/e2e/framework/interfaces.go
+- ./tests/e2e/framework/types.go
+- ./tests/e2e/framework/nrdb_client_extensions.go
+- ./tests/e2e/framework/test_environment.go
+- ./tests/e2e/framework/test_collector.go
+- ./tests/e2e/framework/nrdb_client.go
+- ./tests/e2e/metric_accuracy_test.go
+- ./tests/e2e/first_real_test.go
+- ./tests/e2e/stability_test.go
+- ./tests/e2e/local_collector_test.go
+- ./tests/e2e/memory_usage_test.go
+- ./tests/e2e/docker_postgres_test.go
+- ./tests/e2e/verify_processor_test.go
+- ./tests/e2e/debug_metrics_test.go
+- ./tests/e2e/custom_processors_test.go
+- ./tests/e2e/connection_recovery_test.go
+- ./tests/e2e/verify_mysql_metrics_test.go
+- ./tests/e2e/high_load_test.go
+- ./tests/e2e/docker_mysql_test.go
+- ./tests/e2e/nrdb_verification_test.go
+- ./tests/e2e/pkg/validation/parity_validator.go
+- ./tests/e2e/pkg/validation/dashboard_parser.go
+- ./tests/e2e/pkg/validation/continuous_validator.go
+- ./tests/e2e/pkg/validation/dashboard_parser_test.go
+- ./tests/e2e/multi_instance_mysql_test.go
+- ./receivers/kernelmetrics/config.go
+- ./receivers/kernelmetrics/scraper.go
+- ./receivers/kernelmetrics/factory.go
+- ./receivers/enhancedsql/config.go
+- ./receivers/enhancedsql/collect.go
+- ./receivers/enhancedsql/factory.go
+- ./receivers/enhancedsql/receiver.go
+- ./receivers/registry.go
+- ./receivers/ash/config.go
+- ./receivers/ash/scraper.go
+- ./receivers/ash/factory.go
+- ./receivers/ash/features.go
+- ./receivers/ash/collector.go
+- ./receivers/ash/storage.go
+- ./receivers/ash/sampler.go
+- ./working-collector/database-collector.go
+- ./working-collector/main.go
+- ./extensions/healthcheck/config.go
+- ./extensions/healthcheck/factory.go
+- ./extensions/healthcheck/extension.go
+- ./extensions/registry.go
+- ./processors/adaptivesampler/config.go
+- ./processors/adaptivesampler/processor_test.go
+- ./processors/adaptivesampler/factory.go
+- ./processors/adaptivesampler/processor.go
+- ./processors/adaptivesampler/adaptive_algorithm.go
+- ./processors/registry.go
+- ./processors/verification/config.go
+- ./processors/verification/processor_test.go
+- ./processors/verification/factory.go
+- ./processors/verification/processor.go
+- ./processors/planattributeextractor/plan_dictionary.go
+- ./processors/planattributeextractor/config.go
+- ./processors/planattributeextractor/query_anonymizer_test.go
+- ./processors/planattributeextractor/processor_test.go
+- ./processors/planattributeextractor/factory.go
+- ./processors/planattributeextractor/processor.go
+- ./processors/planattributeextractor/querylens_integration_test.go
+- ./processors/planattributeextractor/query_anonymizer.go
+- ./processors/planattributeextractor/querylens_integration.go
+- ./processors/nrerrormonitor/config.go
+- ./processors/nrerrormonitor/processor_test.go
+- ./processors/nrerrormonitor/factory.go
+- ./processors/nrerrormonitor/processor.go
+- ./processors/circuitbreaker/config.go
+- ./processors/circuitbreaker/processor_test.go
+- ./processors/circuitbreaker/factory.go
+- ./processors/circuitbreaker/processor.go
+- ./processors/circuitbreaker/feature_aware.go
+- ./processors/circuitbreaker/errors.go
+- ./processors/costcontrol/config.go
+- ./processors/costcontrol/processor_test.go
+- ./processors/costcontrol/factory.go
+- ./processors/costcontrol/processor.go
+- ./processors/querycorrelator/config.go
+- ./processors/querycorrelator/processor_test.go
+- ./processors/querycorrelator/factory.go
+- ./processors/querycorrelator/processor.go
+- ./common/featuredetector/metrics.go
+- ./common/featuredetector/postgresql.go
+- ./common/featuredetector/types.go
+- ./common/featuredetector/mysql.go
+- ./common/featuredetector/errors.go
+- ./common/queryselector/selector.go
+- ./simple-working-collector.go
+- ./test-compile.go
+- ./minimal-working-collector.go
+- ./build/main_windows.go
+- ./build/main_others.go
+- ./build/main.go
+- ./build/components.go
+- ./basic-collector.go
+- ./distributions/minimal-working/main.go
+- ./distributions/enterprise/main-complex.go
+- ./distributions/enterprise/main_minimal.go
+- ./distributions/enterprise/main_simple.go
+- ./distributions/enterprise/main.go
+- ./distributions/enterprise/components.go
+- ./distributions/working/main.go
+- ./distributions/minimal/main.go
+- ./distributions/standard/main.go
+- ./distributions/test-simple/main.go
+- ./distributions/production/main.go
+- ./distributions/final/main.go
+- ./distributions/streamlined/main.go
+- ./validation/ohi-compatibility-validator.go
+
+## Commented-Out Code Blocks
+
+
+## TODO/FIXME/HACK Comments
+
+- ./tests/e2e/suites/adapter_integration_test.go:545:	// TODO: Verify Prometheus metrics endpoint
+- ./processors/verification/processor.go:630:	// TODO: Consider storing a context in the processor for proper cancellation propagation
+- ./processors/nrerrormonitor/processor.go:296:	// TODO: Consider storing a context in the processor for proper cancellation propagation
+- ./configs/examples/collector-resilient-fixed.yaml:125:          - replace_all_patterns(attributes["query_text"], "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3[0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\\b", "****-****-****-XXXX")
+- ./configs/examples/collector-resilient-fixed.yaml:127:          - replace_all_patterns(attributes["query_text"], "\\b(?:\\d{3}[-.]?\\d{2}[-.]?\\d{4})\\b", "XXX-XX-XXXX")
+- ./configs/examples/collector-resilient-fixed.yaml:131:          - replace_all_patterns(attributes["query_text"], "\\b(?:\\+?1[-.]?)?\\(?([0-9]{3})\\)?[-.]?([0-9]{3})[-.]?([0-9]{4})\\b", "+1-XXX-XXX-XXXX")
+- ./configs/examples/collector-resilient-fixed.yaml:135:          - replace_all_patterns(attributes["query_text"], "\\b\\d{6,}\\b", "XXXXXX")
+
+## Potentially Unused Functions
+
+- Function `func ConfigureConnectionPool(db *sql.DB, config ConnectionPoolConfig, logger *zap.Logger) {` in `./core/internal/database/connection_pool.go` (no references found)
+- Function `func OpenWithSecurePool(driver, dataSource string, config ConnectionPoolConfig, logger *zap.Logger) (*sql.DB, error) {` in `./core/internal/database/connection_pool.go` (no references found)
+- Function `func GetPoolStats(db *sql.DB) sql.DBStats {` in `./core/internal/database/connection_pool.go` (no references found)
+- Function `func LogPoolStats(db *sql.DB, logger *zap.Logger, component string) {` in `./core/internal/database/connection_pool.go` (no references found)
+- Function `func NewSecretManager(logger *zap.Logger) *SecretManager {` in `./core/internal/secrets/manager.go` (no references found)
+- Function `func NewHealthChecker(logger *zap.Logger, version string) *HealthChecker {` in `./core/internal/health/checker.go` (no references found)
+- Function `func NewPipelineMonitor(name string) *PipelineMonitor {` in `./core/internal/health/checker.go` (no references found)
+- Function `func NewResourceMonitor() *ResourceMonitor {` in `./core/internal/health/checker.go` (no references found)
+- Function `func NewDatabaseRateLimiter(config RateLimiterConfig, logger *zap.Logger) *DatabaseRateLimiter {` in `./core/internal/ratelimit/limiter.go` (no references found)
+- Function `func NewValidator(logger *zap.Logger, config Config) *Validator {` in `./core/internal/conventions/validator.go` (no references found)
+- Function `func NewOptimizedPlanParser(config ParserConfig, logger *zap.Logger) (*OptimizedPlanParser, error) {` in `./core/internal/performance/optimizer.go` (no references found)
+- Function `func NewDurationHistogram() *DurationHistogram {` in `./core/internal/performance/optimizer.go` (no references found)
+- Function `func NewMemoryPools() *MemoryPools {` in `./core/internal/performance/optimizer.go` (no references found)
+- Function `func Factories() (map[component.Type]exporter.Factory, error) {` in `./exporters/registry.go` (no references found)
+- Function `func DefaultConfig() *Config {` in `./exporters/nri/config.go` (no references found)
+- Function `func Get() *Config {` in `./tests/testconfig/config.go` (no references found)
+- Function `func NewTestDataGenerator(pgDB, mysqlDB *sql.DB) *TestDataGenerator {` in `./tests/e2e/framework/test_utils.go` (no references found)
+- Function `func NewTestEnvironment() *TestEnvironment {` in `./tests/e2e/framework/test_environment.go` (no references found)
+- Function `func NewTestCollector(env *TestEnvironment) *TestCollector {` in `./tests/e2e/framework/test_collector.go` (no references found)
+- Function `func NewNRDBClient(accountID, apiKey string) *NRDBClient {` in `./tests/e2e/framework/nrdb_client.go` (no references found)
+- Function `func NewParityValidator(ohiClient, otelClient DataClient, mappingsFile string) (*ParityValidator, error) {` in `./tests/e2e/pkg/validation/parity_validator.go` (no references found)
+- Function `func LoadMappingRegistry(filename string) (*MetricMappingRegistry, error) {` in `./tests/e2e/pkg/validation/parity_validator.go` (no references found)
+- Function `func NewDashboardParser() *DashboardParser {` in `./tests/e2e/pkg/validation/dashboard_parser.go` (no references found)
+- Function `func NewContinuousValidator(validator *ParityValidator, configFile string) (*ContinuousValidator, error) {` in `./tests/e2e/pkg/validation/continuous_validator.go` (no references found)
+- Function `func NewParityAlerter(config *AlertingConfig) *ParityAlerter {` in `./tests/e2e/pkg/validation/continuous_validator.go` (no references found)
+- Function `func NewParityReporter(config *ReportingConfig) *ParityReporter {` in `./tests/e2e/pkg/validation/continuous_validator.go` (no references found)
+- Function `func NewDriftDetector(store *ValidationHistoryStore, config *DriftDetectionConfig) *DriftDetector {` in `./tests/e2e/pkg/validation/continuous_validator.go` (no references found)
+- Function `func NewValidationHistoryStore(dataDir string, retention time.Duration) *ValidationHistoryStore {` in `./tests/e2e/pkg/validation/continuous_validator.go` (no references found)
+- Function `func NewAutoRemediator(config *AutoRemediationConfig) *AutoRemediator {` in `./tests/e2e/pkg/validation/continuous_validator.go` (no references found)
+- Function `func DefaultConfig() *Config {` in `./receivers/kernelmetrics/config.go` (no references found)
+- Function `func Factories() (map[component.Type]receiver.Factory, error) {` in `./receivers/registry.go` (no references found)
+- Function `func DefaultConfig() *Config {` in `./receivers/ash/config.go` (no references found)
+- Function `func NewFeatureDetector(logger *zap.Logger) *FeatureDetector {` in `./receivers/ash/features.go` (no references found)
+- Function `func NewASHCollector(db *sql.DB, storage *ASHStorage, sampler *AdaptiveSampler, config *Config, logger *zap.Logger) *ASHCollector {` in `./receivers/ash/collector.go` (no references found)
+- Function `func NewASHStorage(bufferSize int, retention time.Duration, windows []time.Duration, logger *zap.Logger) *ASHStorage {` in `./receivers/ash/storage.go` (no references found)
+- Function `func NewCircularBuffer(capacity int) *CircularBuffer {` in `./receivers/ash/storage.go` (no references found)
+- Function `func NewAdaptiveSampler(config SamplingConfig, logger *zap.Logger) *AdaptiveSampler {` in `./receivers/ash/sampler.go` (no references found)
+- Function `func Factories() (map[component.Type]extension.Factory, error) {` in `./extensions/registry.go` (no references found)
+- Function `func NewAdaptiveAlgorithm(logger *zap.Logger, redisClient *redis.Client, config *Config) *AdaptiveAlgorithm {` in `./processors/adaptivesampler/adaptive_algorithm.go` (no references found)
+- Function `func Factories() (map[component.Type]processor.Factory, error) {` in `./processors/registry.go` (no references found)
+- Function `func NewPlanDictionary(logger *zap.Logger, retentionPeriod time.Duration, maxPlansPerQuery int) *PlanDictionary {` in `./processors/planattributeextractor/plan_dictionary.go` (no references found)
+- Function `func NewCircuitBreaker(config *Config, logger *zap.Logger) *CircuitBreaker {` in `./processors/circuitbreaker/processor.go` (no references found)
+- Function `func NewThroughputMonitor(windowSize time.Duration) *ThroughputMonitor {` in `./processors/circuitbreaker/processor.go` (no references found)
+- Function `func NewLatencyTracker(maxSize int) *LatencyTracker {` in `./processors/circuitbreaker/processor.go` (no references found)
+- Function `func NewErrorClassifier() *ErrorClassifier {` in `./processors/circuitbreaker/processor.go` (no references found)
+- Function `func NewMemoryMonitor(maxMemoryMB int) *MemoryMonitor {` in `./processors/circuitbreaker/processor.go` (no references found)
+- Function `func NewFeatureAwareCircuitBreaker(config *Config, logger *zap.Logger) *FeatureAwareCircuitBreaker {` in `./processors/circuitbreaker/feature_aware.go` (no references found)
+- Function `func NewMetricsBuilder(scope string) *MetricsBuilder {` in `./common/featuredetector/metrics.go` (no references found)
+- Function `func EmitFeatureMetrics(ctx context.Context, features *FeatureSet, scope string) pmetric.Metrics {` in `./common/featuredetector/metrics.go` (no references found)
+- Function `func NewPostgreSQLDetector(db *sql.DB, logger *zap.Logger, config DetectionConfig) *PostgreSQLDetector {` in `./common/featuredetector/postgresql.go` (no references found)
+- Function `func NewBaseDetector(db *sql.DB, logger *zap.Logger, config DetectionConfig) *BaseDetector {` in `./common/featuredetector/types.go` (no references found)
+- Function `func NewMySQLDetector(db *sql.DB, logger *zap.Logger, config DetectionConfig) *MySQLDetector {` in `./common/featuredetector/mysql.go` (no references found)
+- Function `func NewQuerySelector(detector featuredetector.Detector, logger *zap.Logger, config Config) *QuerySelector {` in `./common/queryselector/selector.go` (no references found)
+- Function `func NewValidator(config Config) (*Validator, error) {` in `./validation/ohi-compatibility-validator.go` (no references found)
+
+## Potentially Unused Configuration Files
+
+- ./tests/fixtures/configs/test-receivers-config.yaml
+- ./tests/e2e/e2e-test-config.yaml
+- ./configs/examples/test-pipeline.yaml
+- ./configs/examples/test-config.yaml
+- ./distributions/enterprise/test-config.yaml
+- ./distributions/test-simple/config.yaml
+- ./distributions/production/test-receivers-config.yaml
+- ./distributions/production/test-receivers.yaml
+- ./distributions/production/distributions/production/test-receivers.yaml
+- ./distributions/production/test-basic.yaml
+
+## Empty or Nearly Empty Files
+
+- ./test-compile.go (       3 lines)
+
+## Potential Code Duplication
+
+- Pattern appears 37 times: `func main() {`
+- Pattern appears 13 times: `func components() (otelcol.Factories, error) {`
+- Pattern appears 12 times: `func (cfg *Config) Validate() error {`
+- Pattern appears 10 times: `func createDefaultConfig() component.Config {`
+- Pattern appears 7 times: `func NewFactory() processor.Factory {`
+- Pattern appears 6 times: `func run(params otelcol.CollectorSettings) error {`
+- Pattern appears 6 times: `func getEnvOrDefault(key, defaultValue string) string {`
+- Pattern appears 5 times: `func run(settings otelcol.CollectorSettings) error {`
+- Pattern appears 5 times: `func loadEnvFile(filename string) {`
+- Pattern appears 5 times: `func contains(s, substr string) bool {`
+
+## Orphaned Test Files
+
+- ./tests/integration/full_integration_test.go (no corresponding source file)
+- ./tests/integration/full_pipeline_test.go (no corresponding source file)
+- ./tests/integration/config_validation_test.go (no corresponding source file)
+- ./tests/integration/feature_detection_test.go (no corresponding source file)
+- ./tests/benchmarks/benchmarks_test.go (no corresponding source file)
+- ./tests/benchmarks/processor_bench_test.go (no corresponding source file)
+- ./tests/performance/load_test.go (no corresponding source file)
+- ./tests/performance/resource_test.go (no corresponding source file)
+- ./tests/performance/processor_bench_test.go (no corresponding source file)
+- ./tests/e2e/config_hotreload_test.go (no corresponding source file)
+- ./tests/e2e/verify_postgres_metrics_test.go (no corresponding source file)
+- ./tests/e2e/ssl_tls_connection_test.go (no corresponding source file)
+- ./tests/e2e/processor_behavior_test.go (no corresponding source file)
+- ./tests/e2e/multi_instance_postgres_test.go (no corresponding source file)
+- ./tests/e2e/schema_change_test.go (no corresponding source file)
+- ./tests/e2e/suites/adapter_integration_test.go (no corresponding source file)
+- ./tests/e2e/suites/newrelic_verification_test.go (no corresponding source file)
+- ./tests/e2e/suites/otel_dimensional_metrics_test.go (no corresponding source file)
+- ./tests/e2e/suites/comprehensive_e2e_test.go (no corresponding source file)
+- ./tests/e2e/suites/ohi_parity_validation_test.go (no corresponding source file)
+- ./tests/e2e/suites/otlp_compliance_test.go (no corresponding source file)
+- ./tests/e2e/suites/otlp_format_validation_test.go (no corresponding source file)
+- ./tests/e2e/suites/simple_db_test.go (no corresponding source file)
+- ./tests/e2e/suites/database_to_nrdb_verification_test.go (no corresponding source file)
+- ./tests/e2e/metric_accuracy_test.go (no corresponding source file)
+- ./tests/e2e/first_real_test.go (no corresponding source file)
+- ./tests/e2e/stability_test.go (no corresponding source file)
+- ./tests/e2e/local_collector_test.go (no corresponding source file)
+- ./tests/e2e/memory_usage_test.go (no corresponding source file)
+- ./tests/e2e/docker_postgres_test.go (no corresponding source file)
+- ./tests/e2e/verify_processor_test.go (no corresponding source file)
+- ./tests/e2e/debug_metrics_test.go (no corresponding source file)
+- ./tests/e2e/custom_processors_test.go (no corresponding source file)
+- ./tests/e2e/connection_recovery_test.go (no corresponding source file)
+- ./tests/e2e/verify_mysql_metrics_test.go (no corresponding source file)
+- ./tests/e2e/high_load_test.go (no corresponding source file)
+- ./tests/e2e/docker_mysql_test.go (no corresponding source file)
+- ./tests/e2e/nrdb_verification_test.go (no corresponding source file)
+- ./tests/e2e/multi_instance_mysql_test.go (no corresponding source file)
+
+## Potentially Unused Struct Fields
+
+- Field `MaxOpenConnections int `json:"max_open_connections" yaml:"max_open_connections"`` in `./core/internal/database/connection_pool.go`
+- Field `MaxIdleConnections int `json:"max_idle_connections" yaml:"max_idle_connections"`` in `./core/internal/database/connection_pool.go`
+- Field `ConnMaxLifetime time.Duration `json:"conn_max_lifetime" yaml:"conn_max_lifetime"`` in `./core/internal/database/connection_pool.go`
+- Field `ConnMaxIdleTime time.Duration `json:"conn_max_idle_time" yaml:"conn_max_idle_time"`` in `./core/internal/database/connection_pool.go`
+- Field `Name        string                 `json:"name"`` in `./core/internal/health/checker.go`
+- Field `Healthy     bool                   `json:"healthy"`` in `./core/internal/health/checker.go`
+- Field `LastChecked time.Time              `json:"last_checked"`` in `./core/internal/health/checker.go`
+- Field `Message     string                 `json:"message,omitempty"`` in `./core/internal/health/checker.go`
+- Field `Metrics     map[string]interface{} `json:"metrics,omitempty"`` in `./core/internal/health/checker.go`
+- Field `Healthy           bool                       `json:"healthy"`` in `./core/internal/health/checker.go`
+- Field `Timestamp         time.Time                  `json:"timestamp"`` in `./core/internal/health/checker.go`
+- Field `Version           string                     `json:"version"`` in `./core/internal/health/checker.go`
+- Field `Uptime            time.Duration              `json:"uptime"`` in `./core/internal/health/checker.go`
+- Field `Components        map[string]ComponentHealth `json:"components"`` in `./core/internal/health/checker.go`
+- Field `ReourceU` in `./core/internal/health/checker.go`
+- Field `PipelineStatus    map[string]PipelineHealth  `json:"pipeline_tatu` in `./core/internal/health/checker.go`
+- Field `MemoryUsageMB   float64 `json:"memory_usage_mb"`` in `./core/internal/health/checker.go`
+- Field `MemoryLimitMB   float64 `json:"memory_limit_mb"`` in `./core/internal/health/checker.go`
+- Field `CPUUsagePercent float64 `json:"cpu_usage_percent"`` in `./core/internal/health/checker.go`
+- Field `GoroutineCount  int     `json:"goroutine_count"`` in `./core/internal/health/checker.go`
+- Field `Name             string  `json:"name"`` in `./core/internal/health/checker.go`
+- Field `Healthy          bool    `json:"healthy"`` in `./core/internal/health/checker.go`
+- Field `RecordProces` in `./core/internal/health/checker.go`
+- Field `RecordsDropped   int64   `json:"records_dropped"`` in `./core/internal/health/checker.go`
+- Field `ErrorRate        float64 `json:"error_rate"`` in `./core/internal/health/checker.go`
+- Field `Latency          float64 `json:"latency_ms"`` in `./core/internal/health/checker.go`
+- Field `Debug DebugInfo `json:"debug"`` in `./core/internal/health/checker.go`
+- Field `ConfiguredComponents int     `json:"configured_components"`` in `./core/internal/health/checker.go`
+- Field `ConfiguredPipelines  int     `json:"configured_pipelines"`` in `./core/internal/health/checker.go`
+- Field `LastCheckDuration    float64 `json:"lat_check_duration_second` in `./core/internal/health/checker.go`
+- Field `DefaultRPS   float64 `mapstructure:"default_rps"`` in `./core/internal/ratelimit/limiter.go`
+- Field `DefaultBurst int     `mapstructure:"default_burst"`` in `./core/internal/ratelimit/limiter.go`
+- Field `DatabaeLimit` in `./core/internal/ratelimit/limiter.go`
+- Field `GlobalMaxRPS   float64 `mapstructure:"global_max_rps"`` in `./core/internal/ratelimit/limiter.go`
+- Field `GlobalMaxBurst int     `mapstructure:"global_max_burst"`` in `./core/internal/ratelimit/limiter.go`
+- Field `EnableAdaptive bool    `mapstructure:"enable_adaptive"`` in `./core/internal/ratelimit/limiter.go`
+- Field `MinRPS         float64 `mapstructure:"min_rps"`` in `./core/internal/ratelimit/limiter.go`
+- Field `MaxRPS         float64 `mapstructure:"max_rps"`` in `./core/internal/ratelimit/limiter.go`
+- Field `EnableMetrics bool `mapstructure:"enable_metrics"`` in `./core/internal/ratelimit/limiter.go`
+- Field `RPS   float64 `mapstructure:"rps"`` in `./core/internal/ratelimit/limiter.go`
+- Field `Burst int     `mapstructure:"burst"`` in `./core/internal/ratelimit/limiter.go`
+- Field `Schedule []ScheduledLimit `mapstructure:"schedule"`` in `./core/internal/ratelimit/limiter.go`
+- Field `StartHour int     `mapstructure:"start_hour"`` in `./core/internal/ratelimit/limiter.go`
+- Field `EndHour   int     `mapstructure:"end_hour"`` in `./core/internal/ratelimit/limiter.go`
+- Field `RPS       float64 `mapstructure:"rps"`` in `./core/internal/ratelimit/limiter.go`
+- Field `Burst     int     `mapstructure:"burst"`` in `./core/internal/ratelimit/limiter.go`
+- Field `EnforceServiceName bool `mapstructure:"enforce_service_name"`` in `./core/internal/conventions/validator.go`
+- Field `EnforceHostID bool `mapstructure:"enforce_host_id"`` in `./core/internal/conventions/validator.go`
+- Field `EnforceK8Attribute` in `./core/internal/conventions/validator.go`
+- Field `WarnOnMissing bool `mapstructure:"warn_on_missing"`` in `./core/internal/conventions/validator.go`
+- Field `AutoCorrect bool `mapstructure:"auto_correct"`` in `./core/internal/conventions/validator.go`
+- Field `CacheSize          int           `mapstructure:"cache_size"`` in `./core/internal/performance/optimizer.go`
+- Field `ParseTimeout       time.Duration `mapstructure:"parse_timeout"`` in `./core/internal/performance/optimizer.go`
+- Field `MaxPlanSize        int           `mapstructure:"max_plan_size"`` in `./core/internal/performance/optimizer.go`
+- Field `EnableCaching      bool          `mapstructure:"enable_caching"`` in `./core/internal/performance/optimizer.go`
+- Field `CacheTTL           time.Duration `mapstructure:"cache_ttl"`` in `./core/internal/performance/optimizer.go`
+- Field `PoolSize           int           `mapstructure:"pool_size"`` in `./core/internal/performance/optimizer.go`
+- Field `EnableCompression  bool          `mapstructure:"enable_compression"`` in `./core/internal/performance/optimizer.go`
+- Field `Hash           string                 `json:"hash"`` in `./core/internal/performance/optimizer.go`
+- Field `ParsedAt       time.Time              `json:"parsed_at"`` in `./core/internal/performance/optimizer.go`
+- Field `TotalCost      float64                `json:"total_cost"`` in `./core/internal/performance/optimizer.go`
+- Field `NodeCount      int                    `json:"node_count"`` in `./core/internal/performance/optimizer.go`
+- Field `HasSeqScan     bool                   `json:"ha_seq_` in `./core/internal/performance/optimizer.go`
+- Field `IndexeU` in `./core/internal/performance/optimizer.go`
+- Field `JoinTypes      []string               `json:"join_types"`` in `./core/internal/performance/optimizer.go`
+- Field `EtimatedRow` in `./core/internal/performance/optimizer.go`
+- Field `Attributes     map[string]interface{} `json:"attributes"`` in `./core/internal/performance/optimizer.go`
+- Field `CompressedSize int                    `json:"compreed_` in `./core/internal/performance/optimizer.go`
+- Field `IntegrationName string `mapstructure:"integration_name"`` in `./exporters/nri/config.go`
+- Field `IntegrationVersion string `mapstructure:"integration_version"`` in `./exporters/nri/config.go`
+- Field `ProtocolVersion int `mapstructure:"protocol_version"`` in `./exporters/nri/config.go`
+- Field `Entity EntityConfig `mapstructure:"entity"`` in `./exporters/nri/config.go`
+- Field `Output OutputConfig `mapstructure:"output"`` in `./exporters/nri/config.go`
+- Field `MetricRules []MetricRule `mapstructure:"metric_rules"`` in `./exporters/nri/config.go`
+- Field `EventRules []EventRule `mapstructure:"event_rules"`` in `./exporters/nri/config.go`
+- Field `BackOffConfig configretry.BackOffConfig `mapstructure:"retry_on_failure"`` in `./exporters/nri/config.go`
+- Field `Timeout time.Duration `mapstructure:"timeout"`` in `./exporters/nri/config.go`
+- Field `Type string `mapstructure:"type"`` in `./exporters/nri/config.go`
+- Field `NameSource string `mapstructure:"name_source"`` in `./exporters/nri/config.go`
+- Field `Attributes map[string]string `mapstructure:"attributes"`` in `./exporters/nri/config.go`
+- Field `DisplayNameTemplate string `mapstructure:"display_name_template"`` in `./exporters/nri/config.go`
+- Field `Mode string `mapstructure:"mode"`` in `./exporters/nri/config.go`
+- Field `FilePath string `mapstructure:"file_path"`` in `./exporters/nri/config.go`
+- Field `HTTPEndpoint string `mapstructure:"http_endpoint"`` in `./exporters/nri/config.go`
+- Field `APIKey string `mapstructure:"api_key"`` in `./exporters/nri/config.go`
+- Field `BatchSize int           `mapstructure:"batch_size"`` in `./exporters/nri/config.go`
+- Field `FlushInterval time.Duration `mapstructure:"flush_interval"`` in `./exporters/nri/config.go`
+- Field `SourcePattern string `mapstructure:"source_pattern"`` in `./exporters/nri/config.go`
+- Field `TargetName string `mapstructure:"target_name"`` in `./exporters/nri/config.go`
+- Field `NRIType string `mapstructure:"nri_type"`` in `./exporters/nri/config.go`
+- Field `AttributeMappings map[string]string `mapstructure:"attribute_mappings"`` in `./exporters/nri/config.go`
+- Field `IncludeAttributes []string `mapstructure:"include_attributes"`` in `./exporters/nri/config.go`
+- Field `ExcludeAttributes []string `mapstructure:"exclude_attributes"`` in `./exporters/nri/config.go`
+- Field `ScaleFactor float64 `mapstructure:"scale_factor"`` in `./exporters/nri/config.go`
+- Field `Unit        string  `mapstructure:"unit"`` in `./exporters/nri/config.go`
+- Field `SourcePattern string `mapstructure:"source_pattern"`` in `./exporters/nri/config.go`
+- Field `EventType string `mapstructure:"event_type"`` in `./exporters/nri/config.go`
+- Field `Category string `mapstructure:"category"`` in `./exporters/nri/config.go`
+- Field `SummaryTemplate string `mapstructure:"summary_template"`` in `./exporters/nri/config.go`
+- Field `AttributeMappings map[string]string `mapstructure:"attribute_mappings"`` in `./exporters/nri/config.go`
+- Field `Name               string       `json:"name"`` in `./exporters/nri/exporter.go`
+- Field `IntegrationVersion string       `json:"integration_version"`` in `./exporters/nri/exporter.go`
+- Field `ProtocolVersion    string       `json:"protocol_version"`` in `./exporters/nri/exporter.go`
+- Field `Data               []nriEntity  `json:"data"`` in `./exporters/nri/exporter.go`
+- Field `Entity     nriEntityInfo        `json:"entity"`` in `./exporters/nri/exporter.go`
+- Field `Metrics    []nriMetric          `json:"metrics,omitempty"`` in `./exporters/nri/exporter.go`
+- Field `Events     []nriEvent           `json:"events,omitempty"`` in `./exporters/nri/exporter.go`
+- Field `Inventory  map[string]inventory `json:"inventory,omitempty"`` in `./exporters/nri/exporter.go`
+- Field `Name        string            `json:"name"`` in `./exporters/nri/exporter.go`
+- Field `Type        string            `json:"type"`` in `./exporters/nri/exporter.go`
+- Field `DisplayName string            `json:"displayName,omitempty"`` in `./exporters/nri/exporter.go`
+- Field `Metadata    map[string]string `json:"metadata,omitempty"`` in `./exporters/nri/exporter.go`
+- Field `EventType  string                 `json:"event_type"`` in `./exporters/nri/exporter.go`
+- Field `Timestamp  int64                  `json:"timestamp"`` in `./exporters/nri/exporter.go`
+- Field `Attributes map[string]interface{} `json:"attributes"`` in `./exporters/nri/exporter.go`
+- Field `EventType  string                 `json:"eventType"`` in `./exporters/nri/exporter.go`
+- Field `Timestamp  int64                  `json:"timestamp"`` in `./exporters/nri/exporter.go`
+- Field `Category   string                 `json:"category,omitempty"`` in `./exporters/nri/exporter.go`
+- Field `Summary    string                 `json:"summary"`` in `./exporters/nri/exporter.go`
+- Field `Attributes map[string]interface{} `json:"attributes"`` in `./exporters/nri/exporter.go`
+- Field `Status string `json:"tatu` in `./tests/e2e/cmd/e2e_verification/main.go`
+- Field `ResultType string `json:"resultType"`` in `./tests/e2e/cmd/e2e_verification/main.go`
+- Field `Metric map[string]string `json:"metric"`` in `./tests/e2e/cmd/e2e_verification/main.go`
+- Field `Value  []interface{}     `json:"value"`` in `./tests/e2e/cmd/e2e_verification/main.go`
+- Field `Query string `json:"query"`` in `./tests/e2e/cmd/verify/main.go`
+- Field `Reult` in `./tests/e2e/cmd/verify/main.go`
+- Field `Message string `json:"message"`` in `./tests/e2e/cmd/verify/main.go`
+- Field `Query     string                 `json:"query"`` in `./tests/e2e/cmd/create_otel_dashboard/main.go`
+- Field `Variables map[string]interface{} `json:"variables"`` in `./tests/e2e/cmd/create_otel_dashboard/main.go`
+- Field `GUID string `json:"guid"`` in `./tests/e2e/cmd/create_otel_dashboard/main.go`
+- Field `Description string `json:"description"`` in `./tests/e2e/cmd/create_otel_dashboard/main.go`
+- Field `Type        string `json:"type"`` in `./tests/e2e/cmd/create_otel_dashboard/main.go`
+- Field `Message string `json:"message"`` in `./tests/e2e/cmd/create_otel_dashboard/main.go`
+- Field `Query string `json:"query"`` in `./tests/e2e/cmd/nrdb_test/main.go`
+- Field `Reult` in `./tests/e2e/cmd/nrdb_test/main.go`
+- Field `Facets  []string                 `json:"facets"`` in `./tests/e2e/cmd/nrdb_test/main.go`
+- Field `Message string `json:"message"`` in `./tests/e2e/cmd/nrdb_test/main.go`
+- Field `Query string `json:"query"`` in `./tests/e2e/cmd/validate_otel_queries/main.go`
+- Field `Reult` in `./tests/e2e/cmd/validate_otel_queries/main.go`
+- Field `Message string `json:"message"`` in `./tests/e2e/cmd/validate_otel_queries/main.go`
+- Field `OHIToOTELMappings map[string]EventMapping `yaml:"ohi_to_otel_mappings"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Tranformation` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `ValidationRules   ValidationRules        `yaml:"validation_rules"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `OTELMetricType string                       `yaml:"otel_metric_type"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `OTELFilter     string                       `yaml:"otel_filter"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Description    string                       `yaml:"description"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Metrics        map[string]MetricMapping     `yaml:"metrics,omitempty"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Attributes     map[string]AttributeMapping  `yaml:"attributes,omitempty"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `OTELName       string `yaml:"otel_name"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Type           string `yaml:"type"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Transformation string `yaml:"transformation"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Formula        string `yaml:"formula,omitempty"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Unit           string `yaml:"unit,omitempty"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `OTELName       string                 `yaml:"otel_name"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Type           string                 `yaml:"type"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Transformation string                 `yaml:"transformation"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `PIISafe        bool                   `yaml:"pii_safe,omitempty"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `DefaultValue   string                 `yaml:"default_value,omitempty"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `SpecialValues  map[string]interface{} `yaml:"pecial_value` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `AccuracyThrehold` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `TimingTolerance    map[string]string  `yaml:"timing_tolerance"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `CardinalityLimits  map[string]int     `yaml:"cardinality_limits"`` in `./tests/e2e/suites/ohi_parity_validation_test.go`
+- Field `Framework FrameworkConfig            `yaml:"framework" json:"framework"`` in `./tests/e2e/framework/types.go`
+- Field `Environments map[string]EnvironmentConfig `yaml:"environments" json:"environments"`` in `./tests/e2e/framework/types.go`
+- Field `TetSuite` in `./tests/e2e/framework/types.go`
+- Field `Reporting  ReportingConfig           `yaml:"reporting" json:"reporting"`` in `./tests/e2e/framework/types.go`
+- Field `Security   SecurityConfig            `yaml:"security" json:"security"`` in `./tests/e2e/framework/types.go`
+- Field `Version              string        `yaml:"version" json:"version"`` in `./tests/e2e/framework/types.go`
+- Field `ParallelExecution    bool          `yaml:"parallel_execution" json:"parallel_execution"`` in `./tests/e2e/framework/types.go`
+- Field `MaxConcurrentSuites  int           `yaml:"max_concurrent_uite` in `./tests/e2e/framework/types.go`
+- Field `DefaultTimeout       string        `yaml:"default_timeout" json:"default_timeout"`` in `./tests/e2e/framework/types.go`
+- Field `ContinueOnError      bool          `yaml:"continue_on_error" json:"continue_on_error"`` in `./tests/e2e/framework/types.go`
+- Field `ArtifactRetention    string        `yaml:"artifact_retention" json:"artifact_retention"`` in `./tests/e2e/framework/types.go`
+- Field `Type             string                 `yaml:"type" json:"type"`` in `./tests/e2e/framework/types.go`
+- Field `DockerCompose    string                 `yaml:"docker_compose,omitempty" json:"docker_compose,omitempty"`` in `./tests/e2e/framework/types.go`
+- Field `KubernetesConfig string                 `yaml:"kubernetes_config,omitempty" json:"kubernetes_config,omitempty"`` in `./tests/e2e/framework/types.go`
+- Field `Databae` in `./tests/e2e/framework/types.go`
+- Field `Reource` in `./tests/e2e/framework/types.go`
+- Field `NetworkConfig    NetworkConfig          `yaml:"network" json:"network"`` in `./tests/e2e/framework/types.go`
+- Field `Environment      map[string]string      `yaml:"environment" json:"environment"`` in `./tests/e2e/framework/types.go`
+- Field `PostgreSQL DatabaseConfig `yaml:"potgre` in `./tests/e2e/framework/types.go`
+- Field `MySQL      DatabaseConfig `yaml:"mysql" json:"mysql"`` in `./tests/e2e/framework/types.go`
+- Field `Host     string `yaml:"host" json:"host"`` in `./tests/e2e/framework/types.go`
+- Field `Port     int    `yaml:"port" json:"port"`` in `./tests/e2e/framework/types.go`
+- Field `Database string `yaml:"database" json:"database"`` in `./tests/e2e/framework/types.go`
+- Field `Username string `yaml:"username" json:"username"`` in `./tests/e2e/framework/types.go`
+- Field `Password string `yaml:"password" json:"password"`` in `./tests/e2e/framework/types.go`
+- Field `SSL      bool   `yaml:"ssl" json:"ssl"`` in `./tests/e2e/framework/types.go`
+- Field `CPU    string `yaml:"cpu" json:"cpu"`` in `./tests/e2e/framework/types.go`
+- Field `Memory string `yaml:"memory" json:"memory"`` in `./tests/e2e/framework/types.go`
+- Field `Disk   string `yaml:"disk" json:"disk"`` in `./tests/e2e/framework/types.go`
+- Field `CollectorPort int    `yaml:"collector_port" json:"collector_port"`` in `./tests/e2e/framework/types.go`
+- Field `MetricsPort   int    `yaml:"metrics_port" json:"metrics_port"`` in `./tests/e2e/framework/types.go`
+- Field `NetworkName   string `yaml:"network_name" json:"network_name"`` in `./tests/e2e/framework/types.go`
+- Field `Enabled          bool                   `yaml:"enabled" json:"enabled"`` in `./tests/e2e/framework/types.go`
+- Field `Timeout          string                 `yaml:"timeout" json:"timeout"`` in `./tests/e2e/framework/types.go`
+- Field `Parameters       map[string]interface{} `yaml:"parameters" json:"parameters"`` in `./tests/e2e/framework/types.go`
+- Field `Dependencies     []string               `yaml:"dependencies" json:"dependencies"`` in `./tests/e2e/framework/types.go`
+- Field `Tags             []string               `yaml:"tags" json:"tags"`` in `./tests/e2e/framework/types.go`
+- Field `Formats           []string `yaml:"formats" json:"formats"`` in `./tests/e2e/framework/types.go`
+- Field `OutputDir         string   `yaml:"output_dir" json:"output_dir"`` in `./tests/e2e/framework/types.go`
+- Field `MetricsCollection bool     `yaml:"metrics_collection" json:"metrics_collection"`` in `./tests/e2e/framework/types.go`
+- Field `DashboardGeneration bool   `yaml:"dashboard_generation" json:"dashboard_generation"`` in `./tests/e2e/framework/types.go`
+- Field `Notifications     NotificationConfig `yaml:"notifications" json:"notifications"`` in `./tests/e2e/framework/types.go`
+- Field `Enabled  bool     `yaml:"enabled" json:"enabled"`` in `./tests/e2e/framework/types.go`
+- Field `Channels []string `yaml:"channels" json:"channels"`` in `./tests/e2e/framework/types.go`
+- Field `Webhook  string   `yaml:"webhook,omitempty" json:"webhook,omitempty"`` in `./tests/e2e/framework/types.go`
+- Field `Email    string   `yaml:"email,omitempty" json:"email,omitempty"`` in `./tests/e2e/framework/types.go`
+- Field `PIIDetection      PIIDetectionConfig    `yaml:"pii_detection" json:"pii_detection"`` in `./tests/e2e/framework/types.go`
+- Field `ComplianceStandards []ComplianceStandard `yaml:"compliance_tandard` in `./tests/e2e/framework/types.go`
+- Field `VulnerabilityScanning bool              `yaml:"vulnerability_scanning" json:"vulnerability_scanning"`` in `./tests/e2e/framework/types.go`
+- Field `Enabled    bool           `yaml:"enabled" json:"enabled"`` in `./tests/e2e/framework/types.go`
+- Field `Categories []PIICategory  `yaml:"categories" json:"categories"`` in `./tests/e2e/framework/types.go`
+- Field `Patterns   []PIIPattern   `yaml:"patterns" json:"patterns"`` in `./tests/e2e/framework/types.go`
+- Field `Description       string        `json:"description"`` in `./tests/e2e/framework/types.go`
+- Field `Priority          int           `json:"priority"`` in `./tests/e2e/framework/types.go`
+- Field `EstimatedDuration time.Duration `json:"estimated_duration"`` in `./tests/e2e/framework/types.go`
+- Field `Tags              []string      `json:"tags"`` in `./tests/e2e/framework/types.go`
+- Field `Dependencies      []string      `json:"dependencies"`` in `./tests/e2e/framework/types.go`
+- Field `Author            string        `json:"author"`` in `./tests/e2e/framework/types.go`
+- Field `Version           string        `json:"version"`` in `./tests/e2e/framework/types.go`
+- Field `ExecutionID string             `json:"execution_id"`` in `./tests/e2e/framework/types.go`
+- Field `Status      TetStatu` in `./tests/e2e/framework/types.go`
+- Field `StartTime   time.Time          `json:"start_time"`` in `./tests/e2e/framework/types.go`
+- Field `EndTime     time.Time          `json:"end_time"`` in `./tests/e2e/framework/types.go`
+- Field `Environment *EnvironmentInfo   `json:"environment"`` in `./tests/e2e/framework/types.go`
+- Field `Reult` in `./tests/e2e/framework/types.go`
+- Field `Summary     *ExecutionSummary  `json:"summary"`` in `./tests/e2e/framework/types.go`
+- Field `Error       error              `json:"error,omitempty"`` in `./tests/e2e/framework/types.go`
+- Field `TotalSuites   int           `json:"total_uite` in `./tests/e2e/framework/types.go`
+- Field `PaedSuite` in `./tests/e2e/framework/types.go`
+- Field `FailedSuites  int           `json:"failed_uite` in `./tests/e2e/framework/types.go`
+- Field `SkippedSuites int           `json:"kipped_suite` in `./tests/e2e/framework/types.go`
+- Field `TotalDuration time.Duration `json:"total_duration"`` in `./tests/e2e/framework/types.go`
+- Field `PassRate      float64       `json:"pass_rate"`` in `./tests/e2e/framework/types.go`
+- Field `SuiteName   string              `json:"suite_name"`` in `./tests/e2e/framework/types.go`
+- Field `Status      TetStatu` in `./tests/e2e/framework/types.go`
+- Field `StartTime   time.Time           `json:"start_time"`` in `./tests/e2e/framework/types.go`
+- Field `EndTime     time.Time           `json:"end_time"`` in `./tests/e2e/framework/types.go`
+- Field `TetCase` in `./tests/e2e/framework/types.go`
+- Field `Metrics     map[string]interface{} `json:"metrics"`` in `./tests/e2e/framework/types.go`
+- Field `Artifacts   []string            `json:"artifacts"`` in `./tests/e2e/framework/types.go`
+- Field `Environment *EnvironmentInfo    `json:"environment"`` in `./tests/e2e/framework/types.go`
+- Field `Metadata    *SuiteMetadata      `json:"metadata"`` in `./tests/e2e/framework/types.go`
+- Field `Error       error               `json:"error,omitempty"`` in `./tests/e2e/framework/types.go`
+- Field `Name        string                 `json:"name"`` in `./tests/e2e/framework/types.go`
+- Field `Status      TetStatu` in `./tests/e2e/framework/types.go`
+- Field `Duration    time.Duration          `json:"duration"`` in `./tests/e2e/framework/types.go`
+- Field `Aertion` in `./tests/e2e/framework/types.go`
+- Field `Metrics     map[string]interface{} `json:"metrics"`` in `./tests/e2e/framework/types.go`
+- Field `Artifacts   []string               `json:"artifacts"`` in `./tests/e2e/framework/types.go`
+- Field `Error       error                  `json:"error,omitempty"`` in `./tests/e2e/framework/types.go`
+- Field `Description string                 `json:"description"`` in `./tests/e2e/framework/types.go`
+- Field `Name        string      `json:"name"`` in `./tests/e2e/framework/types.go`
+- Field `Status      TetStatu` in `./tests/e2e/framework/types.go`
+- Field `Expected    interface{} `json:"expected"`` in `./tests/e2e/framework/types.go`
+- Field `Actual      interface{} `json:"actual"`` in `./tests/e2e/framework/types.go`
+- Field `Message     string      `json:"message"`` in `./tests/e2e/framework/types.go`
+- Field `Error       error       `json:"error,omitempty"`` in `./tests/e2e/framework/types.go`
+- Field `Name            string                 `json:"name"`` in `./tests/e2e/framework/types.go`
+- Field `Type            string                 `json:"type"`` in `./tests/e2e/framework/types.go`
+- Field `Version         string                 `json:"version"`` in `./tests/e2e/framework/types.go`
+- Field `Configuration   map[string]interface{} `json:"configuration"`` in `./tests/e2e/framework/types.go`
+- Field `Reource` in `./tests/e2e/framework/types.go`
+- Field `Network         *NetworkInfo           `json:"network"`` in `./tests/e2e/framework/types.go`
+- Field `CreatedAt       time.Time              `json:"created_at"`` in `./tests/e2e/framework/types.go`
+- Field `HealthStatus    string                 `json:"health_tatu` in `./tests/e2e/framework/types.go`
+- Field `CPU    string `json:"cpu"`` in `./tests/e2e/framework/types.go`
+- Field `Memory string `json:"memory"`` in `./tests/e2e/framework/types.go`
+- Field `Disk   string `json:"disk"`` in `./tests/e2e/framework/types.go`
+- Field `CollectorEndpoint string `json:"collector_endpoint"`` in `./tests/e2e/framework/types.go`
+- Field `MetricsEndpoint   string `json:"metrics_endpoint"`` in `./tests/e2e/framework/types.go`
+- Field `NetworkName       string `json:"network_name"`` in `./tests/e2e/framework/types.go`
+- Field `PostgreSQL *DatabaseConnectionInfo `json:"potgre` in `./tests/e2e/framework/types.go`
+- Field `MySQL      *DatabaseConnectionInfo `json:"mysql"`` in `./tests/e2e/framework/types.go`
+- Field `Host     string `json:"host"`` in `./tests/e2e/framework/types.go`
+- Field `Port     int    `json:"port"`` in `./tests/e2e/framework/types.go`
+- Field `Database string `json:"database"`` in `./tests/e2e/framework/types.go`
+- Field `Username string `json:"username"`` in `./tests/e2e/framework/types.go`
+- Field `SSL      bool   `json:"ssl"`` in `./tests/e2e/framework/types.go`
+- Field `Tables    []*TableData           `json:"tables"`` in `./tests/e2e/framework/types.go`
+- Field `Queries   []*QueryData           `json:"queries"`` in `./tests/e2e/framework/types.go`
+- Field `Workload  *WorkloadData          `json:"workload"`` in `./tests/e2e/framework/types.go`
+- Field `Metadata  map[string]interface{} `json:"metadata"`` in `./tests/e2e/framework/types.go`
+- Field `Name    string                 `json:"name"`` in `./tests/e2e/framework/types.go`
+- Field `Schema  string                 `json:"schema"`` in `./tests/e2e/framework/types.go`
+- Field `Rows    []map[string]interface{} `json:"rows"`` in `./tests/e2e/framework/types.go`
+- Field `Indexes []string               `json:"indexes"`` in `./tests/e2e/framework/types.go`
+- Field `ID          string                 `json:"id"`` in `./tests/e2e/framework/types.go`
+- Field `SQL         string                 `json:"sql"`` in `./tests/e2e/framework/types.go`
+- Field `Parameters  map[string]interface{} `json:"parameters"`` in `./tests/e2e/framework/types.go`
+- Field `Expected    *QueryExpectedResult   `json:"expected"`` in `./tests/e2e/framework/types.go`
+- Field `Category    string                 `json:"category"`` in `./tests/e2e/framework/types.go`
+- Field `RowCount      int                    `json:"row_count"`` in `./tests/e2e/framework/types.go`
+- Field `Columns       []string               `json:"columns"`` in `./tests/e2e/framework/types.go`
+- Field `Duration      time.Duration          `json:"duration"`` in `./tests/e2e/framework/types.go`
+- Field `PlanHash      string                 `json:"plan_hash"`` in `./tests/e2e/framework/types.go`
+- Field `Metrics       map[string]interface{} `json:"metrics"`` in `./tests/e2e/framework/types.go`
+- Field `Pattern    LoadPattern   `json:"pattern"`` in `./tests/e2e/framework/types.go`
+- Field `Duration   time.Duration `json:"duration"`` in `./tests/e2e/framework/types.go`
+- Field `QPS        int           `json:"qps"`` in `./tests/e2e/framework/types.go`
+- Field `Concurrent int           `json:"concurrent"`` in `./tests/e2e/framework/types.go`
+- Field `Categories []PIICategory          `json:"categories"`` in `./tests/e2e/framework/types.go`
+- Field `Samples    []*PIISample           `json:"ample` in `./tests/e2e/framework/types.go`
+- Field `Patterns   []PIIPattern           `json:"patterns"`` in `./tests/e2e/framework/types.go`
+- Field `Metadata   map[string]interface{} `json:"metadata"`` in `./tests/e2e/framework/types.go`
+- Field `Category PIICategory `json:"category"`` in `./tests/e2e/framework/types.go`
+- Field `Value    string      `json:"value"`` in `./tests/e2e/framework/types.go`
+- Field `Pattern  string      `json:"pattern"`` in `./tests/e2e/framework/types.go`
+- Field `Masked   string      `json:"masked"`` in `./tests/e2e/framework/types.go`
+- Field `Pattern   LoadPattern   `json:"pattern"`` in `./tests/e2e/framework/types.go`
+- Field `Duration  time.Duration `json:"duration"`` in `./tests/e2e/framework/types.go`
+- Field `Requet` in `./tests/e2e/framework/types.go`
+- Field `Metrics   *LoadMetrics  `json:"metrics"`` in `./tests/e2e/framework/types.go`
+- Field `ID        string                 `json:"id"`` in `./tests/e2e/framework/types.go`
+- Field `Type      string                 `json:"type"`` in `./tests/e2e/framework/types.go`
+- Field `Target    string                 `json:"target"`` in `./tests/e2e/framework/types.go`
+- Field `Payload   map[string]interface{} `json:"payload"`` in `./tests/e2e/framework/types.go`
+- Field `Timestamp time.Time              `json:"timestamp"`` in `./tests/e2e/framework/types.go`
+- Field `TotalRequet` in `./tests/e2e/framework/types.go`
+- Field `SuccefulRequest` in `./tests/e2e/framework/types.go`
+- Field `FailedRequet` in `./tests/e2e/framework/types.go`
+- Field `AverageLatency time.Duration `json:"average_latency"`` in `./tests/e2e/framework/types.go`
+- Field `ThroughputQPS  float64       `json:"throughput_qps"`` in `./tests/e2e/framework/types.go`
+- Field `Scenario FailureScenario        `json:"scenario"`` in `./tests/e2e/framework/types.go`
+- Field `Config   map[string]interface{} `json:"config"`` in `./tests/e2e/framework/types.go`
+- Field `Duration time.Duration          `json:"duration"`` in `./tests/e2e/framework/types.go`
+- Field `Impact   *FailureImpact         `json:"impact"`` in `./tests/e2e/framework/types.go`
+- Field `Services   []string               `json:"ervice` in `./tests/e2e/framework/types.go`
+- Field `Metrics    map[string]interface{} `json:"metrics"`` in `./tests/e2e/framework/types.go`
+- Field `Recovery   time.Duration          `json:"recovery"`` in `./tests/e2e/framework/types.go`
+- Field `Valid       bool                   `json:"valid"`` in `./tests/e2e/framework/types.go`
+- Field `Score       float64                `json:"score"`` in `./tests/e2e/framework/types.go`
+- Field `Iue` in `./tests/e2e/framework/types.go`
+- Field `Metrics     map[string]interface{} `json:"metrics"`` in `./tests/e2e/framework/types.go`
+- Field `Timestamp   time.Time              `json:"timestamp"`` in `./tests/e2e/framework/types.go`
+- Field `Severity    string `json:"severity"`` in `./tests/e2e/framework/types.go`
+- Field `Message     string `json:"message"`` in `./tests/e2e/framework/types.go`
+- Field `Field       string `json:"field"`` in `./tests/e2e/framework/types.go`
+- Field `Expected    interface{} `json:"expected"`` in `./tests/e2e/framework/types.go`
+- Field `Actual      interface{} `json:"actual"`` in `./tests/e2e/framework/types.go`
+- Field `Suggestion  string `json:"ugge` in `./tests/e2e/framework/types.go`
+- Field `Timestamp time.Time              `json:"timestamp"`` in `./tests/e2e/framework/types.go`
+- Field `Source    string                 `json:"source"`` in `./tests/e2e/framework/types.go`
+- Field `Metrics   map[string]interface{} `json:"metrics"`` in `./tests/e2e/framework/types.go`
+- Field `Labels    map[string]string      `json:"labels"`` in `./tests/e2e/framework/types.go`
+- Field `Valid      bool                   `json:"valid"`` in `./tests/e2e/framework/types.go`
+- Field `Matches    int                    `json:"matches"`` in `./tests/e2e/framework/types.go`
+- Field `Mimatche` in `./tests/e2e/framework/types.go`
+- Field `Missing    []string               `json:"missing"`` in `./tests/e2e/framework/types.go`
+- Field `Extra      []string               `json:"extra"`` in `./tests/e2e/framework/types.go`
+- Field `Name     string      `json:"name"`` in `./tests/e2e/framework/types.go`
+- Field `Expected interface{} `json:"expected"`` in `./tests/e2e/framework/types.go`
+- Field `Actual   interface{} `json:"actual"`` in `./tests/e2e/framework/types.go`
+- Field `Tolerance float64    `json:"tolerance"`` in `./tests/e2e/framework/types.go`
+- Field `Name     string      `json:"name"`` in `./tests/e2e/framework/types.go`
+- Field `Category PIICategory `json:"category"`` in `./tests/e2e/framework/types.go`
+- Field `Regex    string      `json:"regex"`` in `./tests/e2e/framework/types.go`
+- Field `Examples []string    `json:"examples"`` in `./tests/e2e/framework/types.go`
+- Field `SuiteName   string    `json:"suite_name"`` in `./tests/e2e/framework/types.go`
+- Field `TetCa` in `./tests/e2e/framework/types.go`
+- Field `Message     string    `json:"message"`` in `./tests/e2e/framework/types.go`
+- Field `Error       error     `json:"error"`` in `./tests/e2e/framework/types.go`
+- Field `Timestamp   time.Time `json:"timestamp"`` in `./tests/e2e/framework/types.go`
+- Field `StackTrace  string    `json:"stack_trace"`` in `./tests/e2e/framework/types.go`
+- Field `Artifacts   []string  `json:"artifacts"`` in `./tests/e2e/framework/types.go`
+- Field `Category    string    `json:"category"`` in `./tests/e2e/framework/types.go`
+- Field `Severity    string    `json:"severity"`` in `./tests/e2e/framework/types.go`
+- Field `Pattern     LoadPattern   `json:"pattern"`` in `./tests/e2e/framework/types.go`
+- Field `Duration    time.Duration `json:"duration"`` in `./tests/e2e/framework/types.go`
+- Field `QPS         int           `json:"qps"`` in `./tests/e2e/framework/types.go`
+- Field `Concurrency int           `json:"concurrency"`` in `./tests/e2e/framework/types.go`
+- Field `DataSize    string        `json:"data_size"`` in `./tests/e2e/framework/types.go`
+- Field `Tables      []string      `json:"tables"`` in `./tests/e2e/framework/types.go`
+- Field `Pattern      LoadPattern   `json:"pattern"`` in `./tests/e2e/framework/types.go`
+- Field `Duration     time.Duration `json:"duration"`` in `./tests/e2e/framework/types.go`
+- Field `Requet` in `./tests/e2e/framework/types.go`
+- Field `Concurrency  int           `json:"concurrency"`` in `./tests/e2e/framework/types.go`
+- Field `RampUpTime   time.Duration `json:"ramp_up_time"`` in `./tests/e2e/framework/types.go`
+- Field `RampDownTime time.Duration `json:"ramp_down_time"`` in `./tests/e2e/framework/types.go`
+- Field `Reult` in `./tests/e2e/framework/nrdb_client.go`
+- Field `Facets  []string                 `json:"facets"`` in `./tests/e2e/framework/nrdb_client.go`
+- Field `Total   int                      `json:"total"`` in `./tests/e2e/framework/nrdb_client.go`
+- Field `NRQL NRQLResult `json:"nrql"`` in `./tests/e2e/framework/nrdb_client.go`
+- Field `Message string `json:"message"`` in `./tests/e2e/framework/nrdb_client.go`
+- Field `Query string `json:"query"`` in `./tests/e2e/nrdb_verification_test.go`
+- Field `Reult` in `./tests/e2e/nrdb_verification_test.go`
+- Field `Message string `json:"message"`` in `./tests/e2e/nrdb_verification_test.go`
+- Field `DefaultTolerance   float64                    `yaml:"default_tolerance"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `MetricTolerances   map[string]float64         `yaml:"metric_tolerances"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `TimeWindow         string                     `yaml:"time_window"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `AggregationMethod  string                     `yaml:"aggregation_method"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `IgnoreAttributes   []string                   `yaml:"ignore_attributes"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `AttributeMappings  map[string]string          `yaml:"attribute_mappings"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `ValidationProfiles map[string]ValidationProfile `yaml:"validation_profiles"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `Name         string             `yaml:"name"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `Description  string             `yaml:"description"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `Tolerance    float64            `yaml:"tolerance"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `Metrics      []string           `yaml:"metrics"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `Attributes   []string           `yaml:"attributes"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `CutomRule` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `Name      string                 `yaml:"name"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `Type      string                 `yaml:"type"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `Config    map[string]interface{} `yaml:"config"`` in `./tests/e2e/pkg/validation/parity_validator.go`
+- Field `Schedules       ValidationSchedules     `yaml:"chedule` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Threhold` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Alerting        AlertingConfig          `yaml:"alerting"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Reporting       ReportingConfig         `yaml:"reporting"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `DriftDetection  DriftDetectionConfig    `yaml:"drift_detection"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `AutoRemediation AutoRemediationConfig   `yaml:"auto_remediation"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `QuickValidation         string `yaml:"quick_validation"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `ComprehensiveValidation string `yaml:"comprehensive_validation"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `TrendAnalyi` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `DriftDetection          string `yaml:"drift_detection"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `CriticalAccuracy float64            `yaml:"critical_accuracy"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `WarningAccuracy  float64            `yaml:"warning_accuracy"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `DriftThreshold   float64            `yaml:"drift_threshold"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `MetricThrehold` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Enabled          bool              `yaml:"enabled"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Channels         []string          `yaml:"channels"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `WebhookURL       string            `yaml:"webhook_url"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `EmailRecipients  []string          `yaml:"email_recipients"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `SlackChannel     string            `yaml:"slack_channel"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `AlertThrottling  time.Duration     `yaml:"alert_throttling"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `SeverityFilters  []string          `yaml:"everity_filter` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `OutputDir           string   `yaml:"output_dir"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Formats             []string `yaml:"formats"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `RetentionDays       int      `yaml:"retention_days"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `IncludeRawData      bool     `yaml:"include_raw_data"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `GenerateDahboard` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Enabled            bool          `yaml:"enabled"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `BaselineWindow     time.Duration `yaml:"baseline_window"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `DetectionWindow    time.Duration `yaml:"detection_window"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `MinDataPoints      int           `yaml:"min_data_points"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `AnomalyThreshold   float64       `yaml:"anomaly_threshold"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Enabled              bool                    `yaml:"enabled"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `MaxRetries           int                     `yaml:"max_retries"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `RetryInterval        time.Duration           `yaml:"retry_interval"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `RemediationStrategies []RemediationStrategy  `yaml:"trategie` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Name         string                 `yaml:"name"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Trigger      string                 `yaml:"trigger"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Actions      []RemediationAction    `yaml:"actions"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `MaxAttempts  int                    `yaml:"max_attempts"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Type        string                 `yaml:"type"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Config      map[string]interface{} `yaml:"config"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Timeout     time.Duration          `yaml:"timeout"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `ID              string                  `json:"id"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Timestamp       time.Time               `json:"timestamp"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Type            string                  `json:"type"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Duration        time.Duration           `json:"duration"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `TotalWidgets    int                     `json:"total_widgets"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `PaedWidget` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `FailedWidgets   int                     `json:"failed_widgets"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `AverageAccuracy float64                 `json:"average_accuracy"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Reult` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `DriftAnalyi` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Iue` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Timestamp        time.Time      `json:"timestamp"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Severity         DriftSeverity  `json:"severity"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `AffectedMetrics  []MetricDrift  `json:"affected_metrics"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Recommendations  []string       `json:"recommendations"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `TrendDirection   string         `json:"trend_direction"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `MetricName        string    `json:"metric_name"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `BaselineAccuracy  float64   `json:"baseline_accuracy"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `CurrentAccuracy   float64   `json:"current_accuracy"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `DriftPercentage   float64   `json:"drift_percentage"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Trend             string    `json:"trend"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `FirstDetected     time.Time `json:"first_detected"`` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `ConecutiveFailure` in `./tests/e2e/pkg/validation/continuous_validator.go`
+- Field `Programs ProgramsConfig `mapstructure:"programs"`` in `./receivers/kernelmetrics/config.go`
+- Field `TargetProcess ProcessConfig `mapstructure:"target_process"`` in `./receivers/kernelmetrics/config.go`
+- Field `BufferSize     int           `mapstructure:"buffer_size"`` in `./receivers/kernelmetrics/config.go`
+- Field `RingBufferSize int           `mapstructure:"ring_buffer_size"`` in `./receivers/kernelmetrics/config.go`
+- Field `CPULimit      float64       `mapstructure:"cpu_limit"`      // Max CPU usage percentage` in `./receivers/kernelmetrics/config.go`
+- Field `MemoryLimitMB int           `mapstructure:"memory_limit_mb"` // Max memory usage` in `./receivers/kernelmetrics/config.go`
+- Field `RequireRoot   bool          `mapstructure:"require_root"`` in `./receivers/kernelmetrics/config.go`
+- Field `Capabilities  []string      `mapstructure:"capabilities"`` in `./receivers/kernelmetrics/config.go`
+- Field `SyscallTrace   bool `mapstructure:"y` in `./receivers/kernelmetrics/config.go`
+- Field `FileIOTrace    bool `mapstructure:"file_io_trace"`` in `./receivers/kernelmetrics/config.go`
+- Field `NetworkTrace   bool `mapstructure:"network_trace"`` in `./receivers/kernelmetrics/config.go`
+- Field `MemoryTrace    bool `mapstructure:"memory_trace"`` in `./receivers/kernelmetrics/config.go`
+- Field `CPUProfile     bool `mapstructure:"cpu_profile"`` in `./receivers/kernelmetrics/config.go`
+- Field `LockTrace      bool `mapstructure:"lock_trace"`` in `./receivers/kernelmetrics/config.go`
+- Field `DBQueryTrace   bool `mapstructure:"db_query_trace"`` in `./receivers/kernelmetrics/config.go`
+- Field `DBConnTrace    bool `mapstructure:"db_conn_trace"`` in `./receivers/kernelmetrics/config.go`
+- Field `ProcessName    string `mapstructure:"process_name"`` in `./receivers/kernelmetrics/config.go`
+- Field `PID            int    `mapstructure:"pid"`` in `./receivers/kernelmetrics/config.go`
+- Field `CmdlinePattern string `mapstructure:"cmdline_pattern"`` in `./receivers/kernelmetrics/config.go`
+- Field `FollowChildren bool   `mapstructure:"follow_children"`` in `./receivers/kernelmetrics/config.go`
+- Field `Driver string `mapstructure:"driver"`` in `./receivers/enhancedsql/config.go`
+- Field `Datasource string `mapstructure:"datasource"`` in `./receivers/enhancedsql/config.go`
+- Field `CollectionInterval time.Duration `mapstructure:"collection_interval"`` in `./receivers/enhancedsql/config.go`
+- Field `MaxOpenConnections int `mapstructure:"max_open_connections"`` in `./receivers/enhancedsql/config.go`
+- Field `MaxIdleConnections int `mapstructure:"max_idle_connections"`` in `./receivers/enhancedsql/config.go`
+- Field `FeatureDetection FeatureDetectionConfig `mapstructure:"feature_detection"`` in `./receivers/enhancedsql/config.go`
+- Field `Queries []QueryConfig `mapstructure:"queries"`` in `./receivers/enhancedsql/config.go`
+- Field `CutomQuerie` in `./receivers/enhancedsql/config.go`
+- Field `ReourceAttribute` in `./receivers/enhancedsql/config.go`
+- Field `Enabled bool `mapstructure:"enabled"`` in `./receivers/enhancedsql/config.go`
+- Field `CacheDuration time.Duration `mapstructure:"cache_duration"`` in `./receivers/enhancedsql/config.go`
+- Field `RefreshInterval time.Duration `mapstructure:"refresh_interval"`` in `./receivers/enhancedsql/config.go`
+- Field `RetryAttempts int `mapstructure:"retry_attempts"`` in `./receivers/enhancedsql/config.go`
+- Field `RetryDelay time.Duration `mapstructure:"retry_delay"`` in `./receivers/enhancedsql/config.go`
+- Field `TimeoutPerCheck time.Duration `mapstructure:"timeout_per_check"`` in `./receivers/enhancedsql/config.go`
+- Field `SkipCloudDetection bool `mapstructure:"skip_cloud_detection"`` in `./receivers/enhancedsql/config.go`
+- Field `Name string `mapstructure:"name"`` in `./receivers/enhancedsql/config.go`
+- Field `Category string `mapstructure:"category"`` in `./receivers/enhancedsql/config.go`
+- Field `Timeout time.Duration `mapstructure:"timeout"`` in `./receivers/enhancedsql/config.go`
+- Field `MaxRows int `mapstructure:"max_rows"`` in `./receivers/enhancedsql/config.go`
+- Field `Parameters []QueryParameter `mapstructure:"parameters"`` in `./receivers/enhancedsql/config.go`
+- Field `Metrics []MetricConfig `mapstructure:"metrics"`` in `./receivers/enhancedsql/config.go`
+- Field `Logs []LogConfig `mapstructure:"logs"`` in `./receivers/enhancedsql/config.go`
+- Field `Name string `mapstructure:"name"`` in `./receivers/enhancedsql/config.go`
+- Field `Type string `mapstructure:"type"`` in `./receivers/enhancedsql/config.go`
+- Field `DefaultInt      int           `mapstructure:"default_int"`` in `./receivers/enhancedsql/config.go`
+- Field `DefaultFloat    float64       `mapstructure:"default_float"`` in `./receivers/enhancedsql/config.go`
+- Field `DefaultString   string        `mapstructure:"default_string"`` in `./receivers/enhancedsql/config.go`
+- Field `DefaultDuration time.Duration `mapstructure:"default_duration"`` in `./receivers/enhancedsql/config.go`
+- Field `Unit string `mapstructure:"unit"`` in `./receivers/enhancedsql/config.go`
+- Field `MetricName string `mapstructure:"metric_name"`` in `./receivers/enhancedsql/config.go`
+- Field `Description string `mapstructure:"description"`` in `./receivers/enhancedsql/config.go`
+- Field `ValueColumn string `mapstructure:"value_column"`` in `./receivers/enhancedsql/config.go`
+- Field `ValueType string `mapstructure:"value_type"`` in `./receivers/enhancedsql/config.go`
+- Field `AttributeColumns []string `mapstructure:"attribute_columns"`` in `./receivers/enhancedsql/config.go`
+- Field `BodyColumn string `mapstructure:"body_column"`` in `./receivers/enhancedsql/config.go`
+- Field `SeverityColumn string `mapstructure:"severity_column"`` in `./receivers/enhancedsql/config.go`
+- Field `Attributes map[string]string `mapstructure:"attributes"`` in `./receivers/enhancedsql/config.go`
+- Field `Name string `mapstructure:"name"`` in `./receivers/enhancedsql/config.go`
+- Field `Category string `mapstructure:"category"`` in `./receivers/enhancedsql/config.go`
+- Field `SQL string `mapstructure:"sql"`` in `./receivers/enhancedsql/config.go`
+- Field `Priority int `mapstructure:"priority"`` in `./receivers/enhancedsql/config.go`
+- Field `Description string `mapstructure:"description"`` in `./receivers/enhancedsql/config.go`
+- Field `Requirements featuredetector.QueryRequirements `mapstructure:"requirements"`` in `./receivers/enhancedsql/config.go`
+- Field `Driver     string `mapstructure:"driver"`` in `./receivers/ash/config.go`
+- Field `DataSource string `mapstructure:"datasource"`` in `./receivers/ash/config.go`
+- Field `SamplingConfig SamplingConfig `mapstructure:"sampling"`` in `./receivers/ash/config.go`
+- Field `BufferSize         int           `mapstructure:"buffer_size"`` in `./receivers/ash/config.go`
+- Field `RetentionDuration  time.Duration `mapstructure:"retention_duration"`` in `./receivers/ash/config.go`
+- Field `AggregationWindows []time.Duration `mapstructure:"aggregation_windows"`` in `./receivers/ash/config.go`
+- Field `EnableFeatureDetection bool `mapstructure:"enable_feature_detection"`` in `./receivers/ash/config.go`
+- Field `EnableWaitAnalyi` in `./receivers/ash/config.go`
+- Field `EnableBlockingAnalyi` in `./receivers/ash/config.go`
+- Field `EnableAnomalyDetection bool `mapstructure:"enable_anomaly_detection"`` in `./receivers/ash/config.go`
+- Field `SlowQueryThreholdM` in `./receivers/ash/config.go`
+- Field `BlockedSeionThre` in `./receivers/ash/config.go`
+- Field `BackOffConfig configretry.BackOffConfig `mapstructure:"retry_on_failure"`` in `./receivers/ash/config.go`
+- Field `BaseRate float64 `mapstructure:"base_rate"`` in `./receivers/ash/config.go`
+- Field `MinRate float64 `mapstructure:"min_rate"`` in `./receivers/ash/config.go`
+- Field `MaxRate float64 `mapstructure:"max_rate"`` in `./receivers/ash/config.go`
+- Field `LowSeionThre` in `./receivers/ash/config.go`
+- Field `HighSeionThre` in `./receivers/ash/config.go`
+- Field `AlwaysSampleBlocked      bool `mapstructure:"alway_` in `./receivers/ash/config.go`
+- Field `AlwaysSampleLongRunning  bool `mapstructure:"alway_` in `./receivers/ash/config.go`
+- Field `AlwaysSampleMaintenance  bool `mapstructure:"alway_` in `./receivers/ash/config.go`
+- Field `Endpoint string `mapstructure:"endpoint"`` in `./extensions/healthcheck/config.go`
+- Field `Path string `mapstructure:"path"`` in `./extensions/healthcheck/config.go`
+- Field `CheckCollectorPipeline PipelineCheckConfig `mapstructure:"check_collector_pipeline"`` in `./extensions/healthcheck/config.go`
+- Field `VerificationIntegration VerificationIntegrationConfig `mapstructure:"verification_integration"`` in `./extensions/healthcheck/config.go`
+- Field `NewRelicValidation NewRelicValidationConfig `mapstructure:"newrelic_validation"`` in `./extensions/healthcheck/config.go`
+- Field `Enabled bool `mapstructure:"enabled"`` in `./extensions/healthcheck/config.go`
+- Field `Interval time.Duration `mapstructure:"interval"`` in `./extensions/healthcheck/config.go`
+- Field `ExporterFailureThreshold int `mapstructure:"exporter_failure_threshold"`` in `./extensions/healthcheck/config.go`
+- Field `Enabled bool `mapstructure:"enabled"`` in `./extensions/healthcheck/config.go`
+- Field `FeedbackEndpoint string `mapstructure:"feedback_endpoint"`` in `./extensions/healthcheck/config.go`
+- Field `MaxFeedbackHistory int `mapstructure:"max_feedback_history"`` in `./extensions/healthcheck/config.go`
+- Field `Enabled bool `mapstructure:"enabled"`` in `./extensions/healthcheck/config.go`
+- Field `APIKey string `mapstructure:"api_key"`` in `./extensions/healthcheck/config.go`
+- Field `AccountID string `mapstructure:"account_id"`` in `./extensions/healthcheck/config.go`
+- Field `ValidationQueries []ValidationQuery `mapstructure:"validation_queries"`` in `./extensions/healthcheck/config.go`
+- Field `Name     string        `mapstructure:"name"`` in `./extensions/healthcheck/config.go`
+- Field `Query    string        `mapstructure:"query"`` in `./extensions/healthcheck/config.go`
+- Field `Interval time.Duration `mapstructure:"interval"`` in `./extensions/healthcheck/config.go`
+- Field `Status                string                     `json:"tatu` in `./extensions/healthcheck/extension.go`
+- Field `LastCheck             time.Time                  `json:"last_check"`` in `./extensions/healthcheck/extension.go`
+- Field `CollectorHealth       ComponentHealth            `json:"collector"`` in `./extensions/healthcheck/extension.go`
+- Field `DataIngestion         DataIngestionHealth        `json:"data_ingestion"`` in `./extensions/healthcheck/extension.go`
+- Field `NewRelicIntegration   NewRelicIntegrationHealth  `json:"newrelic_integration"`` in `./extensions/healthcheck/extension.go`
+- Field `DatabaeConnection` in `./extensions/healthcheck/extension.go`
+- Field `VerificationMetrics   VerificationMetrics        `json:"verification"`` in `./extensions/healthcheck/extension.go`
+- Field `Healthy    bool      `json:"healthy"`` in `./extensions/healthcheck/extension.go`
+- Field `Uptime     string    `json:"uptime"`` in `./extensions/healthcheck/extension.go`
+- Field `StartTime  time.Time `json:"start_time"`` in `./extensions/healthcheck/extension.go`
+- Field `Version    string    `json:"version"`` in `./extensions/healthcheck/extension.go`
+- Field `RecordProces` in `./extensions/healthcheck/extension.go`
+- Field `LastDataReceived      time.Time `json:"last_data_received"`` in `./extensions/healthcheck/extension.go`
+- Field `DataFrehnes` in `./extensions/healthcheck/extension.go`
+- Field `ProcessingRate        float64   `json:"processing_rate"`` in `./extensions/healthcheck/extension.go`
+- Field `Connected             bool      `json:"connected"`` in `./extensions/healthcheck/extension.go`
+- Field `LatSucces` in `./extensions/healthcheck/extension.go`
+- Field `IntegrationErrors     int64     `json:"integration_errors"`` in `./extensions/healthcheck/extension.go`
+- Field `ExportSuccessRate     float64   `json:"export_ucces` in `./extensions/healthcheck/extension.go`
+- Field `EntitySynthei` in `./extensions/healthcheck/extension.go`
+- Field `Connected         bool      `json:"connected"`` in `./extensions/healthcheck/extension.go`
+- Field `LastQuery         time.Time `json:"last_query"`` in `./extensions/healthcheck/extension.go`
+- Field `CircuitBreakerState string  `json:"circuit_breaker_state"`` in `./extensions/healthcheck/extension.go`
+- Field `ErrorRate         float64   `json:"error_rate"`` in `./extensions/healthcheck/extension.go`
+- Field `AverageLatency    float64   `json:"average_latency_ms"`` in `./extensions/healthcheck/extension.go`
+- Field `EntityCorrelationRate  float64            `json:"entity_correlation_rate"`` in `./extensions/healthcheck/extension.go`
+- Field `QueryNormalizationRate float64            `json:"query_normalization_rate"`` in `./extensions/healthcheck/extension.go`
+- Field `CardinalityWarnings    int64              `json:"cardinality_warnings"`` in `./extensions/healthcheck/extension.go`
+- Field `RemediationSuggetion` in `./extensions/healthcheck/extension.go`
+- Field `Timestamp   time.Time              `json:"timestamp"`` in `./extensions/healthcheck/extension.go`
+- Field `Level       string                 `json:"level"`` in `./extensions/healthcheck/extension.go`
+- Field `Category    string                 `json:"category"`` in `./extensions/healthcheck/extension.go`
+- Field `Message     string                 `json:"message"`` in `./extensions/healthcheck/extension.go`
+- Field `Database    string                 `json:"database,omitempty"`` in `./extensions/healthcheck/extension.go`
+- Field `Metrics     map[string]interface{} `json:"metrics,omitempty"`` in `./extensions/healthcheck/extension.go`
+- Field `Remediation string                 `json:"remediation,omitempty"`` in `./extensions/healthcheck/extension.go`
+- Field `SyncInterval time.Duration `mapstructure:"sync_interval"`` in `./processors/adaptivesampler/config.go`
+- Field `HighCotThre` in `./processors/adaptivesampler/config.go`
+- Field `MinSampleRate float64 `mapstructure:"min_sample_rate"`` in `./processors/adaptivesampler/config.go`
+- Field `InMemoryOnly bool `mapstructure:"in_memory_only"`` in `./processors/adaptivesampler/config.go`
+- Field `Deduplication DeduplicationConfig `mapstructure:"deduplication"`` in `./processors/adaptivesampler/config.go`
+- Field `SamplingRules []SamplingRule `mapstructure:"rules"`` in `./processors/adaptivesampler/config.go`
+- Field `DefaultSampleRate float64 `mapstructure:"default_sample_rate"`` in `./processors/adaptivesampler/config.go`
+- Field `MaxRecordsPerSecond int `mapstructure:"max_record_per_` in `./processors/adaptivesampler/config.go`
+- Field `EnableDebugLogging bool `mapstructure:"enable_debug_logging"`` in `./processors/adaptivesampler/config.go`
+- Field `CleanupInterval time.Duration `mapstructure:"cleanup_interval"`` in `./processors/adaptivesampler/config.go`
+- Field `MaxMemoryMB int `mapstructure:"max_memory_mb"`` in `./processors/adaptivesampler/config.go`
+- Field `Enabled bool `mapstructure:"enabled"`` in `./processors/adaptivesampler/config.go`
+- Field `CacheSize int `mapstructure:"cache_size"`` in `./processors/adaptivesampler/config.go`
+- Field `WindowSeconds int `mapstructure:"window_econd` in `./processors/adaptivesampler/config.go`
+- Field `HashAttribute string `mapstructure:"hash_attribute"`` in `./processors/adaptivesampler/config.go`
+- Field `CleanupInterval time.Duration `mapstructure:"cleanup_interval"`` in `./processors/adaptivesampler/config.go`
+- Field `Name string `mapstructure:"name"`` in `./processors/adaptivesampler/config.go`
+- Field `Priority int `mapstructure:"priority"`` in `./processors/adaptivesampler/config.go`
+- Field `SampleRate float64 `mapstructure:"sample_rate"`` in `./processors/adaptivesampler/config.go`
+- Field `Conditions []SamplingCondition `mapstructure:"conditions"`` in `./processors/adaptivesampler/config.go`
+- Field `MaxPerMinute int `mapstructure:"max_per_minute,omitempty"`` in `./processors/adaptivesampler/config.go`
+- Field `Attribute string `mapstructure:"attribute"`` in `./processors/adaptivesampler/config.go`
+- Field `Operator string `mapstructure:"operator"`` in `./processors/adaptivesampler/config.go`
+- Field `Value interface{} `mapstructure:"value"`` in `./processors/adaptivesampler/config.go`
+- Field `EnablePeriodicVerification bool `mapstructure:"enable_periodic_verification"`` in `./processors/verification/config.go`
+- Field `VerificationInterval time.Duration `mapstructure:"verification_interval"`` in `./processors/verification/config.go`
+- Field `DataFrehnessThre` in `./processors/verification/config.go`
+- Field `MinEntityCorrelationRate float64 `mapstructure:"min_entity_correlation_rate"`` in `./processors/verification/config.go`
+- Field `MinNormalizationRate float64 `mapstructure:"min_normalization_rate"`` in `./processors/verification/config.go`
+- Field `RequireEntitySynthei` in `./processors/verification/config.go`
+- Field `ExportFeedbackALog` in `./processors/verification/config.go`
+- Field `FeedbackEndpoint string `mapstructure:"feedback_endpoint"`` in `./processors/verification/config.go`
+- Field `VerificationQueries []VerificationQuery `mapstructure:"verification_queries"`` in `./processors/verification/config.go`
+- Field `EnableContinuouHealthCheck` in `./processors/verification/config.go`
+- Field `HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`` in `./processors/verification/config.go`
+- Field `HealthThrehold` in `./processors/verification/config.go`
+- Field `QualityRules QualityRulesConfig `mapstructure:"quality_rules"`` in `./processors/verification/config.go`
+- Field `PIIDetection PIIDetectionConfig `mapstructure:"pii_detection"`` in `./processors/verification/config.go`
+- Field `Name        string        `mapstructure:"name"`` in `./processors/verification/config.go`
+- Field `Query       string        `mapstructure:"query"`` in `./processors/verification/config.go`
+- Field `Interval    time.Duration `mapstructure:"interval"`` in `./processors/verification/config.go`
+- Field `Threshold   float64       `mapstructure:"threshold"`` in `./processors/verification/config.go`
+- Field `Comparison  string        `mapstructure:"comparison"` // gt, lt, eq` in `./processors/verification/config.go`
+- Field `MemoryPercent  float64       `mapstructure:"memory_percent"`` in `./processors/verification/config.go`
+- Field `CPUPercent     float64       `mapstructure:"cpu_percent"`` in `./processors/verification/config.go`
+- Field `DiskPercent    float64       `mapstructure:"disk_percent"`` in `./processors/verification/config.go`
+- Field `NetworkLatency time.Duration `mapstructure:"network_latency"`` in `./processors/verification/config.go`
+- Field `RequiredFields         []string          `mapstructure:"required_fields"`` in `./processors/verification/config.go`
+- Field `EnableSchemaValidation bool              `mapstructure:"enable_schema_validation"`` in `./processors/verification/config.go`
+- Field `CardinalityLimits      map[string]int    `mapstructure:"cardinality_limits"`` in `./processors/verification/config.go`
+- Field `DataTypeValidation     map[string]string `mapstructure:"data_type_validation"`` in `./processors/verification/config.go`
+- Field `Enabled         bool     `mapstructure:"enabled"`` in `./processors/verification/config.go`
+- Field `AutoSanitize    bool     `mapstructure:"auto_sanitize"`` in `./processors/verification/config.go`
+- Field `CutomPattern` in `./processors/verification/config.go`
+- Field `ExcludeFields   []string `mapstructure:"exclude_fields"`` in `./processors/verification/config.go`
+- Field `SensitivityLevel string  `mapstructure:"en` in `./processors/verification/config.go`
+- Field `Timestamp   time.Time               `json:"timestamp"`` in `./processors/verification/processor.go`
+- Field `Level       string                  `json:"level"`` in `./processors/verification/processor.go`
+- Field `Category    string                  `json:"category"`` in `./processors/verification/processor.go`
+- Field `Message     string                  `json:"message"`` in `./processors/verification/processor.go`
+- Field `Database    string                  `json:"database,omitempty"`` in `./processors/verification/processor.go`
+- Field `Metrics     map[string]interface{}  `json:"metrics,omitempty"`` in `./processors/verification/processor.go`
+- Field `Remediation string                  `json:"remediation,omitempty"`` in `./processors/verification/processor.go`
+- Field `Severity    int                     `json:"severity,omitempty"` // 1-10 scale` in `./processors/verification/processor.go`
+- Field `PlanID              string                 `json:"plan_id"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `QueryID             string                 `json:"query_id"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `PlanHash            string                 `json:"plan_hash"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `DatabaseName        string                 `json:"database_name"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `PlanJSON            json.RawMessage        `json:"plan_json"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `PlanText            string                 `json:"plan_text"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `TotalCost           float64                `json:"total_cost"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `FirstSeen           time.Time              `json:"firt_` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `LastSeen            time.Time              `json:"lat_` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `ExecutionCount      int64                  `json:"execution_count"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `AvgDurationMs       float64                `json:"avg_duration_ms"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `MinDurationMs       float64                `json:"min_duration_ms"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `MaxDurationMs       float64                `json:"max_duration_ms"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `StddevDurationMs    float64                `json:"tddev_duration_m` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `P95DurationMs       float64                `json:"p95_duration_ms"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `P99DurationMs       float64                `json:"p99_duration_ms"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `AvgRowsReturned     float64                `json:"avg_rows_returned"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `AvgDikRead` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `AvgDikWrite` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `AvgTempSpaceKB      float64                `json:"avg_temp_space_kb"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `NodeTypes           map[string]int         `json:"node_types"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `JoinTypes           map[string]int         `json:"join_types"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `IndexeU` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `TableAcces` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `HasSeqScan          bool                   `json:"ha_seq_` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `HaNe` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `HaHa` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `HasSort             bool                   `json:"ha_` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `EtimatedRow` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `ActualRows          float64                `json:"actual_rows"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `PlanningTimeMs      float64                `json:"planning_time_ms"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `EstimationAccuracy  float64                `json:"estimation_accuracy"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `CostAccuracy        float64                `json:"cost_accuracy"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `RegressionID        string                 `json:"regression_id"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `QueryID             string                 `json:"query_id"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `DatabaseName        string                 `json:"database_name"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `OldPlanID           string                 `json:"old_plan_id"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `NewPlanID           string                 `json:"new_plan_id"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `DetectedAt          time.Time              `json:"detected_at"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `OldAvgDurationMs    float64                `json:"old_avg_duration_ms"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `NewAvgDurationMs    float64                `json:"new_avg_duration_ms"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `PerformanceChangePct float64               `json:"performance_change_pct"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `DikRead` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `TempSpaceChange     float64                `json:"temp_space_change"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `IRegres` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `RegressionSeverity  string                 `json:"regreion_` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `PoibleCause` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `Recommendations     []string               `json:"recommendations"`` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `StatisticalConfidence float64              `json:"tati` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `SampleSize          int                    `json:"ample_` in `./processors/planattributeextractor/plan_dictionary.go`
+- Field `TimeoutMS int `mapstructure:"timeout_ms"`` in `./processors/planattributeextractor/config.go`
+- Field `ErrorMode string `mapstructure:"error_mode"`` in `./processors/planattributeextractor/config.go`
+- Field `PotgreSQLRule` in `./processors/planattributeextractor/config.go`
+- Field `MySQLRules MySQLExtractionRules `mapstructure:"myql_rule` in `./processors/planattributeextractor/config.go`
+- Field `HashConfig HashGenerationConfig `mapstructure:"hash_config"`` in `./processors/planattributeextractor/config.go`
+- Field `EnableDebugLogging bool `mapstructure:"enable_debug_logging"`` in `./processors/planattributeextractor/config.go`
+- Field `UnsafePlanCollection bool `mapstructure:"unsafe_plan_collection"`` in `./processors/planattributeextractor/config.go`
+- Field `SafeMode bool `mapstructure:"safe_mode"`` in `./processors/planattributeextractor/config.go`
+- Field `QueryAnonymization QueryAnonymizationConfig `mapstructure:"query_anonymization"`` in `./processors/planattributeextractor/config.go`
+- Field `QueryLens QueryLensConfig `mapstructure:"querylens"`` in `./processors/planattributeextractor/config.go`
+- Field `DetectionJSONPath string `mapstructure:"detection_jsonpath"`` in `./processors/planattributeextractor/config.go`
+- Field `Extractions map[string]string `mapstructure:"extractions"`` in `./processors/planattributeextractor/config.go`
+- Field `DerivedAttributes map[string]string `mapstructure:"derived"`` in `./processors/planattributeextractor/config.go`
+- Field `DetectionJSONPath string `mapstructure:"detection_jsonpath"`` in `./processors/planattributeextractor/config.go`
+- Field `Extractions map[string]string `mapstructure:"extractions"`` in `./processors/planattributeextractor/config.go`
+- Field `Include []string `mapstructure:"include"`` in `./processors/planattributeextractor/config.go`
+- Field `Output string `mapstructure:"output"`` in `./processors/planattributeextractor/config.go`
+- Field `Algorithm string `mapstructure:"algorithm"`` in `./processors/planattributeextractor/config.go`
+- Field `Enabled bool `mapstructure:"enabled"`` in `./processors/planattributeextractor/config.go`
+- Field `AttributesToAnonymize []string `mapstructure:"attributes_to_anonymize"`` in `./processors/planattributeextractor/config.go`
+- Field `GenerateFingerprint bool `mapstructure:"generate_fingerprint"`` in `./processors/planattributeextractor/config.go`
+- Field `FingerprintAttribute string `mapstructure:"fingerprint_attribute"`` in `./processors/planattributeextractor/config.go`
+- Field `QueryID     int64       `json:"queryid"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `PlanID      string      `json:"plan_id"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `PlanText    string      `json:"plan_text"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `PlanChanges []PlanChange `json:"plan_changes"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `Metrics     PlanMetrics  `json:"metrics"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `Timestamp      time.Time `json:"timestamp"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `OldPlanID      string    `json:"old_plan_id"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `NewPlanID      string    `json:"new_plan_id"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `CostChange     float64   `json:"cost_change"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `PerformanceImpact string `json:"performance_impact"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `MeanTime       float64 `json:"mean_time_ms"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `TotalTime      float64 `json:"total_time_ms"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `StdDevTime     float64 `json:"tddev_time_m` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `ExecutionCount int64   `json:"execution_count"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `BlocksRead     int64   `json:"blocks_read"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `BlocksHit      int64   `json:"blocks_hit"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `TempBlocks     int64   `json:"temp_blocks"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `PlanType       string  `json:"plan_type"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `EtimatedCo` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `ActualCost     float64 `json:"actual_cost"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `HaRegres` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `RegressionType string  `json:"regression_type"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `Recommendations []string `json:"recommendations"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `Detected      bool    `json:"detected"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `Severity      string  `json:"severity"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `TimeIncrease  float64 `json:"time_increase_ratio"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `IOIncrease    float64 `json:"io_increase_ratio"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `CotIncrea` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `IORegression  bool    `json:"io_regression"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `TimeRegression bool   `json:"time_regression"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `Enabled              bool                     `mapstructure:"enabled"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `PlanHitoryHour` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `RegreionThre` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `RegressionDetection  RegressionDetectionConfig `mapstructure:"regression_detection"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `AlertOnRegression    bool                     `mapstructure:"alert_on_regression"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `Enabled       bool    `mapstructure:"enabled"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `TimeIncrease  float64 `mapstructure:"time_increase"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `IOIncrease    float64 `mapstructure:"io_increase"`` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `CotIncrea` in `./processors/planattributeextractor/querylens_integration.go`
+- Field `MaxAttributeLength int `mapstructure:"max_attribute_length"`` in `./processors/nrerrormonitor/config.go`
+- Field `MaxMetricNameLength int `mapstructure:"max_metric_name_length"`` in `./processors/nrerrormonitor/config.go`
+- Field `CardinalityWarningThreshold int `mapstructure:"cardinality_warning_threshold"`` in `./processors/nrerrormonitor/config.go`
+- Field `AlertThreshold int64 `mapstructure:"alert_threshold"`` in `./processors/nrerrormonitor/config.go`
+- Field `ReportingInterval time.Duration `mapstructure:"reporting_interval"`` in `./processors/nrerrormonitor/config.go`
+- Field `ErrorSuppressionDuration time.Duration `mapstructure:"error_uppres` in `./processors/nrerrormonitor/config.go`
+- Field `EnableProactiveValidation bool `mapstructure:"enable_proactive_validation"`` in `./processors/nrerrormonitor/config.go`
+- Field `FailureThreshold int `mapstructure:"failure_threshold"`` in `./processors/circuitbreaker/config.go`
+- Field `SucceThre` in `./processors/circuitbreaker/config.go`
+- Field `OpenStateTimeout time.Duration `mapstructure:"open_state_timeout"`` in `./processors/circuitbreaker/config.go`
+- Field `MaxConcurrentRequet` in `./processors/circuitbreaker/config.go`
+- Field `MaxConcurrent int `mapstructure:"max_concurrent"`` in `./processors/circuitbreaker/config.go`
+- Field `BaseTimeout time.Duration `mapstructure:"base_timeout"`` in `./processors/circuitbreaker/config.go`
+- Field `Timeout time.Duration `mapstructure:"timeout"`` in `./processors/circuitbreaker/config.go`
+- Field `MaxTimeout time.Duration `mapstructure:"max_timeout"`` in `./processors/circuitbreaker/config.go`
+- Field `EnableAdaptiveTimeout bool `mapstructure:"enable_adaptive_timeout"`` in `./processors/circuitbreaker/config.go`
+- Field `HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`` in `./processors/circuitbreaker/config.go`
+- Field `MemoryThresholdMB int `mapstructure:"memory_threshold_mb"`` in `./processors/circuitbreaker/config.go`
+- Field `CPUThresholdPercent float64 `mapstructure:"cpu_threshold_percent"`` in `./processors/circuitbreaker/config.go`
+- Field `EnableDebugLogging bool `mapstructure:"enable_debug_logging"`` in `./processors/circuitbreaker/config.go`
+- Field `NewRelicErrorPatterns []string `mapstructure:"new_relic_error_patterns"`` in `./processors/circuitbreaker/config.go`
+- Field `ErrorPatterns []ErrorPatternConfig `mapstructure:"error_patterns"`` in `./processors/circuitbreaker/config.go`
+- Field `QueryFallbacks map[string]string `mapstructure:"query_fallbacks"`` in `./processors/circuitbreaker/config.go`
+- Field `Pattern     string        `mapstructure:"pattern"`` in `./processors/circuitbreaker/config.go`
+- Field `Action      string        `mapstructure:"action"`` in `./processors/circuitbreaker/config.go`
+- Field `Feature     string        `mapstructure:"feature"`` in `./processors/circuitbreaker/config.go`
+- Field `Backoff     time.Duration `mapstructure:"backoff"`` in `./processors/circuitbreaker/config.go`
+- Field `Description string        `mapstructure:"description"`` in `./processors/circuitbreaker/config.go`
+- Field `Name        string         `mapstructure:"name"`` in `./processors/circuitbreaker/feature_aware.go`
+- Field `Pattern     string         `mapstructure:"pattern"`` in `./processors/circuitbreaker/feature_aware.go`
+- Field `Regex       *regexp.Regexp `mapstructure:"-"`` in `./processors/circuitbreaker/feature_aware.go`
+- Field `Action      string         `mapstructure:"action"` // "disable_query", "use_fallback", "circuit_break"` in `./processors/circuitbreaker/feature_aware.go`
+- Field `Feature     string         `mapstructure:"feature"` // Feature that caused the error` in `./processors/circuitbreaker/feature_aware.go`
+- Field `Backoff     time.Duration  `mapstructure:"backoff"`` in `./processors/circuitbreaker/feature_aware.go`
+- Field `Description string         `mapstructure:"description"`` in `./processors/circuitbreaker/feature_aware.go`
+- Field `MonthlyBudgetUSD float64 `mapstructure:"monthly_budget_usd"`` in `./processors/costcontrol/config.go`
+- Field `PricePerGB float64 `mapstructure:"price_per_gb"`` in `./processors/costcontrol/config.go`
+- Field `MetricCardinalityLimit int `mapstructure:"metric_cardinality_limit"`` in `./processors/costcontrol/config.go`
+- Field `SlowSpanThreholdM` in `./processors/costcontrol/config.go`
+- Field `MaxLogBodySize int `mapstructure:"max_log_body_size"`` in `./processors/costcontrol/config.go`
+- Field `ReportingInterval time.Duration `mapstructure:"reporting_interval"`` in `./processors/costcontrol/config.go`
+- Field `AggressiveMode bool `mapstructure:"aggressive_mode"`` in `./processors/costcontrol/config.go`
+- Field `DataPlusEnabled bool `mapstructure:"data_plus_enabled"`` in `./processors/costcontrol/config.go`
+- Field `HighCardinalityDimenion` in `./processors/costcontrol/config.go`
+- Field `RetentionPeriod time.Duration `mapstructure:"retention_period"`` in `./processors/querycorrelator/config.go`
+- Field `CleanupInterval time.Duration `mapstructure:"cleanup_interval"`` in `./processors/querycorrelator/config.go`
+- Field `EnableTableCorrelation bool `mapstructure:"enable_table_correlation"`` in `./processors/querycorrelator/config.go`
+- Field `EnableDatabaseCorrelation bool `mapstructure:"enable_database_correlation"`` in `./processors/querycorrelator/config.go`
+- Field `MaxQueriesTracked int `mapstructure:"max_queries_tracked"`` in `./processors/querycorrelator/config.go`
+- Field `CorrelationAttributes CorrelationAttributesConfig `mapstructure:"correlation_attributes"`` in `./processors/querycorrelator/config.go`
+- Field `QueryCategorization QueryCategorizationConfig `mapstructure:"query_categorization"`` in `./processors/querycorrelator/config.go`
+- Field `AddQueryCategory bool `mapstructure:"add_query_category"`` in `./processors/querycorrelator/config.go`
+- Field `AddTableStats bool `mapstructure:"add_table_tat` in `./processors/querycorrelator/config.go`
+- Field `AddLoadContribution bool `mapstructure:"add_load_contribution"`` in `./processors/querycorrelator/config.go`
+- Field `AddMaintenanceIndicators bool `mapstructure:"add_maintenance_indicators"`` in `./processors/querycorrelator/config.go`
+- Field `SlowQueryThreholdM` in `./processors/querycorrelator/config.go`
+- Field `ModerateQueryThreholdM` in `./processors/querycorrelator/config.go`
+- Field `Name         string                 `json:"name"`` in `./common/featuredetector/types.go`
+- Field `Available    bool                   `json:"available"`` in `./common/featuredetector/types.go`
+- Field `Version      string                 `json:"version,omitempty"`` in `./common/featuredetector/types.go`
+- Field `LastChecked  time.Time             `json:"last_checked"`` in `./common/featuredetector/types.go`
+- Field `Metadata     map[string]interface{} `json:"metadata,omitempty"`` in `./common/featuredetector/types.go`
+- Field `ErrorMessage string                 `json:"error_message,omitempty"`` in `./common/featuredetector/types.go`
+- Field `DatabaseType    string              `json:"database_type"`` in `./common/featuredetector/types.go`
+- Field `ServerVersion   string              `json:"erver_ver` in `./common/featuredetector/types.go`
+- Field `Extenion` in `./common/featuredetector/types.go`
+- Field `Capabilities    map[string]*Feature `json:"capabilities"`` in `./common/featuredetector/types.go`
+- Field `CloudProvider   string              `json:"cloud_provider,omitempty"`` in `./common/featuredetector/types.go`
+- Field `LastDetection   time.Time           `json:"last_detection"`` in `./common/featuredetector/types.go`
+- Field `DetectionErrors []string            `json:"detection_errors,omitempty"`` in `./common/featuredetector/types.go`
+- Field `Metadata        map[string]interface{} `json:"metadata,omitempty"`` in `./common/featuredetector/types.go`
+- Field `RequiredExtenion` in `./common/featuredetector/types.go`
+- Field `RequiredCapabilities []string `json:"required_capabilities"`` in `./common/featuredetector/types.go`
+- Field `MinimumVersion     string   `json:"minimum_version,omitempty"`` in `./common/featuredetector/types.go`
+- Field `Name         string            `mapstructure:"name"`` in `./common/featuredetector/types.go`
+- Field `SQL          string            `mapstructure:"sql"`` in `./common/featuredetector/types.go`
+- Field `Requirements QueryRequirements `mapstructure:"requirements"`` in `./common/featuredetector/types.go`
+- Field `Priority     int               `mapstructure:"priority"`` in `./common/featuredetector/types.go`
+- Field `FallbackName string            `mapstructure:"fallback"`` in `./common/featuredetector/types.go`
+- Field `Description  string            `mapstructure:"description"`` in `./common/featuredetector/types.go`
+- Field `CacheDuration time.Duration `mapstructure:"cache_duration"`` in `./common/featuredetector/types.go`
+- Field `RetryAttempts int `mapstructure:"retry_attempts"`` in `./common/featuredetector/types.go`
+- Field `RetryDelay time.Duration `mapstructure:"retry_delay"`` in `./common/featuredetector/types.go`
+- Field `TimeoutPerCheck time.Duration `mapstructure:"timeout_per_check"`` in `./common/featuredetector/types.go`
+- Field `SkipCloudDetection bool `mapstructure:"skip_cloud_detection"`` in `./common/featuredetector/types.go`
+- Field `CutomQuerie` in `./common/featuredetector/types.go`
+- Field `CacheDuration time.Duration `mapstructure:"cache_duration"`` in `./common/queryselector/selector.go`
+- Field `QueryLibrary  string        `mapstructure:"query_library"` // Path to query definitions` in `./common/queryselector/selector.go`
+- Field `WHERE hostname = '` + v.getHostname() + `'` in `./validation/ohi-compatibility-validator.go`
+- Field `WHERE host.name = '` + v.getHostname() + `'` in `./validation/ohi-compatibility-validator.go`
+
+## Summary
+
+Review completed at: Thu Jul 10 20:04:32 IST 2025
+
+### Statistics
+- TODO/FIXME comments:        3
+- Files with potential commented code:      161

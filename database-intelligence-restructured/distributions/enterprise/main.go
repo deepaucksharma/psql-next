@@ -1,8 +1,14 @@
 package main
 
 import (
+    "context"
     "fmt"
     "log"
+    "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
     
     "go.opentelemetry.io/collector/component"
     "go.opentelemetry.io/collector/exporter"
@@ -15,18 +21,23 @@ import (
     "go.opentelemetry.io/collector/processor/batchprocessor"
     "go.opentelemetry.io/collector/receiver"
     "go.opentelemetry.io/collector/receiver/otlpreceiver"
+    "go.uber.org/zap"
     
-    // Import custom processors
-    "github.com/database-intelligence/processors/adaptivesampler"
-    "github.com/database-intelligence/processors/circuitbreaker"
-    "github.com/database-intelligence/processors/costcontrol"
-    "github.com/database-intelligence/processors/nrerrormonitor"
-    "github.com/database-intelligence/processors/planattributeextractor"
-    "github.com/database-intelligence/processors/querycorrelator"
-    "github.com/database-intelligence/processors/verification"
+    // Import health checker
+    "github.com/database-intelligence/core/internal/health"
+    
+    // Import unified component registry
+    "github.com/database-intelligence/core/registry"
 )
 
 func main() {
+    // Create logger
+    logger, err := zap.NewProduction()
+    if err != nil {
+        log.Fatalf("failed to create logger: %v", err)
+    }
+    defer logger.Sync()
+    
     factories, err := components()
     if err != nil {
         log.Fatalf("failed to build components: %v", err)
@@ -37,6 +48,28 @@ func main() {
         Description: "Database Intelligence Collector with Custom Processors",
         Version:     "2.0.0",
     }
+    
+    // Create health checker
+    healthChecker := health.NewHealthChecker(logger, info.Version)
+    
+    // Start health monitoring server
+    startHealthServer(healthChecker, logger)
+    
+    // Setup signal handling
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+    
+    go func() {
+        <-sigChan
+        logger.Info("Shutting down collector...")
+        cancel()
+    }()
+    
+    // Start background health checks
+    go healthChecker.StartBackgroundCheck(ctx)
 
     if err := run(otelcol.CollectorSettings{
         BuildInfo: info,
@@ -47,40 +80,8 @@ func main() {
 }
 
 func components() (otelcol.Factories, error) {
-    factories := otelcol.Factories{}
-
-    // Receivers - core only
-    factories.Receivers = map[component.Type]receiver.Factory{
-        otlpreceiver.NewFactory().Type(): otlpreceiver.NewFactory(),
-    }
-
-    // Processors - core + custom
-    factories.Processors = map[component.Type]processor.Factory{
-        batchprocessor.NewFactory().Type():         batchprocessor.NewFactory(),
-        // Custom processors
-        adaptivesampler.NewFactory().Type():        adaptivesampler.NewFactory(),
-        circuitbreaker.NewFactory().Type():         circuitbreaker.NewFactory(),
-        costcontrol.NewFactory().Type():            costcontrol.NewFactory(),
-        nrerrormonitor.NewFactory().Type():         nrerrormonitor.NewFactory(),
-        planattributeextractor.NewFactory().Type(): planattributeextractor.NewFactory(),
-        querycorrelator.NewFactory().Type():        querycorrelator.NewFactory(),
-        verification.NewFactory().Type():           verification.NewFactory(),
-    }
-
-    // Exporters - core only  
-    factories.Exporters = map[component.Type]exporter.Factory{
-        otlpexporter.NewFactory().Type():      otlpexporter.NewFactory(),
-        otlphttpexporter.NewFactory().Type():  otlphttpexporter.NewFactory(),
-        debugexporter.NewFactory().Type():     debugexporter.NewFactory(),
-    }
-
-    // Extensions - empty for now
-    factories.Extensions = map[component.Type]extension.Factory{}
-
-    // Initialize empty connectors map
-    factories.Connectors = make(map[component.Type]component.Factory)
-
-    return factories, nil
+    // Use the unified component registry for enterprise distribution
+    return registry.BuildFromPreset("enterprise")
 }
 
 func run(settings otelcol.CollectorSettings) error {
@@ -90,4 +91,46 @@ func run(settings otelcol.CollectorSettings) error {
     }
     
     return nil
+}
+
+// startHealthServer starts the health monitoring HTTP server
+func startHealthServer(healthChecker *health.HealthChecker, logger *zap.Logger) {
+    mux := http.NewServeMux()
+    
+    // Register health endpoints
+    mux.HandleFunc("/health", healthChecker.ReadinessHandler())
+    mux.HandleFunc("/health/live", healthChecker.LivenessHandler())
+    mux.HandleFunc("/health/ready", healthChecker.ReadinessHandler())
+    mux.HandleFunc("/health/detail", healthChecker.DetailedHealthHandler())
+    
+    // Add metrics endpoint
+    mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+        // In production, this would expose Prometheus metrics
+        w.Header().Set("Content-Type", "text/plain")
+        w.WriteHeader(http.StatusOK)
+        fmt.Fprintf(w, "# HELP database_intelligence_health Health status\n")
+        fmt.Fprintf(w, "# TYPE database_intelligence_health gauge\n")
+        
+        status := healthChecker.CheckHealth(r.Context())
+        if status.Healthy {
+            fmt.Fprintf(w, "database_intelligence_health 1\n")
+        } else {
+            fmt.Fprintf(w, "database_intelligence_health 0\n")
+        }
+    })
+    
+    server := &http.Server{
+        Addr:         ":8080",
+        Handler:      mux,
+        ReadTimeout:  10 * time.Second,
+        WriteTimeout: 10 * time.Second,
+        IdleTimeout:  60 * time.Second,
+    }
+    
+    go func() {
+        logger.Info("Starting health monitoring server", zap.String("addr", server.Addr))
+        if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            logger.Error("Health server error", zap.Error(err))
+        }
+    }()
 }
