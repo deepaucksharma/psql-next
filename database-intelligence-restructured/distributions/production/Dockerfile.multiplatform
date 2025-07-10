@@ -1,0 +1,63 @@
+# Multi-platform Dockerfile for Database Intelligence Collector
+# Supports: linux/amd64, linux/arm64, linux/arm/v7
+
+# Build stage
+FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git make
+
+# Set up build arguments
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+
+# Set working directory
+WORKDIR /build
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build for the target platform
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT} \
+    go build -a -trimpath -ldflags="-s -w" -o database-intelligence .
+
+# Final stage
+FROM --platform=$TARGETPLATFORM alpine:3.18
+
+# Install runtime dependencies
+RUN apk --no-cache add ca-certificates tzdata
+
+# Create non-root user
+RUN addgroup -g 1001 -S otel && \
+    adduser -u 1001 -S otel -G otel
+
+# Set up working directory
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /build/database-intelligence /app/database-intelligence
+
+# Copy configuration
+COPY production-config.yaml /etc/database-intelligence/config.yaml
+
+# Set ownership
+RUN chown -R otel:otel /app /etc/database-intelligence
+
+# Switch to non-root user
+USER otel
+
+# Expose ports
+EXPOSE 4317 4318 13133
+
+# Set entrypoint
+ENTRYPOINT ["/app/database-intelligence"]
+CMD ["--config", "/etc/database-intelligence/config.yaml"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:13133/health || exit 1

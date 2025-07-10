@@ -1,0 +1,23 @@
+receivers:
+  noop:
+
+processors:
+  passthrough:
+
+exporters:
+  logging:
+
+service:
+  pipelines:
+    traces:
+      receivers: [noop]
+      processors: [passthrough]
+      exporters: [logging]
+    metrics:
+      receivers: [noop]
+      processors: [passthrough]
+      exporters: [logging]
+    logs:
+      receivers: [noop]
+      processors: [passthrough]
+      exporters: [logging]

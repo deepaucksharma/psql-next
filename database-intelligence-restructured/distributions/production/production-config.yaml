@@ -1,0 +1,74 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  
+  postgresql:
+    endpoint: ${DB_POSTGRES_HOST:localhost}:${DB_POSTGRES_PORT:5432}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    databases:
+      - ${DB_NAME:postgres}
+    collection_interval: 10s
+  
+  mysql:
+    endpoint: ${DB_MYSQL_HOST:localhost}:${DB_MYSQL_PORT:3306}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    database: ${DB_NAME:mysql}
+    collection_interval: 10s
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: ${MEMORY_LIMIT_MIB:512}
+
+exporters:
+  otlphttp:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net}
+    headers:
+      api-key: ${NEW_RELIC_API_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+  
+  debug:
+    verbosity: ${DEBUG_VERBOSITY:normal}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics/postgresql:
+      receivers: [postgresql]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp]
+    metrics/mysql:
+      receivers: [mysql]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp]
