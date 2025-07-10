@@ -1,0 +1,498 @@
+{
+  "name": "Postgresql-demo-feb",
+  "description": null,
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Bird's-Eye View",
+      "description": null,
+      "widgets": [
+        {
+          "title": "Database",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 3,
+            "height": 3
+          },
+          "linkedEntityGuids": [
+            "MzUxNjkxN3xWSVp8REFTSEJPQVJEfDI4MTAwNzA5"
+          ],
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT uniqueCount(query_id) from PostgresSlowQueries facet database_name"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Average execution time (ms)",
+          "layout": {
+            "column": 4,
+            "row": 1,
+            "width": 3,
+            "height": 3
+          },
+          "linkedEntityGuids": [
+            "MzUxNjkxN3xWSVp8REFTSEJPQVJEfDI4MTAwNzA5"
+          ],
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(avg_elapsed_time_ms) from PostgresSlowQueries where query_text!='<insufficient privilege>' facet query_text"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Execution counts over time",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 3,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT count(execution_count) from PostgresSlowQueries TIMESERIES"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": {
+              "isLabelVisible": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            },
+            "yAxisRight": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Top wait events",
+          "layout": {
+            "column": 10,
+            "row": 1,
+            "width": 3,
+            "height": 3
+          },
+          "linkedEntityGuids": [
+            "MzUxNjkxN3xWSVp8REFTSEJPQVJEfDI4MTAwNzEx"
+          ],
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(total_wait_time_ms) from PostgresWaitEvents facet wait_event_name where wait_event_name!='<nil>'"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Top n slowest",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 5
+          },
+          "linkedEntityGuids": [
+            "MzgyMTMzN3xWSVp8REFTSEJPQVJEfDMwMzU2MzY2"
+          ],
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "initialSorting": {
+              "direction": "desc",
+              "name": "Avg Elapsed Time Ms"
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(database_name),latest(query_text),latest(schema_name), latest(execution_count), latest(avg_elapsed_time_ms), latest(avg_disk_reads), latest(avg_disk_writes), latest(statement_type) FROM PostgresSlowQueries facet query_id limit max"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Disk IO usage (Avg disk reads)",
+          "layout": {
+            "column": 1,
+            "row": 9,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(avg_disk_reads) as 'Average Disk Reads' From PostgresSlowQueries facet database_name TIMESERIES"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Disk IO usage (Avg disk writes)",
+          "layout": {
+            "column": 7,
+            "row": 9,
+            "width": 6,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT average(avg_disk_writes) as 'Average Disk Writes' From PostgresSlowQueries facet database_name TIMESERIES"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Blocking details",
+          "layout": {
+            "column": 1,
+            "row": 12,
+            "width": 12,
+            "height": 5
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(blocked_pid),latest(blocked_query),latest(blocked_query_id),latest(blocked_query_start) as 'Blocked Query Timeseries',latest(database_name), latest(blocking_pid), latest(blocking_query),latest(blocking_query_id),latest(blocking_query_start) as'Blocking Query Timeseries',latest(blocking_database)as'Database' from PostgresBlockingSessions facet blocked_pid"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query Details",
+      "description": null,
+      "widgets": [
+        {
+          "title": "Individual query details",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 5
+          },
+          "linkedEntityGuids": [
+            "MzUxNjkxN3xWSVp8REFTSEJPQVJEfDI4MTAwNzEw"
+          ],
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(query_text),latest(avg_cpu_time_ms or 'NA'),latest(query_id) from PostgresIndividualQueries facet plan_id limit max"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Query execution plan details",
+          "layout": {
+            "column": 1,
+            "row": 6,
+            "width": 12,
+            "height": 4
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "initialSorting": {
+              "direction": "asc",
+              "name": "level_id"
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(node_type),latest(query_id),latest(query_text),latest(total_cost),latest(startup_cost),latest(plan_rows),latest(actual_startup_time),latest(actual_total_time), latest(actual_rows),latest(actual_loops),latest(shared_hit_block),latest(shared_read_blocks),latest(shared_dirtied_blocks),latest(shared_written_blocks),latest(local_hit_block),latest(local_read_blocks),latest(local_dirtied_blocks),latest(local_written_blocks),latest(temp_read_block),latest(temp_written_blocks),latest(database_name) from PostgresExecutionPlanMetrics facet plan_id,level_id"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wait Time Analysis",
+      "description": null,
+      "widgets": [
+        {
+          "title": "Top wait events",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 7,
+            "height": 4
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(total_wait_time_ms) from PostgresWaitEvents facet wait_event_name, wait_category where wait_event_name != '<nil>'timeseries"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": {
+              "isLabelVisible": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            },
+            "yAxisRight": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Web events",
+          "layout": {
+            "column": 8,
+            "row": 1,
+            "width": 5,
+            "height": 4
+          },
+          "linkedEntityGuids": [
+            "MzgyMTMzN3xWSVp8REFTSEJPQVJEfDIwOTMyNDAy"
+          ],
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT uniqueCount(wait_event_name) from PostgresWaitEvents FACET wait_event_name where wait_event_name != '<nil>'"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Trend of DB instance wait times",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 5,
+            "height": 4
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(total_wait_time_ms) FROM PostgresWaitEvents WHERE database_name != '<nil>' FACET database_name TIMESERIES"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": {
+              "isLabelVisible": true
+            },
+            "yAxisLeft": {
+              "zero": true
+            },
+            "yAxisRight": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Wait query details",
+          "layout": {
+            "column": 6,
+            "row": 5,
+            "width": 7,
+            "height": 4
+          },
+          "linkedEntityGuids": [],
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "initialSorting": {
+              "direction": "desc",
+              "name": "Total Wait Time Ms"
+            },
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  3821337
+                ],
+                "query": "SELECT latest(wait_event_name), latest(total_wait_time_ms) from PostgresWaitEvents facet query_id where wait_event_name !='<nil>' and query_id !='<nil>'"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variables": []
+}

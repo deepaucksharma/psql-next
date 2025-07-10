@@ -1,0 +1,268 @@
+# E2E Test Configuration
+# This file defines the configuration for end-to-end tests
+
+framework:
+  version: "1.0.0"
+  parallel_execution: true
+  max_concurrent_suites: 3
+  default_timeout: "30m"
+  continue_on_error: false
+  artifact_retention: "7d"
+
+environments:
+  local:
+    type: "docker-compose"
+    docker_compose: "./docker-compose.yml"
+    databases:
+      postgresql:
+        host: "localhost"
+        port: 5432
+        database: "testdb"
+        username: "postgres"
+        password: "postgres"
+        ssl: false
+      mysql:
+        host: "localhost"
+        port: 3306
+        database: "testdb"
+        username: "root"
+        password: "root"
+        ssl: false
+    resources:
+      cpu: "2"
+      memory: "4Gi"
+      disk: "10Gi"
+    network:
+      collector_port: 4317
+      metrics_port: 8889
+      network_name: "e2e-test-network"
+    environment:
+      LOG_LEVEL: "debug"
+      TELEMETRY_ENABLED: "true"
+
+  ci:
+    type: "kubernetes"
+    kubernetes_config: "./k8s-test-config.yaml"
+    databases:
+      postgresql:
+        host: "postgres-service"
+        port: 5432
+        database: "testdb"
+        username: "postgres"
+        password: "postgres"
+        ssl: true
+      mysql:
+        host: "mysql-service"
+        port: 3306
+        database: "testdb"
+        username: "root"
+        password: "root"
+        ssl: true
+    resources:
+      cpu: "4"
+      memory: "8Gi"
+      disk: "20Gi"
+    network:
+      collector_port: 4317
+      metrics_port: 8889
+      network_name: "test-namespace"
+
+test_suites:
+  comprehensive:
+    enabled: true
+    timeout: "20m"
+    parameters:
+      scale: 1000
+      duration: "5m"
+      qps: 100
+    dependencies: []
+    tags: ["core", "integration", "newrelic"]
+
+  verification:
+    enabled: true
+    timeout: "15m"
+    parameters:
+      verify_accuracy: true
+      tolerance_percent: 5.0
+      collection_cycles: 3
+    dependencies: []
+    tags: ["verification", "newrelic", "accuracy"]
+
+  adapters:
+    enabled: true
+    timeout: "10m"
+    parameters:
+      test_all_receivers: true
+      test_all_processors: true
+      test_all_exporters: true
+    dependencies: []
+    tags: ["adapters", "integration"]
+
+  database:
+    enabled: true
+    timeout: "25m"
+    parameters:
+      test_postgresql: true
+      test_mysql: true
+      test_data_types: true
+      test_plan_extraction: true
+    dependencies: []
+    tags: ["database", "postgresql", "mysql"]
+
+  performance:
+    enabled: true
+    timeout: "30m"
+    parameters:
+      target_qps: 1000
+      duration: "10m"
+      concurrent_connections: 50
+      data_volume: "large"
+    dependencies: ["comprehensive"]
+    tags: ["performance", "load", "stress"]
+
+  security:
+    enabled: true
+    timeout: "15m"
+    parameters:
+      pii_detection: true
+      compliance_check: true
+      vulnerability_scan: false
+    dependencies: []
+    tags: ["security", "compliance", "pii"]
+
+  failure:
+    enabled: true
+    timeout: "20m"
+    parameters:
+      test_network_failures: true
+      test_database_failures: true
+      test_collector_failures: true
+      test_recovery: true
+    dependencies: ["comprehensive"]
+    tags: ["failure", "recovery", "resilience"]
+
+reporting:
+  formats: ["json", "html", "junit"]
+  output_dir: "./test-results"
+  metrics_collection: true
+  dashboard_generation: true
+  notifications:
+    enabled: false
+    channels: ["email", "slack"]
+    webhook: "${NOTIFICATION_WEBHOOK}"
+    email: "${NOTIFICATION_EMAIL}"
+
+security:
+  pii_detection:
+    enabled: true
+    categories:
+      - category: "email"
+        patterns:
+          - name: "email_pattern"
+            regex: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+            examples: ["user@example.com", "test@test.org"]
+      - category: "phone"
+        patterns:
+          - name: "us_phone"
+            regex: '(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})'
+            examples: ["555-123-4567", "(555) 123-4567", "+1-555-123-4567"]
+      - category: "ssn"
+        patterns:
+          - name: "ssn_pattern"
+            regex: '(?!000|666)[0-9]{3}-(?!00)[0-9]{2}-(?!0000)[0-9]{4}'
+            examples: ["123-45-6789"]
+      - category: "credit_card"
+        patterns:
+          - name: "credit_card_pattern"
+            regex: '(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12})'
+            examples: ["4532123456789012", "5412345678901234"]
+  
+  compliance_standards:
+    - standard: "GDPR"
+      enabled: true
+      checks:
+        - data_minimization
+        - consent_tracking
+        - right_to_erasure
+        - data_portability
+    - standard: "HIPAA"
+      enabled: true
+      checks:
+        - encryption_at_rest
+        - encryption_in_transit
+        - access_controls
+        - audit_logging
+    - standard: "PCI_DSS"
+      enabled: false
+      checks:
+        - no_card_storage
+        - encryption
+        - access_control
+        - monitoring
+    - standard: "SOC2"
+      enabled: false
+      checks:
+        - security_principle
+        - availability_principle
+        - processing_integrity
+        - confidentiality
+        - privacy
+  
+  vulnerability_scanning: false
+
+# Test data configuration
+test_data:
+  scale_factors:
+    small:
+      users: 100
+      products: 500
+      orders: 1000
+      activities: 10000
+    medium:
+      users: 1000
+      products: 5000
+      orders: 10000
+      activities: 100000
+    large:
+      users: 10000
+      products: 50000
+      orders: 100000
+      activities: 1000000
+  
+  workload_patterns:
+    steady:
+      qps: 100
+      duration: "5m"
+      distribution: "uniform"
+    burst:
+      base_qps: 50
+      burst_qps: 500
+      burst_duration: "30s"
+      burst_interval: "2m"
+    ramp:
+      start_qps: 10
+      end_qps: 200
+      ramp_duration: "5m"
+      hold_duration: "5m"
+    chaos:
+      min_qps: 10
+      max_qps: 300
+      change_interval: "30s"
+      
+# Performance baselines
+performance_baselines:
+  metrics:
+    postgresql_query_p95: 50  # milliseconds
+    postgresql_query_p99: 100
+    mysql_query_p95: 45
+    mysql_query_p99: 90
+    collector_processing_p95: 10
+    collector_processing_p99: 20
+    export_latency_p95: 100
+    export_latency_p99: 200
+  
+  thresholds:
+    error_rate: 0.01  # 1%
+    drop_rate: 0.001  # 0.1%
+    cpu_usage: 0.8    # 80%
+    memory_usage: 0.9 # 90%

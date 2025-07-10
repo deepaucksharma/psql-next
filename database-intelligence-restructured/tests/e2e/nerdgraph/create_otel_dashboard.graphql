@@ -1,0 +1,222 @@
+mutation CreateOtelPostgresDashboard($accountId: Int!) {
+  dashboardCreate(
+    accountId: $accountId
+    dashboard: {
+      name: "PostgreSQL OpenTelemetry Monitoring"
+      description: "PostgreSQL monitoring using OpenTelemetry metrics (migrated from OHI)"
+      permissions: PUBLIC_READ_WRITE
+      pages: [
+        {
+          name: "Bird's-Eye View"
+          description: "Overview of PostgreSQL performance metrics"
+          widgets: [
+            {
+              title: "Database"
+              layout: { column: 1, row: 1, width: 3, height: 3 }
+              configuration: {
+                bar: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT uniqueCount(attributes.db.postgresql.query_id) FROM Metric WHERE metricName LIKE 'postgres.slow_queries%' FACET attributes.db.name"
+                    }
+                  ]
+                }
+              }
+            }
+            {
+              title: "Average execution time (ms)"
+              layout: { column: 4, row: 1, width: 3, height: 3 }
+              configuration: {
+                bar: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT latest(postgres.slow_queries.elapsed_time) FROM Metric WHERE attributes.db.statement != '<insufficient privilege>' FACET attributes.db.statement"
+                    }
+                  ]
+                }
+              }
+            }
+            {
+              title: "Execution counts over time"
+              layout: { column: 7, row: 1, width: 3, height: 3 }
+              configuration: {
+                line: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT sum(postgres.slow_queries.count) FROM Metric TIMESERIES"
+                    }
+                  ]
+                }
+              }
+            }
+            {
+              title: "Top wait events"
+              layout: { column: 10, row: 1, width: 3, height: 3 }
+              configuration: {
+                bar: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT sum(postgres.wait_events) FROM Metric FACET attributes.db.wait_event.name WHERE attributes.db.wait_event.name IS NOT NULL"
+                    }
+                  ]
+                }
+              }
+            }
+            {
+              title: "Top n slowest queries"
+              layout: { column: 1, row: 4, width: 12, height: 5 }
+              configuration: {
+                table: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT latest(attributes.db.name) as 'Database', latest(attributes.db.statement) as 'Query', latest(attributes.db.schema) as 'Schema', latest(postgres.slow_queries.count) as 'Execution Count', latest(postgres.slow_queries.elapsed_time) as 'Avg Elapsed Time (ms)', latest(postgres.slow_queries.disk_reads) as 'Avg Disk Reads', latest(postgres.slow_queries.disk_writes) as 'Avg Disk Writes', latest(attributes.db.operation) as 'Statement Type' FROM Metric WHERE metricName LIKE 'postgres.slow_queries%' FACET attributes.db.postgresql.query_id LIMIT MAX"
+                    }
+                  ]
+                  initialSorting: { direction: DESC, name: "Avg Elapsed Time (ms)" }
+                }
+              }
+            }
+            {
+              title: "Disk IO usage (Avg disk reads)"
+              layout: { column: 1, row: 9, width: 6, height: 3 }
+              configuration: {
+                area: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT average(postgres.slow_queries.disk_reads) as 'Average Disk Reads' FROM Metric FACET attributes.db.name TIMESERIES"
+                    }
+                  ]
+                }
+              }
+            }
+            {
+              title: "Disk IO usage (Avg disk writes)"
+              layout: { column: 7, row: 9, width: 6, height: 3 }
+              configuration: {
+                area: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT average(postgres.slow_queries.disk_writes) as 'Average Disk Writes' FROM Metric FACET attributes.db.name TIMESERIES"
+                    }
+                  ]
+                }
+              }
+            }
+            {
+              title: "Blocking details"
+              layout: { column: 1, row: 12, width: 12, height: 5 }
+              configuration: {
+                table: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT latest(attributes.db.blocking.blocked_pid) as 'Blocked PID', latest(attributes.db.blocking.blocked_query) as 'Blocked Query', latest(attributes.db.blocking.blocked_query_id) as 'Blocked Query ID', latest(attributes.blocked_query_start) as 'Blocked Query Start', latest(attributes.db.name) as 'Database', latest(attributes.db.blocking.blocking_pid) as 'Blocking PID', latest(attributes.db.blocking.blocking_query) as 'Blocking Query', latest(attributes.db.blocking.blocking_query_id) as 'Blocking Query ID', latest(attributes.blocking_query_start) as 'Blocking Query Start', latest(attributes.blocking_database) as 'Blocking Database' FROM Metric WHERE metricName = 'postgres.blocking_sessions' FACET attributes.db.blocking.blocked_pid"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+        {
+          name: "Query Details"
+          description: "Detailed query performance analysis"
+          widgets: [
+            {
+              title: "Individual query details"
+              layout: { column: 1, row: 1, width: 12, height: 5 }
+              configuration: {
+                table: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT latest(attributes.db.statement) as 'Query Text', latest(postgres.individual_queries.cpu_time) as 'Avg CPU Time (ms)', latest(attributes.db.postgresql.query_id) as 'Query ID' FROM Metric WHERE metricName = 'postgres.individual_queries.cpu_time' FACET attributes.db.postgresql.plan_id LIMIT MAX"
+                    }
+                  ]
+                }
+              }
+            }
+            {
+              title: "Query execution plan details"
+              layout: { column: 1, row: 6, width: 12, height: 4 }
+              configuration: {
+                table: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT latest(attributes.db.plan.node_type) as 'Node Type', latest(attributes.db.postgresql.query_id) as 'Query ID', latest(attributes.query_text) as 'Query Text', latest(postgres.execution_plan.cost) as 'Total Cost', latest(attributes.startup_cost) as 'Startup Cost', latest(postgres.execution_plan.rows) as 'Plan Rows', latest(attributes.actual_startup_time) as 'Actual Startup Time', latest(postgres.execution_plan.time) as 'Actual Total Time', latest(attributes.actual_rows) as 'Actual Rows', latest(attributes.actual_loops) as 'Actual Loops', latest(postgres.execution_plan.blocks_hit) as 'Shared Hit Blocks', latest(postgres.execution_plan.blocks_read) as 'Shared Read Blocks', latest(attributes.shared_dirtied_blocks) as 'Shared Dirtied', latest(attributes.shared_written_blocks) as 'Shared Written', latest(attributes.local_hit_block) as 'Local Hit', latest(attributes.local_read_blocks) as 'Local Read', latest(attributes.local_dirtied_blocks) as 'Local Dirtied', latest(attributes.local_written_blocks) as 'Local Written', latest(attributes.temp_read_block) as 'Temp Read', latest(attributes.temp_written_blocks) as 'Temp Written', latest(attributes.db.name) as 'Database' FROM Metric WHERE metricName LIKE 'postgres.execution_plan%' FACET attributes.db.postgresql.plan_id, attributes.db.plan.level ORDER BY attributes.db.plan.level ASC"
+                    }
+                  ]
+                  initialSorting: { direction: ASC, name: "level_id" }
+                }
+              }
+            }
+          ]
+        }
+        {
+          name: "Wait Time Analysis"
+          description: "Analysis of database wait events"
+          widgets: [
+            {
+              title: "Top wait events over time"
+              layout: { column: 1, row: 1, width: 7, height: 4 }
+              configuration: {
+                line: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT sum(postgres.wait_events) FROM Metric FACET attributes.db.wait_event.name, attributes.db.wait_event.category WHERE attributes.db.wait_event.name IS NOT NULL TIMESERIES"
+                    }
+                  ]
+                }
+              }
+            }
+            {
+              title: "Wait event details"
+              layout: { column: 8, row: 1, width: 5, height: 4 }
+              configuration: {
+                table: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT count(*) as 'Count', latest(attributes.db.wait_event.name) as 'Wait Event', latest(attributes.db.wait_event.category) as 'Category', latest(attributes.db.name) as 'Database' FROM Metric WHERE metricName = 'postgres.wait_events' AND attributes.db.wait_event.name IS NOT NULL FACET attributes.db.wait_event.name, attributes.db.wait_event.category LIMIT 100"
+                    }
+                  ]
+                }
+              }
+            }
+            {
+              title: "PostgreSQL Core Metrics"
+              layout: { column: 1, row: 5, width: 12, height: 4 }
+              configuration: {
+                table: {
+                  nrqlQueries: [
+                    {
+                      accountIds: [$accountId]
+                      query: "SELECT latest(postgresql.backends) as 'Active Connections', latest(postgresql.commits) as 'Commits/sec', latest(postgresql.rollbacks) as 'Rollbacks/sec', latest(postgresql.db_size) as 'Database Size (bytes)', latest(postgresql.deadlocks) as 'Deadlocks', latest(postgresql.temp_files) as 'Temp Files' FROM Metric WHERE attributes.db.system = 'postgresql' FACET attributes.postgresql.database.name"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ) {
+    entityResult {
+      guid
+    }
+    errors {
+      description
+      type
+    }
+  }
+}

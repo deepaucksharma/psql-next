@@ -1,0 +1,428 @@
+# OHI to OpenTelemetry Metric Mappings
+# This file defines how OHI events and metrics map to OpenTelemetry equivalents
+
+ohi_to_otel_mappings:
+  # PostgreSQL Sample Metrics
+  PostgreSQLSample:
+    otel_metric_type: "Metric"
+    otel_filter: "db.system = 'postgresql'"
+    description: "Core PostgreSQL infrastructure metrics"
+    metrics:
+      # Connection Metrics
+      db.connections.active:
+        otel_name: "postgresql.connections.active"
+        type: "gauge"
+        transformation: "direct"
+        unit: "connections"
+      db.connections.idle:
+        otel_name: "postgresql.connections.idle"
+        type: "gauge"
+        transformation: "direct"
+      db.connections.max:
+        otel_name: "postgresql.connections.max"
+        type: "gauge"
+        transformation: "direct"
+      
+      # Transaction Metrics
+      db.commitsPerSecond:
+        otel_name: "postgresql.commits"
+        type: "counter"
+        transformation: "rate_per_second"
+        unit: "commits/s"
+      db.rollbacksPerSecond:
+        otel_name: "postgresql.rollbacks"
+        type: "counter"
+        transformation: "rate_per_second"
+        unit: "rollbacks/s"
+      
+      # Buffer Cache Metrics
+      db.bufferHitRatio:
+        otel_name: "calculated"
+        type: "gauge"
+        formula: "100 * postgresql.blocks.hit / (postgresql.blocks.hit + postgresql.blocks.read)"
+        unit: "percent"
+      db.reads.blocksPerSecond:
+        otel_name: "postgresql.blocks.read"
+        type: "counter"
+        transformation: "rate_per_second"
+        namespace_transform: "nested_to_flat"
+      db.writes.blocksPerSecond:
+        otel_name: "postgresql.blocks.written"
+        type: "counter"
+        transformation: "rate_per_second"
+        namespace_transform: "nested_to_flat"
+      
+      # Background Writer Metrics
+      db.bgwriter.checkpointsScheduledPerSecond:
+        otel_name: "postgresql.bgwriter.checkpoints.scheduled"
+        type: "counter"
+        transformation: "rate_per_second"
+      db.bgwriter.checkpointsRequestedPerSecond:
+        otel_name: "postgresql.bgwriter.checkpoints.requested"
+        type: "counter"
+        transformation: "rate_per_second"
+      db.bgwriter.buffersWrittenByBackgroundWriterPerSecond:
+        otel_name: "postgresql.bgwriter.buffers_written"
+        type: "counter"
+        transformation: "rate_per_second"
+      
+      # Database Size Metrics
+      db.database.sizeInBytes:
+        otel_name: "postgresql.database.size"
+        type: "gauge"
+        transformation: "direct"
+        unit: "bytes"
+      db.database.count:
+        otel_name: "postgresql.database.count"
+        type: "gauge"
+        transformation: "direct"
+      db.table.count:
+        otel_name: "postgresql.table.count"
+        type: "gauge"
+        transformation: "direct"
+      
+      # Replication Metrics
+      db.replication.lagInBytes:
+        otel_name: "postgresql.replication.lag_bytes"
+        type: "gauge"
+        transformation: "direct"
+        unit: "bytes"
+
+  # PostgreSQL Slow Query Events
+  PostgresSlowQueries:
+    otel_metric_type: "Metric"
+    otel_filter: "db.system = 'postgresql' AND db.query.duration > 500"
+    description: "Query performance metrics for slow queries"
+    attributes:
+      # Query Identification
+      query_id:
+        otel_name: "db.querylens.queryid"
+        type: "attribute"
+        transformation: "direct"
+      query_text:
+        otel_name: "db.statement"
+        type: "attribute"
+        transformation: "anonymize"
+        pii_safe: true
+      database_name:
+        otel_name: "db.name"
+        type: "attribute"
+        transformation: "direct"
+      schema_name:
+        otel_name: "db.schema"
+        type: "attribute"
+        transformation: "direct"
+      statement_type:
+        otel_name: "db.operation"
+        type: "attribute"
+        transformation: "uppercase"
+      
+      # Performance Metrics
+      execution_count:
+        otel_name: "db.query.calls"
+        type: "sum"
+        transformation: "direct"
+      avg_elapsed_time_ms:
+        otel_name: "db.query.execution_time_mean"
+        type: "gauge"
+        transformation: "direct"
+        unit: "ms"
+      total_exec_time:
+        otel_name: "db.query.total_time"
+        type: "sum"
+        transformation: "direct"
+        unit: "ms"
+      rows:
+        otel_name: "db.query.rows"
+        type: "sum"
+        transformation: "direct"
+      
+      # IO Metrics
+      avg_disk_reads:
+        otel_name: "db.query.disk_io.reads_avg"
+        type: "gauge"
+        transformation: "direct"
+      avg_disk_writes:
+        otel_name: "db.query.disk_io.writes_avg"
+        type: "gauge"
+        transformation: "direct"
+      
+      # Plan Metrics
+      plan_id:
+        otel_name: "db.plan.hash"
+        type: "attribute"
+        transformation: "direct"
+
+  # PostgreSQL Wait Events
+  PostgresWaitEvents:
+    otel_metric_type: "Metric"
+    otel_filter: "db.system = 'postgresql' AND wait.event_name IS NOT NULL"
+    description: "Database wait event tracking"
+    attributes:
+      wait_event_name:
+        otel_name: "wait.event_name"
+        type: "attribute"
+        transformation: "direct"
+        special_values:
+          "<nil>": null
+      wait_category:
+        otel_name: "wait.event_type"
+        type: "attribute"
+        transformation: "direct"
+      total_wait_time_ms:
+        otel_name: "wait.duration_ms"
+        type: "sum"
+        transformation: "sum_aggregation"
+        unit: "ms"
+      database_name:
+        otel_name: "db.name"
+        type: "attribute"
+        transformation: "direct"
+      query_id:
+        otel_name: "db.querylens.queryid"
+        type: "attribute"
+        transformation: "direct"
+
+  # PostgreSQL Blocking Sessions
+  PostgresBlockingSessions:
+    otel_metric_type: "Log"
+    otel_filter: "db.system = 'postgresql' AND blocking.detected = true"
+    description: "Blocking session detection and tracking"
+    attributes:
+      # Blocked Session Info
+      blocked_pid:
+        otel_name: "session.blocked.pid"
+        type: "attribute"
+        transformation: "direct"
+      blocked_query:
+        otel_name: "session.blocked.query"
+        type: "attribute"
+        transformation: "anonymize"
+        pii_safe: true
+      blocked_query_id:
+        otel_name: "session.blocked.query_id"
+        type: "attribute"
+        transformation: "direct"
+      blocked_query_start:
+        otel_name: "session.blocked.start_time"
+        type: "attribute"
+        transformation: "timestamp"
+      
+      # Blocking Session Info
+      blocking_pid:
+        otel_name: "session.blocking.pid"
+        type: "attribute"
+        transformation: "direct"
+      blocking_query:
+        otel_name: "session.blocking.query"
+        type: "attribute"
+        transformation: "anonymize"
+        pii_safe: true
+      blocking_query_id:
+        otel_name: "session.blocking.query_id"
+        type: "attribute"
+        transformation: "direct"
+      blocking_query_start:
+        otel_name: "session.blocking.start_time"
+        type: "attribute"
+        transformation: "timestamp"
+      
+      # Database Info
+      database_name:
+        otel_name: "db.name"
+        type: "attribute"
+        transformation: "direct"
+      blocking_database:
+        otel_name: "db.blocking.name"
+        type: "attribute"
+        transformation: "direct"
+
+  # PostgreSQL Individual Queries
+  PostgresIndividualQueries:
+    otel_metric_type: "Metric"
+    otel_filter: "db.system = 'postgresql'"
+    description: "Individual query execution details"
+    attributes:
+      query_id:
+        otel_name: "db.querylens.queryid"
+        type: "attribute"
+        transformation: "direct"
+      query_text:
+        otel_name: "db.statement"
+        type: "attribute"
+        transformation: "anonymize"
+        pii_safe: true
+      avg_cpu_time_ms:
+        otel_name: "db.query.cpu_time_mean"
+        type: "gauge"
+        transformation: "direct"
+        unit: "ms"
+        default_value: "NA"
+      plan_id:
+        otel_name: "db.plan.hash"
+        type: "attribute"
+        transformation: "direct"
+
+  # PostgreSQL Execution Plan Metrics
+  PostgresExecutionPlanMetrics:
+    otel_metric_type: "Metric"
+    otel_filter: "db.system = 'postgresql' AND db.plan.node_type IS NOT NULL"
+    description: "Query execution plan analysis"
+    attributes:
+      # Plan Identification
+      plan_id:
+        otel_name: "db.plan.hash"
+        type: "attribute"
+        transformation: "direct"
+      level_id:
+        otel_name: "db.plan.level"
+        type: "attribute"
+        transformation: "direct"
+      node_type:
+        otel_name: "db.plan.node_type"
+        type: "attribute"
+        transformation: "direct"
+      
+      # Query Info
+      query_id:
+        otel_name: "db.querylens.queryid"
+        type: "attribute"
+        transformation: "direct"
+      query_text:
+        otel_name: "db.statement"
+        type: "attribute"
+        transformation: "anonymize"
+        pii_safe: true
+      database_name:
+        otel_name: "db.name"
+        type: "attribute"
+        transformation: "direct"
+      
+      # Cost Metrics
+      total_cost:
+        otel_name: "db.plan.cost.total"
+        type: "gauge"
+        transformation: "direct"
+      startup_cost:
+        otel_name: "db.plan.cost.startup"
+        type: "gauge"
+        transformation: "direct"
+      plan_rows:
+        otel_name: "db.plan.rows.estimated"
+        type: "gauge"
+        transformation: "direct"
+      
+      # Actual Performance
+      actual_startup_time:
+        otel_name: "db.plan.time.startup_actual"
+        type: "gauge"
+        transformation: "direct"
+        unit: "ms"
+      actual_total_time:
+        otel_name: "db.plan.time.total_actual"
+        type: "gauge"
+        transformation: "direct"
+        unit: "ms"
+      actual_rows:
+        otel_name: "db.plan.rows.actual"
+        type: "gauge"
+        transformation: "direct"
+      actual_loops:
+        otel_name: "db.plan.loops"
+        type: "gauge"
+        transformation: "direct"
+      
+      # Block Statistics
+      shared_hit_block:
+        otel_name: "db.plan.blocks.shared_hit"
+        type: "sum"
+        transformation: "direct"
+      shared_read_blocks:
+        otel_name: "db.plan.blocks.shared_read"
+        type: "sum"
+        transformation: "direct"
+      shared_dirtied_blocks:
+        otel_name: "db.plan.blocks.shared_dirtied"
+        type: "sum"
+        transformation: "direct"
+      shared_written_blocks:
+        otel_name: "db.plan.blocks.shared_written"
+        type: "sum"
+        transformation: "direct"
+      local_hit_block:
+        otel_name: "db.plan.blocks.local_hit"
+        type: "sum"
+        transformation: "direct"
+      local_read_blocks:
+        otel_name: "db.plan.blocks.local_read"
+        type: "sum"
+        transformation: "direct"
+      local_dirtied_blocks:
+        otel_name: "db.plan.blocks.local_dirtied"
+        type: "sum"
+        transformation: "direct"
+      local_written_blocks:
+        otel_name: "db.plan.blocks.local_written"
+        type: "sum"
+        transformation: "direct"
+      temp_read_block:
+        otel_name: "db.plan.blocks.temp_read"
+        type: "sum"
+        transformation: "direct"
+      temp_written_blocks:
+        otel_name: "db.plan.blocks.temp_written"
+        type: "sum"
+        transformation: "direct"
+
+# Transformation Definitions
+transformations:
+  direct:
+    description: "No transformation needed"
+  
+  rate_per_second:
+    description: "Convert counter to rate per second"
+    formula: "delta / time_interval_seconds"
+  
+  anonymize:
+    description: "Remove PII and normalize query"
+    steps:
+      - "Replace literals with placeholders"
+      - "Remove comments"
+      - "Normalize whitespace"
+      - "Hash if needed"
+  
+  uppercase:
+    description: "Convert to uppercase"
+  
+  sum_aggregation:
+    description: "Sum values over time window"
+  
+  timestamp:
+    description: "Convert to ISO timestamp format"
+  
+  nested_to_flat:
+    description: "Convert nested namespace to flat"
+    example: "db.reads.blocksPerSecond → postgresql.blocks.read"
+
+# Special Value Mappings
+special_values:
+  "<nil>": null
+  "<insufficient privilege>": "[REDACTED]"
+  "NA": null
+  "": null
+
+# Validation Rules
+validation_rules:
+  accuracy_thresholds:
+    critical_metrics: 0.99  # 99% accuracy for critical metrics
+    standard_metrics: 0.95  # 95% accuracy for standard metrics
+    derived_metrics: 0.90   # 90% accuracy for calculated metrics
+  
+  timing_tolerance:
+    collection_skew: "30s"  # Max time difference between OHI and OTEL
+    aggregation_window: "5m" # Time window for comparisons
+  
+  cardinality_limits:
+    max_unique_queries: 10000
+    max_unique_attributes: 1000
+    max_events_per_minute: 100000
