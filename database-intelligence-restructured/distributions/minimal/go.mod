@@ -1,4 +1,4 @@
-module github.com/database-intelligence/distributions/minimal
+module github.com/deepaksharma/db-otel/components/distributions/minimal
 
 go 1.23.0
 
@@ -121,8 +121,8 @@ require (
 )
 
 replace (
-	github.com/database-intelligence/common => ../../common
-	github.com/database-intelligence/common/featuredetector => ../../common/featuredetector
-	github.com/database-intelligence/processors/adaptivesampler => ../../processors/adaptivesampler
-	github.com/database-intelligence/processors/circuitbreaker => ../../processors/circuitbreaker
+	github.com/deepaksharma/db-otel/components/common => ../../common
+	github.com/deepaksharma/db-otel/components/common/featuredetector => ../../common/featuredetector
+	github.com/deepaksharma/db-otel/components/processors/adaptivesampler => ../../processors/adaptivesampler
+	github.com/deepaksharma/db-otel/components/processors/circuitbreaker => ../../processors/circuitbreaker
 )

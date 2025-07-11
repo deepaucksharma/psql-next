@@ -1,4 +1,4 @@
-module github.com/database-intelligence/tests/e2e
+module github.com/deepaksharma/db-otel/components/tests/e2e
 
 go 1.22.0
 
@@ -22,8 +22,8 @@ require (
 )
 
 replace (
-	github.com/database-intelligence/common => ../../common
-	github.com/database-intelligence/processors/adaptivesampler => ../../processors/adaptivesampler
-	github.com/database-intelligence/processors/circuitbreaker => ../../processors/circuitbreaker
-	github.com/database-intelligence/processors/verification => ../../processors/verification
+	github.com/deepaksharma/db-otel/components/common => ../../common
+	github.com/deepaksharma/db-otel/components/processors/adaptivesampler => ../../processors/adaptivesampler
+	github.com/deepaksharma/db-otel/components/processors/circuitbreaker => ../../processors/circuitbreaker
+	github.com/deepaksharma/db-otel/components/processors/verification => ../../processors/verification
 )

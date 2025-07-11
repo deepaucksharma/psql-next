@@ -36,18 +36,18 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor"
 	
 	// Import custom processors - Database specific
-	"github.com/database-intelligence/processors/adaptivesampler"
-	"github.com/database-intelligence/processors/circuitbreaker"
-	"github.com/database-intelligence/processors/planattributeextractor"
-	"github.com/database-intelligence/processors/verification"
+	"github.com/deepaksharma/db-otel/components/processors/adaptivesampler"
+	"github.com/deepaksharma/db-otel/components/processors/circuitbreaker"
+	"github.com/deepaksharma/db-otel/components/processors/planattributeextractor"
+	"github.com/deepaksharma/db-otel/components/processors/verification"
 	
 	// Import enterprise processors - New for 2025 patterns
-	"github.com/database-intelligence/processors/nrerrormonitor"
-	"github.com/database-intelligence/processors/costcontrol"
-	"github.com/database-intelligence/processors/querycorrelator"
+	"github.com/deepaksharma/db-otel/components/processors/nrerrormonitor"
+	"github.com/deepaksharma/db-otel/components/processors/costcontrol"
+	"github.com/deepaksharma/db-otel/components/processors/querycorrelator"
 	
 	// Import extensions
-	"github.com/database-intelligence/extensions/healthcheck"
+	"github.com/deepaksharma/db-otel/components/extensions/healthcheck"
 )
 
 func main() {

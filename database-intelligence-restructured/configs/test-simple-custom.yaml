@@ -1,0 +1,46 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 512
+  
+  batch:
+    send_batch_size: 1000
+    timeout: 10s
+  
+  adaptivesampler:
+    default_sample_rate: 0.1
+    min_sample_rate: 0.01
+    high_cost_threshold: 1000
+    sync_interval: 30s
+    in_memory_only: true
+    
+  querycorrelator:
+    retention_period: 24h
+    cleanup_interval: 1h
+    max_queries_tracked: 10000
+
+exporters:
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, querycorrelator, batch]
+      exporters: [debug]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, adaptivesampler, batch]
+      exporters: [debug]
+      
+  telemetry:
+    logs:
+      level: info

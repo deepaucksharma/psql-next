@@ -1,0 +1,267 @@
+# Test configuration for Database Intelligence Collector
+# Generates sample metrics to test the dashboard
+
+receivers:
+  # OTLP receiver for test data generation
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  
+  # ASH receiver for database monitoring
+  ash:
+    driver: postgres
+    datasource: "${DB_CONNECTION_STRING}"
+    collection_interval: 30s
+    sampling:
+      base_rate: 0.1
+      min_rate: 0.01
+      max_rate: 0.5
+      adaptive_mode: true
+    buffer_size: 10000
+    retention_duration: 24h
+    aggregation_windows: [1m, 5m, 1h]
+    enable_feature_detection: true
+    enable_wait_analysis: true
+    enable_blocking_analysis: true
+    slow_query_threshold_ms: 1000
+    blocked_session_threshold: 3
+  
+  # Kernel metrics for system-level monitoring
+  kernelmetrics:
+    collection_interval: 10s
+    target_process:
+      process_name: "postgres"
+      follow_children: true
+    programs:
+      syscall_trace: true
+      file_io_trace: true
+      network_trace: false
+      memory_trace: false
+      cpu_profile: true
+      lock_trace: true
+      db_query_trace: true
+      db_conn_trace: true
+    buffer_size: 8192
+    ring_buffer_size: 8388608  # 8MB
+    cpu_limit: 5.0
+    memory_limit_mb: 100
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  
+  # Batch processor for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    send_batch_max_size: 2000
+  
+  # Adaptive sampler for logs
+  adaptivesampler:
+    in_memory_only: true
+    deduplication:
+      enabled: true
+      window: 5m
+      cache_size: 10000
+    rules:
+      - name: "high_frequency_queries"
+        pattern: "SELECT.*FROM pg_"
+        sample_rate: 0.01
+        rate_limit: 10
+      - name: "error_logs"
+        pattern: "ERROR|FATAL|PANIC"
+        sample_rate: 1.0
+        rate_limit: 100
+      - name: "slow_queries"
+        pattern: "duration:.*[0-9]{4,}"
+        sample_rate: 0.5
+        rate_limit: 50
+    default_sample_rate: 0.1
+    max_records_per_second: 1000
+  
+  # Circuit breaker for resilience
+  circuit_breaker:
+    failure_threshold: 5
+    success_threshold: 3
+    timeout: 30s
+    half_open_max_requests: 3
+    adaptive_timeout:
+      enabled: true
+      min_timeout: 1s
+      max_timeout: 30s
+    resource_monitoring:
+      enabled: true
+      memory_threshold_mb: 512
+      cpu_threshold_percent: 80
+    health_check:
+      enabled: true
+      interval: 10s
+  
+  # Cost control processor
+  costcontrol:
+    monitoring:
+      enabled: true
+      interval: 1m
+    limits:
+      max_bytes_per_minute: 10485760  # 10MB
+      max_metrics_per_minute: 100000
+      max_logs_per_minute: 50000
+    monthly_budget_usd: 1000
+    cost_per_gb_usd: 0.50
+    action_on_limit: "throttle"
+    throttle_percent: 50
+  
+  # NR error monitor
+  nrerrormonitor:
+    check_interval: 30s
+    attribute_limits:
+      max_length: 4095
+      max_count: 254
+    metric_name_max_length: 255
+    high_cardinality_threshold: 1000
+    error_categories:
+      - missing_attribute
+      - attribute_too_long
+      - metric_name_too_long
+      - high_cardinality
+      - invalid_metric_type
+      - invalid_sum_metric
+  
+  # Plan attribute extractor
+  planattributeextractor:
+    timeout_ms: 100
+    extract_tables: true
+    extract_indexes: true
+    extract_costs: true
+    error_mode: "ignore"
+  
+  # Query correlator
+  querycorrelator:
+    retention_period: 10m
+    cleanup_interval: 1m
+    enable_table_correlation: true
+    enable_database_correlation: true
+    max_queries_tracked: 5000
+    correlation_attributes:
+      add_query_category: true
+      add_table_stats: true
+      add_load_contribution: true
+      add_maintenance_indicators: true
+    query_categorization:
+      slow_threshold_ms: 1000
+      moderate_threshold_ms: 100
+  
+  # Verification processor
+  verification:
+    enabled: true
+    verification_rules:
+      - name: "validate_timestamps"
+        type: "timestamp"
+        action: "reject_invalid"
+      - name: "validate_checksums"
+        type: "checksum"
+        action: "log_invalid"
+
+exporters:
+  # Debug exporter for testing
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+  
+  # New Relic exporter
+  otlp/newrelic:
+    endpoint: "otlp.nr-data.net:4317"
+    compression: gzip
+    headers:
+      api-key: "${NEW_RELIC_API_KEY}"
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+  
+  # NRI exporter for Infrastructure
+  nri:
+    integration_name: "com.newrelic.database-intelligence"
+    integration_version: "2.0.0"
+    protocol_version: 4
+    output_mode: "stdout"  # Change to "http" for production
+    http_endpoint: "https://infrastructure-api.newrelic.com/v1"
+    entity:
+      type: "DATABASE"
+      name_source: "db.name"
+      display_name_template: "{{.db.system}} - {{.db.name}}"
+      attributes:
+        provider: "database-intelligence"
+        environment: "${ENVIRONMENT:development}"
+    metric_rules:
+      - source_pattern: "db\\..*"
+        target_name: "database.{{.metric_suffix}}"
+        nri_type: "GAUGE"
+        scale_factor: 1.0
+        include_attributes: ["db.*", "database.*"]
+      - source_pattern: "kernel\\..*"
+        target_name: "system.{{.metric_suffix}}"
+        nri_type: "GAUGE"
+        scale_factor: 1.0
+        include_attributes: ["process", "function", "syscall"]
+    event_rules:
+      - source_pattern: ".*ERROR.*"
+        event_type: "DatabaseError"
+        category: "ERROR"
+        summary_template: "Database error in {{.db.name}}: {{.error.message}}"
+    timeout: 30s
+
+service:
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers: [otlp, ash, kernelmetrics]
+      processors: 
+        - memory_limiter
+        - batch
+        - costcontrol
+        - nrerrormonitor
+        - querycorrelator
+      exporters: [debug, otlp/newrelic, nri]
+    
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - batch
+        - costcontrol
+        - adaptivesampler
+        - circuit_breaker
+        - planattributeextractor
+        - verification
+      exporters: [debug, otlp/newrelic, nri]
+  
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: "database-intelligence-collector"
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+# Extensions can be added here if needed
+extensions: {}
+
+# Environment variables needed:
+# - NEW_RELIC_API_KEY: Your New Relic Ingest API key
+# - DB_CONNECTION_STRING: PostgreSQL connection string
+# - ENVIRONMENT: deployment environment (development/staging/production)

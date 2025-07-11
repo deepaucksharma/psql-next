@@ -1,20 +1,20 @@
-module github.com/database-intelligence/core
+module github.com/deepaksharma/db-otel/components/core
 
 go 1.23
 
 require (
-	github.com/database-intelligence/processors/adaptivesampler v0.0.0
-	github.com/database-intelligence/processors/circuitbreaker v0.0.0
-	github.com/database-intelligence/processors/costcontrol v0.0.0
-	github.com/database-intelligence/processors/nrerrormonitor v0.0.0
-	github.com/database-intelligence/processors/planattributeextractor v0.0.0
-	github.com/database-intelligence/processors/querycorrelator v0.0.0
-	github.com/database-intelligence/processors/verification v0.0.0
-	github.com/database-intelligence/extensions/healthcheck v0.0.0
-	github.com/database-intelligence/exporters/nri v0.0.0
-	github.com/database-intelligence/receivers/ash v0.0.0
-	github.com/database-intelligence/receivers/enhancedsql v0.0.0
-	github.com/database-intelligence/receivers/kernelmetrics v0.0.0
+	github.com/deepaksharma/db-otel/components/processors/adaptivesampler v0.0.0
+	github.com/deepaksharma/db-otel/components/processors/circuitbreaker v0.0.0
+	github.com/deepaksharma/db-otel/components/processors/costcontrol v0.0.0
+	github.com/deepaksharma/db-otel/components/processors/nrerrormonitor v0.0.0
+	github.com/deepaksharma/db-otel/components/processors/planattributeextractor v0.0.0
+	github.com/deepaksharma/db-otel/components/processors/querycorrelator v0.0.0
+	github.com/deepaksharma/db-otel/components/processors/verification v0.0.0
+	github.com/deepaksharma/db-otel/components/extensions/healthcheck v0.0.0
+	github.com/deepaksharma/db-otel/components/exporters/nri v0.0.0
+	github.com/deepaksharma/db-otel/components/receivers/ash v0.0.0
+	github.com/deepaksharma/db-otel/components/receivers/enhancedsql v0.0.0
+	github.com/deepaksharma/db-otel/components/receivers/kernelmetrics v0.0.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter v0.129.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter v0.129.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.129.0
@@ -41,19 +41,19 @@ require (
 )
 
 replace (
-	github.com/database-intelligence/processors/adaptivesampler => ../processors/adaptivesampler
-	github.com/database-intelligence/processors/circuitbreaker => ../processors/circuitbreaker
-	github.com/database-intelligence/processors/costcontrol => ../processors/costcontrol
-	github.com/database-intelligence/processors/nrerrormonitor => ../processors/nrerrormonitor
-	github.com/database-intelligence/processors/planattributeextractor => ../processors/planattributeextractor
-	github.com/database-intelligence/processors/querycorrelator => ../processors/querycorrelator
-	github.com/database-intelligence/processors/verification => ../processors/verification
-	github.com/database-intelligence/extensions/healthcheck => ../extensions/healthcheck
-	github.com/database-intelligence/exporters/nri => ../exporters/nri
-	github.com/database-intelligence/receivers/ash => ../receivers/ash
-	github.com/database-intelligence/receivers/enhancedsql => ../receivers/enhancedsql
-	github.com/database-intelligence/receivers/kernelmetrics => ../receivers/kernelmetrics
-	github.com/database-intelligence/common => ../common
-	github.com/database-intelligence/common/featuredetector => ../common/featuredetector
-	github.com/database-intelligence/common/queryselector => ../common/queryselector
+	github.com/deepaksharma/db-otel/components/processors/adaptivesampler => ../processors/adaptivesampler
+	github.com/deepaksharma/db-otel/components/processors/circuitbreaker => ../processors/circuitbreaker
+	github.com/deepaksharma/db-otel/components/processors/costcontrol => ../processors/costcontrol
+	github.com/deepaksharma/db-otel/components/processors/nrerrormonitor => ../processors/nrerrormonitor
+	github.com/deepaksharma/db-otel/components/processors/planattributeextractor => ../processors/planattributeextractor
+	github.com/deepaksharma/db-otel/components/processors/querycorrelator => ../processors/querycorrelator
+	github.com/deepaksharma/db-otel/components/processors/verification => ../processors/verification
+	github.com/deepaksharma/db-otel/components/extensions/healthcheck => ../extensions/healthcheck
+	github.com/deepaksharma/db-otel/components/exporters/nri => ../exporters/nri
+	github.com/deepaksharma/db-otel/components/receivers/ash => ../receivers/ash
+	github.com/deepaksharma/db-otel/components/receivers/enhancedsql => ../receivers/enhancedsql
+	github.com/deepaksharma/db-otel/components/receivers/kernelmetrics => ../receivers/kernelmetrics
+	github.com/deepaksharma/db-otel/components/common => ../common
+	github.com/deepaksharma/db-otel/components/common/featuredetector => ../common/featuredetector
+	github.com/deepaksharma/db-otel/components/common/queryselector => ../common/queryselector
 )

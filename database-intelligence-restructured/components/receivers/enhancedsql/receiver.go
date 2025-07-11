@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 	
-	"github.com/database-intelligence/common/featuredetector"
-	"github.com/database-intelligence/common/queryselector"
-	"github.com/database-intelligence/internal/database"
+	"github.com/deepaksharma/db-otel/common/featuredetector"
+	"github.com/deepaksharma/db-otel/common/queryselector"
+	"github.com/deepaksharma/db-otel/internal/database"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"

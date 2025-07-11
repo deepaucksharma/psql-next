@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 	
-	"github.com/database-intelligence/common/featuredetector"
-	"github.com/database-intelligence/common/queryselector"
+	"github.com/deepaksharma/db-otel/common/featuredetector"
+	"github.com/deepaksharma/db-otel/common/queryselector"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"

@@ -1,18 +1,18 @@
-module github.com/database-intelligence/tests
+module github.com/deepaksharma/db-otel/components/tests
 
 go 1.22
 
 replace (
-	github.com/database-intelligence/common => ../common
-	github.com/database-intelligence/common/featuredetector => ../common/featuredetector
-	github.com/database-intelligence/common/queryselector => ../common/queryselector
-	github.com/database-intelligence/exporters/nri => ../exporters/nri
-	github.com/database-intelligence/extensions/healthcheck => ../extensions/healthcheck
-	github.com/database-intelligence/processors/adaptivesampler => ../processors/adaptivesampler
-	github.com/database-intelligence/processors/circuitbreaker => ../processors/circuitbreaker
-	github.com/database-intelligence/processors/costcontrol => ../processors/costcontrol
-	github.com/database-intelligence/processors/nrerrormonitor => ../processors/nrerrormonitor
-	github.com/database-intelligence/processors/planattributeextractor => ../processors/planattributeextractor
-	github.com/database-intelligence/processors/querycorrelator => ../processors/querycorrelator
-	github.com/database-intelligence/processors/verification => ../processors/verification
+	github.com/deepaksharma/db-otel/components/common => ../common
+	github.com/deepaksharma/db-otel/components/common/featuredetector => ../common/featuredetector
+	github.com/deepaksharma/db-otel/components/common/queryselector => ../common/queryselector
+	github.com/deepaksharma/db-otel/components/exporters/nri => ../exporters/nri
+	github.com/deepaksharma/db-otel/components/extensions/healthcheck => ../extensions/healthcheck
+	github.com/deepaksharma/db-otel/components/processors/adaptivesampler => ../processors/adaptivesampler
+	github.com/deepaksharma/db-otel/components/processors/circuitbreaker => ../processors/circuitbreaker
+	github.com/deepaksharma/db-otel/components/processors/costcontrol => ../processors/costcontrol
+	github.com/deepaksharma/db-otel/components/processors/nrerrormonitor => ../processors/nrerrormonitor
+	github.com/deepaksharma/db-otel/components/processors/planattributeextractor => ../processors/planattributeextractor
+	github.com/deepaksharma/db-otel/components/processors/querycorrelator => ../processors/querycorrelator
+	github.com/deepaksharma/db-otel/components/processors/verification => ../processors/verification
 )

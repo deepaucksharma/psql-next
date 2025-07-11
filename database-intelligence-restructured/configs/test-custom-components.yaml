@@ -1,0 +1,62 @@
+# Test configuration for custom components
+receivers:
+  # Standard receiver
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  
+  # Custom ASH receiver
+  ash:
+    endpoint: ${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}
+    username: ${POSTGRES_USER:-postgres}
+    password: ${POSTGRES_PASSWORD:-postgres}
+    database: postgres
+    collection_interval: 1s
+    sample_size: 100
+
+processors:
+  # Standard processors
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 512
+  
+  batch:
+    send_batch_size: 1000
+    timeout: 10s
+  
+  # Custom processors
+  adaptivesampler:
+    sampling_percentage: 10
+    
+  querycorrelator:
+    retention_period: 24h
+    cleanup_interval: 1h
+    max_queries_tracked: 10000
+    
+  costcontrol:
+    max_cost_per_minute: 100
+    
+  verification:
+    enabled: true
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 2
+    sampling_thereafter: 100
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp, ash]
+      processors: [memory_limiter, adaptivesampler, querycorrelator, costcontrol, verification, batch]
+      exporters: [debug]
+      
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed

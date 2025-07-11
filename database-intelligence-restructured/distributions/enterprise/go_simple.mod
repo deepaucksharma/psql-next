@@ -1,4 +1,4 @@
-module github.com/database-intelligence/distributions/enterprise
+module github.com/deepaksharma/db-otel/components/distributions/enterprise
 
 go 1.22
 
@@ -19,46 +19,46 @@ require (
     go.opentelemetry.io/collector/receiver/otlpreceiver v0.130.0
     
     // Custom processors
-    github.com/database-intelligence/processors/adaptivesampler v0.0.0-00010101000000-000000000000
-    github.com/database-intelligence/processors/circuitbreaker v0.0.0-00010101000000-000000000000
-    github.com/database-intelligence/processors/costcontrol v0.0.0-00010101000000-000000000000
-    github.com/database-intelligence/processors/nrerrormonitor v0.0.0-00010101000000-000000000000
-    github.com/database-intelligence/processors/planattributeextractor v0.0.0-00010101000000-000000000000
-    github.com/database-intelligence/processors/querycorrelator v0.0.0-00010101000000-000000000000
-    github.com/database-intelligence/processors/verification v0.0.0-00010101000000-000000000000
+    github.com/deepaksharma/db-otel/components/processors/adaptivesampler v0.0.0-00010101000000-000000000000
+    github.com/deepaksharma/db-otel/components/processors/circuitbreaker v0.0.0-00010101000000-000000000000
+    github.com/deepaksharma/db-otel/components/processors/costcontrol v0.0.0-00010101000000-000000000000
+    github.com/deepaksharma/db-otel/components/processors/nrerrormonitor v0.0.0-00010101000000-000000000000
+    github.com/deepaksharma/db-otel/components/processors/planattributeextractor v0.0.0-00010101000000-000000000000
+    github.com/deepaksharma/db-otel/components/processors/querycorrelator v0.0.0-00010101000000-000000000000
+    github.com/deepaksharma/db-otel/components/processors/verification v0.0.0-00010101000000-000000000000
 )
 
 // Replace directives for local development
 replace (
-    github.com/database-intelligence/processors/adaptivesampler => ../../processors/adaptivesampler
-    github.com/database-intelligence/processors/circuitbreaker => ../../processors/circuitbreaker
-    github.com/database-intelligence/processors/costcontrol => ../../processors/costcontrol
-    github.com/database-intelligence/processors/nrerrormonitor => ../../processors/nrerrormonitor
-    github.com/database-intelligence/processors/planattributeextractor => ../../processors/planattributeextractor
-    github.com/database-intelligence/processors/querycorrelator => ../../processors/querycorrelator
-    github.com/database-intelligence/processors/verification => ../../processors/verification
+    github.com/deepaksharma/db-otel/components/processors/adaptivesampler => ../../processors/adaptivesampler
+    github.com/deepaksharma/db-otel/components/processors/circuitbreaker => ../../processors/circuitbreaker
+    github.com/deepaksharma/db-otel/components/processors/costcontrol => ../../processors/costcontrol
+    github.com/deepaksharma/db-otel/components/processors/nrerrormonitor => ../../processors/nrerrormonitor
+    github.com/deepaksharma/db-otel/components/processors/planattributeextractor => ../../processors/planattributeextractor
+    github.com/deepaksharma/db-otel/components/processors/querycorrelator => ../../processors/querycorrelator
+    github.com/deepaksharma/db-otel/components/processors/verification => ../../processors/verification
     
     // Common dependencies
-    github.com/database-intelligence/common/anonutils => ../../common/anonutils
-    github.com/database-intelligence/common/detectutils => ../../common/detectutils
-    github.com/database-intelligence/common/featuredetector => ../../common/featuredetector
-    github.com/database-intelligence/common/newrelicutils => ../../common/newrelicutils
-    github.com/database-intelligence/common/piidetector => ../../common/piidetector
-    github.com/database-intelligence/common/querylens => ../../common/querylens
-    github.com/database-intelligence/common/queryparser => ../../common/queryparser
-    github.com/database-intelligence/common/queryselector => ../../common/queryselector
-    github.com/database-intelligence/common/sqltokenizer => ../../common/sqltokenizer
-    github.com/database-intelligence/common/telemetry => ../../common/telemetry
-    github.com/database-intelligence/common/utils => ../../common/utils
+    github.com/deepaksharma/db-otel/components/common/anonutils => ../../common/anonutils
+    github.com/deepaksharma/db-otel/components/common/detectutils => ../../common/detectutils
+    github.com/deepaksharma/db-otel/components/common/featuredetector => ../../common/featuredetector
+    github.com/deepaksharma/db-otel/components/common/newrelicutils => ../../common/newrelicutils
+    github.com/deepaksharma/db-otel/components/common/piidetector => ../../common/piidetector
+    github.com/deepaksharma/db-otel/components/common/querylens => ../../common/querylens
+    github.com/deepaksharma/db-otel/components/common/queryparser => ../../common/queryparser
+    github.com/deepaksharma/db-otel/components/common/queryselector => ../../common/queryselector
+    github.com/deepaksharma/db-otel/components/common/sqltokenizer => ../../common/sqltokenizer
+    github.com/deepaksharma/db-otel/components/common/telemetry => ../../common/telemetry
+    github.com/deepaksharma/db-otel/components/common/utils => ../../common/utils
     
     // Core dependencies
-    github.com/database-intelligence/core/clientauth => ../../core/clientauth
-    github.com/database-intelligence/core/costengine => ../../core/costengine
-    github.com/database-intelligence/core/errorhandler => ../../core/errorhandler
-    github.com/database-intelligence/core/errormonitor => ../../core/errormonitor
-    github.com/database-intelligence/core/healthcheck => ../../core/healthcheck
-    github.com/database-intelligence/core/multidb => ../../core/multidb
-    github.com/database-intelligence/core/queryanalyzer => ../../core/queryanalyzer
-    github.com/database-intelligence/core/ratelimiter => ../../core/ratelimiter
-    github.com/database-intelligence/core/verification => ../../core/verification
+    github.com/deepaksharma/db-otel/components/core/clientauth => ../../core/clientauth
+    github.com/deepaksharma/db-otel/components/core/costengine => ../../core/costengine
+    github.com/deepaksharma/db-otel/components/core/errorhandler => ../../core/errorhandler
+    github.com/deepaksharma/db-otel/components/core/errormonitor => ../../core/errormonitor
+    github.com/deepaksharma/db-otel/components/core/healthcheck => ../../core/healthcheck
+    github.com/deepaksharma/db-otel/components/core/multidb => ../../core/multidb
+    github.com/deepaksharma/db-otel/components/core/queryanalyzer => ../../core/queryanalyzer
+    github.com/deepaksharma/db-otel/components/core/ratelimiter => ../../core/ratelimiter
+    github.com/deepaksharma/db-otel/components/core/verification => ../../core/verification
 )

@@ -1,9 +1,9 @@
-module github.com/database-intelligence/common
+module github.com/deepaksharma/db-otel/components/common
 
 go 1.22
 
 replace (
-	github.com/database-intelligence/common => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common
-	github.com/database-intelligence/common/featuredetector => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common/featuredetector
-	github.com/database-intelligence/common/queryselector => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common/queryselector
+	github.com/deepaksharma/db-otel/components/common => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common
+	github.com/deepaksharma/db-otel/components/common/featuredetector => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common/featuredetector
+	github.com/deepaksharma/db-otel/components/common/queryselector => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common/queryselector
 )

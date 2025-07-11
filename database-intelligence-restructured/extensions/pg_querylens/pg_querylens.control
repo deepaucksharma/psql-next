@@ -1,7 +1,0 @@
-# pg_querylens extension control file
-comment = 'Zero-overhead query telemetry for PostgreSQL'
-default_version = '1.0'
-module_pathname = '$libdir/pg_querylens'
-relocatable = false
-schema = querylens
-superuser = true

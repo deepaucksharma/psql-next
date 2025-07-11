@@ -1,23 +1,10 @@
-module github.com/database-intelligence/distributions/production
+module github.com/deepaksharma/db-otel/distributions/production
 
 go 1.23.0
 
 require (
-	// Custom exporters
-	github.com/database-intelligence/exporters/nri v0.0.0-00010101000000-000000000000
-
-	// Custom processors
-	github.com/database-intelligence/processors/adaptivesampler v0.0.0-00010101000000-000000000000
-	github.com/database-intelligence/processors/circuitbreaker v0.0.0-00010101000000-000000000000
-	github.com/database-intelligence/processors/costcontrol v0.0.0-00010101000000-000000000000
-	github.com/database-intelligence/processors/nrerrormonitor v0.0.0-00010101000000-000000000000
-	github.com/database-intelligence/processors/planattributeextractor v0.0.0-00010101000000-000000000000
-	github.com/database-intelligence/processors/querycorrelator v0.0.0-00010101000000-000000000000
-	github.com/database-intelligence/processors/verification v0.0.0-00010101000000-000000000000
-
-	// Custom receivers
-	github.com/database-intelligence/receivers/ash v0.0.0-00010101000000-000000000000
-	github.com/database-intelligence/receivers/kernelmetrics v0.0.0-00010101000000-000000000000
+	// Consolidated components module
+	github.com/deepaksharma/db-otel/components v0.0.0-00010101000000-000000000000
 	// Core OpenTelemetry components
 	go.opentelemetry.io/collector/component v1.35.0
 	go.opentelemetry.io/collector/confmap v1.35.0
@@ -45,7 +32,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 
 	// Common modules
-	github.com/database-intelligence/common/featuredetector v0.0.0-00010101000000-000000000000 // indirect
+	github.com/deepaksharma/db-otel/components/common/featuredetector v0.0.0-00010101000000-000000000000 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/ebitengine/purego v0.8.4 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -196,26 +183,13 @@ require (
 
 // Replace directives for local modules
 replace (
+	// Consolidated components module
+	github.com/deepaksharma/db-otel/components => ../../components
+	
 	// Common modules
-	github.com/database-intelligence/common/featuredetector => ../../common/featuredetector
-	github.com/database-intelligence/common/queryselector => ../../common/queryselector
-
-	// Custom exporters
-	github.com/database-intelligence/exporters/nri => ../../exporters/nri
+	github.com/deepaksharma/db-otel/common/featuredetector => ../../common/featuredetector
+	github.com/deepaksharma/db-otel/common/queryselector => ../../common/queryselector
 
 	// Internal modules
-	github.com/database-intelligence/internal/database => ../../internal/database
-
-	// Custom processors
-	github.com/database-intelligence/processors/adaptivesampler => ../../processors/adaptivesampler
-	github.com/database-intelligence/processors/circuitbreaker => ../../processors/circuitbreaker
-	github.com/database-intelligence/processors/costcontrol => ../../processors/costcontrol
-	github.com/database-intelligence/processors/nrerrormonitor => ../../processors/nrerrormonitor
-	github.com/database-intelligence/processors/planattributeextractor => ../../processors/planattributeextractor
-	github.com/database-intelligence/processors/querycorrelator => ../../processors/querycorrelator
-	github.com/database-intelligence/processors/verification => ../../processors/verification
-
-	// Custom receivers
-	github.com/database-intelligence/receivers/ash => ../../receivers/ash
-	github.com/database-intelligence/receivers/kernelmetrics => ../../receivers/kernelmetrics
+	github.com/deepaksharma/db-otel/internal/database => ../../internal/database
 )

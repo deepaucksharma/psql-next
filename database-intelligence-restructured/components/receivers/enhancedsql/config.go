@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 	
-	"github.com/database-intelligence/common/featuredetector"
+	"github.com/deepaksharma/db-otel/common/featuredetector"
 	"go.opentelemetry.io/collector/component"
 )
 

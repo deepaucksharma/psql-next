@@ -1,0 +1,44 @@
+# Basic collector configuration that works with minimal components
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+
+exporters:
+  debug:
+    verbosity: detailed
+  
+  otlp/newrelic:
+    endpoint: "otlp.nr-data.net:4317"
+    headers:
+      api-key: "ea7e83e4e29597b0766cf6c4636fba20FFFFNRAL"
+    compression: gzip
+
+service:
+  telemetry:
+    logs:
+      level: info
+  
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, otlp/newrelic]
+    
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, otlp/newrelic]
+    
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, otlp/newrelic]
