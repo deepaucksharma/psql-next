@@ -149,9 +149,6 @@ extensions:
   zpages:
     endpoint: ${env:ZPAGES_ENDPOINT:-0.0.0.0:55679}
   
-  # Memory ballast for heap management
-  memory_ballast:
-    size_mib: ${env:MEMORY_BALLAST_SIZE_MIB:-64}
   
   # File storage for persistence
   file_storage:
@@ -165,7 +162,7 @@ extensions:
       rebound_trigger_threshold_mib: ${env:FILE_STORAGE_REBOUND_TRIGGER_MIB:-150}
 
 service:
-  extensions: [health_check, pprof, zpages, memory_ballast, file_storage]
+  extensions: [health_check, pprof, zpages, file_storage]
   
   pipelines:
     # PostgreSQL metrics pipeline

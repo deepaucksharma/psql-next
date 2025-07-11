@@ -4,7 +4,7 @@ go 1.22
 
 require (
     go.opentelemetry.io/collector/component v0.105.0
-    go.opentelemetry.io/collector/confmap v1.12.0
+    go.opentelemetry.io/collector/confmap v0.105.0
     go.opentelemetry.io/collector/exporter v0.105.0
     go.opentelemetry.io/collector/exporter/debugexporter v0.105.0
     go.opentelemetry.io/collector/exporter/otlpexporter v0.105.0

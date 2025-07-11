@@ -77,7 +77,7 @@ exporters:
 # Service configuration for development
 service:
   # Enable all debugging extensions
-  extensions: [health_check, pprof, zpages, memory_ballast, filestorage]
+  extensions: [health_check, pprof, zpages, filestorage]
 
   # Development telemetry settings
   telemetry:

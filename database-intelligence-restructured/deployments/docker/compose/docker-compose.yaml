@@ -10,7 +10,7 @@ services:
   
   postgres:
     image: postgres:16
-    container_name: db-intel-postgres
+    container_name: database-intelligence-postgres
     environment:
       POSTGRES_DB: testdb
       POSTGRES_USER: postgres
@@ -39,7 +39,7 @@ services:
 
   mysql:
     image: mysql:8.0
-    container_name: db-intel-mysql
+    container_name: database-intelligence-mysql
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: testdb
@@ -73,7 +73,7 @@ services:
     build:
       context: .
       dockerfile: deployments/docker/dockerfiles/Dockerfile.custom
-    container_name: db-intel-collector
+    container_name: database-intelligence-collector
     depends_on:
       postgres:
         condition: service_healthy
@@ -140,7 +140,7 @@ services:
     build:
       context: .
       dockerfile: deployments/docker/dockerfiles/Dockerfile.loadgen
-    container_name: db-intel-load-gen
+    container_name: database-intelligence-load-gen
     depends_on:
       postgres:
         condition: service_healthy
@@ -165,7 +165,7 @@ services:
     build:
       context: .
       dockerfile: deployments/docker/dockerfiles/Dockerfile.test
-    container_name: db-intel-e2e
+    container_name: database-intelligence-e2e
     depends_on:
       collector:
         condition: service_healthy

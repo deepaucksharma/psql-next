@@ -1,0 +1,36 @@
+dist:
+  name: database-intelligence-collector
+  description: Database Intelligence Collector - Minimal build with standard components only
+  output_path: ./distributions/production
+  otelcol_version: 0.105.0
+  version: 2.0.0
+
+extensions:
+  - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/pprofextension v0.105.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/postgresqlreceiver v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/mysqlreceiver v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sqlqueryreceiver v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.105.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.105.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/attributesprocessor v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.105.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.105.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.105.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter v0.105.0
+
+connectors:
+  - gomod: go.opentelemetry.io/collector/connector/forwardconnector v0.105.0

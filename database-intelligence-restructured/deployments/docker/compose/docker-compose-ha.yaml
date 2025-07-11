@@ -38,7 +38,7 @@ services:
     extends:
       file: docker-compose.yaml
       service: collector
-    container_name: db-intel-collector-1
+    container_name: database-intelligence-collector-1
     networks:
       - database-intelligence
 
@@ -46,7 +46,7 @@ services:
     extends:
       file: docker-compose.yaml
       service: collector
-    container_name: db-intel-collector-2
+    container_name: database-intelligence-collector-2
     networks:
       - database-intelligence
 

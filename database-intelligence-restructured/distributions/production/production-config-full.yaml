@@ -258,15 +258,13 @@ extensions:
   zpages:
     endpoint: ${env:ZPAGES_ENDPOINT:-0.0.0.0:55679}
   
-  memory_ballast:
-    size_mib: ${env:MEMORY_BALLAST_SIZE_MIB:-64}
   
   file_storage:
     directory: ${env:FILE_STORAGE_DIRECTORY:-/tmp/otel-storage}
     timeout: ${env:FILE_STORAGE_TIMEOUT:-1s}
 
 service:
-  extensions: [health_check, pprof, zpages, memory_ballast, file_storage]
+  extensions: [health_check, pprof, zpages, file_storage]
   
   pipelines:
     # PostgreSQL metrics with full intelligence pipeline

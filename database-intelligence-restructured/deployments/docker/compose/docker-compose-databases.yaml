@@ -3,7 +3,7 @@ version: '3.8'
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: db-intel-postgres
+    container_name: database-intelligence-postgres
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
@@ -21,7 +21,7 @@ services:
 
   mysql:
     image: mysql:8.0
-    container_name: db-intel-mysql
+    container_name: database-intelligence-mysql
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: testdb

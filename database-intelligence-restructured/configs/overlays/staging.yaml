@@ -125,7 +125,7 @@ exporters:
 
 # Service configuration for staging
 service:
-  extensions: [health_check, pprof, zpages, memory_ballast, filestorage]
+  extensions: [health_check, pprof, zpages, filestorage]
 
   telemetry:
     logs:

@@ -10,9 +10,9 @@ receivers:
   
   # Custom ASH receiver
   ash:
-    endpoint: ${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}
-    username: ${POSTGRES_USER:-postgres}
-    password: ${POSTGRES_PASSWORD:-postgres}
+    endpoint: ${DB_POSTGRES_HOST:-localhost}:${DB_POSTGRES_PORT:-5432}
+    username: ${DB_POSTGRES_USER:-postgres}
+    password: ${DB_POSTGRES_PASSWORD:-postgres}
     database: postgres
     collection_interval: 1s
     sample_size: 100

@@ -229,7 +229,7 @@ exporters:
 
 # Production service configuration
 service:
-  extensions: [health_check, zpages, memory_ballast, filestorage]
+  extensions: [health_check, zpages, filestorage]
 
   telemetry:
     logs:

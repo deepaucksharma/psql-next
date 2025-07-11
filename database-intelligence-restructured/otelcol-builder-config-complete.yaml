@@ -14,7 +14,7 @@ build_info:
 extensions:
   # Core extensions
   - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.105.0
-  - gomod: go.opentelemetry.io/collector/extension/ballastextension v0.105.0
+  # Ballast extension is deprecated - use memory_limiter processor instead
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.105.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/pprofextension v0.105.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/filestorage v0.105.0
@@ -25,8 +25,8 @@ extensions:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/oauth2clientauthextension v0.105.0
   
   # Custom extensions
-  - gomod: github.com/deepaksharma/db-otel/components/extensions/healthcheck v0.0.0
-    path: ./components/extensions/healthcheck
+  # - gomod: github.com/deepaksharma/db-otel/components/extensions/healthcheck v0.0.0
+  #   path: ./components/extensions/healthcheck
 
 # Standard Receivers
 receivers:
@@ -113,8 +113,8 @@ exporters:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter v0.105.0
   
   # Custom exporters
-  - gomod: github.com/deepaksharma/db-otel/components/exporters/nri v0.0.0
-    path: ./components/exporters/nri
+  # - gomod: github.com/deepaksharma/db-otel/components/exporters/nri v0.0.0
+  #   path: ./components/exporters/nri
 
 # Connectors for pipeline-to-pipeline data flow
 connectors:

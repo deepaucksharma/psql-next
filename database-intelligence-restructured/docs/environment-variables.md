@@ -169,7 +169,7 @@ All environment variables follow a consistent naming pattern:
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `PROMETHEUS_ENDPOINT` | Prometheus metrics endpoint | `0.0.0.0:8889` | No |
-| `PROMETHEUS_NAMESPACE` | Prometheus namespace | `database_intelligence` | No |
+| `PROMETHEUS_NAMESPACE` | Prometheus namespace | `database-intelligence` | No |
 | `HEALTH_CHECK_ENDPOINT` | Health check endpoint | `0.0.0.0:13133` | No |
 | `PPROF_ENDPOINT` | pprof debug endpoint | `0.0.0.0:1777` | No |
 | `ZPAGES_ENDPOINT` | zPages debug endpoint | `0.0.0.0:55679` | No |

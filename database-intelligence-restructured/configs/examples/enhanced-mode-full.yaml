@@ -900,17 +900,12 @@ extensions:
       directory: /var/lib/otelcol/file_storage/compaction
       max_transaction_size: 65536
 
-  # Memory ballast for stable performance
-  memory_ballast:
-    size_mib: 256
-
 service:
   # Enable extensions
   extensions: 
     - health_check
     - pprof
     - file_storage
-    - memory_ballast
   
   # Pipeline configuration
   pipelines:

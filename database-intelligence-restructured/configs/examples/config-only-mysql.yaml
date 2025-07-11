@@ -2,9 +2,10 @@
 # Uses standard OpenTelemetry MySQL receiver - no custom code required
 
 # Environment variables:
-# - MYSQL_ENDPOINT: MySQL connection string (e.g., mysql://host:3306)
-# - MYSQL_USERNAME: MySQL username
-# - MYSQL_PASSWORD: MySQL password
+# - DB_MYSQL_HOST: MySQL host
+# - DB_MYSQL_PORT: MySQL port
+# - DB_MYSQL_USER: MySQL username
+# - DB_MYSQL_PASSWORD: MySQL password
 # - NEW_RELIC_OTLP_ENDPOINT: New Relic OTLP endpoint
 # - NEW_RELIC_LICENSE_KEY: New Relic license key
 # - SERVICE_NAME: Service identifier
@@ -13,9 +14,9 @@
 receivers:
   # MySQL metrics receiver
   mysql:
-    endpoint: "${MYSQL_ENDPOINT}"
-    username: "${MYSQL_USERNAME}"
-    password: "${MYSQL_PASSWORD}"
+    endpoint: "${DB_MYSQL_HOST}:${DB_MYSQL_PORT}"
+    username: "${DB_MYSQL_USER}"
+    password: "${DB_MYSQL_PASSWORD}"
     collection_interval: 30s
     transport: tcp
     tls:
@@ -151,7 +152,7 @@ receivers:
   # SQL query receiver for custom MySQL metrics
   sqlquery/mysql:
     driver: mysql
-    datasource: "${MYSQL_USERNAME}:${MYSQL_PASSWORD}@tcp(${MYSQL_HOST}:${MYSQL_PORT})/"
+    datasource: "${DB_MYSQL_USER}:${DB_MYSQL_PASSWORD}@tcp(${DB_MYSQL_HOST}:${DB_MYSQL_PORT})/"
     collection_interval: 60s
     queries:
       # Active connections by user and host
