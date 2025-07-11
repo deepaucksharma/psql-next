@@ -679,7 +679,7 @@ service:
 
 ### Production Configuration
 
-See [config/collector-advanced.yaml](../config/collector-advanced.yaml) for a complete production configuration.
+See [configs/overlays/prod.yaml](../../configs/overlays/prod.yaml) for production configuration and [configs/base.yaml](../../configs/base.yaml) for the complete base configuration.
 
 ### Development Configuration
 

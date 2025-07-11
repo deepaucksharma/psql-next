@@ -87,22 +87,27 @@ services:
       - "55679:55679" # zPages
       - "1777:1777"   # pprof (optional)
     volumes:
-      - ./configs/unified/database-intelligence-complete.yaml:/etc/otelcol-contrib/config.yaml
+      - ../../../distributions/production/production-config-complete.yaml:/etc/otelcol-contrib/config.yaml
       - ./telemetry-output:/app/output
     environment:
       # Database connections
-      - DB_POSTGRES_ENDPOINT=postgres:5432
+      - DB_POSTGRES_HOST=postgres
+      - DB_POSTGRES_PORT=5432
       - DB_POSTGRES_USER=postgres
       - DB_POSTGRES_PASSWORD=password
       - DB_POSTGRES_DATABASE=testdb
-      - DB_MYSQL_ENDPOINT=mysql:3306
+      - DB_MYSQL_HOST=mysql
+      - DB_MYSQL_PORT=3306
       - DB_MYSQL_USER=root
       - DB_MYSQL_PASSWORD=password
       - DB_MYSQL_DATABASE=testdb
       
       # Export configuration
-      - NEW_RELIC_API_KEY=${NEW_RELIC_API_KEY:-your_key_here}
-      - ENVIRONMENT=docker-compose
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-your_key_here}
+      - OTLP_ENDPOINT=${OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
+      - DEPLOYMENT_ENVIRONMENT=docker-compose
+      - SERVICE_NAME=database-intelligence-collector
+      - SERVICE_VERSION=2.0.0
       
       # Feature flags
       - ENABLE_ADAPTIVE_SAMPLER=true

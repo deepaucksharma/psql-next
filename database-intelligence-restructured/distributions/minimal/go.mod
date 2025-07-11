@@ -1,8 +1,6 @@
-module github.com/deepaksharma/db-otel/components/distributions/minimal
+module github.com/deepaksharma/db-otel/distributions/minimal
 
-go 1.23.0
-
-toolchain go1.24.3
+go 1.22
 
 require (
 	go.opentelemetry.io/collector/component v1.35.0

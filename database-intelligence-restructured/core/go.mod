@@ -1,6 +1,6 @@
-module github.com/deepaksharma/db-otel/components/core
+module github.com/deepaksharma/db-otel/core
 
-go 1.23
+go 1.22
 
 require (
 	github.com/deepaksharma/db-otel/components/processors/adaptivesampler v0.0.0

@@ -5,9 +5,9 @@ services:
   postgres:
     image: postgres:14
     environment:
-      POSTGRES_USER: ${DB_USERNAME:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
-      POSTGRES_DB: ${DB_NAME:-dbtelemetry}
+      POSTGRES_USER: ${DB_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_POSTGRES_DATABASE:-dbtelemetry}
     ports:
       - "${DB_POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -22,10 +22,10 @@ services:
   mysql:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-mysql}
-      MYSQL_DATABASE: ${DB_NAME:-dbtelemetry}
-      MYSQL_USER: ${DB_USERNAME:-mysql}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-mysql}
+      MYSQL_ROOT_PASSWORD: ${DB_MYSQL_PASSWORD:-mysql}
+      MYSQL_DATABASE: ${DB_MYSQL_DATABASE:-dbtelemetry}
+      MYSQL_USER: ${DB_MYSQL_USER:-mysql}
+      MYSQL_PASSWORD: ${DB_MYSQL_PASSWORD:-mysql}
     ports:
       - "${DB_MYSQL_PORT:-3306}:3306"
     volumes:
@@ -45,13 +45,21 @@ services:
       DB_POSTGRES_PORT: 5432
       DB_MYSQL_HOST: mysql
       DB_MYSQL_PORT: 3306
-      DB_USERNAME: ${DB_USERNAME:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      DB_NAME: ${DB_NAME:-dbtelemetry}
+      DB_POSTGRES_USER: ${DB_POSTGRES_USER:-postgres}
+      DB_POSTGRES_PASSWORD: ${DB_POSTGRES_PASSWORD:-postgres}
+      DB_POSTGRES_DATABASE: ${DB_POSTGRES_DATABASE:-dbtelemetry}
+      DB_MYSQL_USER: ${DB_MYSQL_USER:-root}
+      DB_MYSQL_PASSWORD: ${DB_MYSQL_PASSWORD:-mysql}
+      DB_MYSQL_DATABASE: ${DB_MYSQL_DATABASE:-dbtelemetry}
       
       # New Relic configuration
-      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
-      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      
+      # Service identification
+      SERVICE_NAME: ${SERVICE_NAME:-database-intelligence-collector}
+      SERVICE_VERSION: ${SERVICE_VERSION:-2.0.0}
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-production}
       
       # Performance tuning
       MEMORY_LIMIT_MIB: ${MEMORY_LIMIT_MIB:-512}

@@ -1,0 +1,222 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: ${env:OTLP_GRPC_ENDPOINT:-0.0.0.0:4317}
+        max_recv_msg_size_mib: ${env:OTLP_MAX_RECV_MSG_SIZE:-32}
+      http:
+        endpoint: ${env:OTLP_HTTP_ENDPOINT:-0.0.0.0:4318}
+        max_request_body_size_mib: ${env:OTLP_MAX_REQUEST_BODY_SIZE:-32}
+  
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB:-postgres}
+    collection_interval: ${env:POSTGRES_COLLECTION_INTERVAL:-60s}
+    # TLS configuration support
+    tls:
+      insecure: ${env:POSTGRES_TLS_INSECURE:-true}
+      insecure_skip_verify: ${env:POSTGRES_TLS_INSECURE:-true}
+      ca_file: ${env:POSTGRES_CA_FILE}
+      cert_file: ${env:POSTGRES_CERT_FILE}
+      key_file: ${env:POSTGRES_KEY_FILE}
+  
+  mysql:
+    endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DB:-mysql}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:-60s}
+    # TLS configuration support
+    tls:
+      insecure: ${env:MYSQL_TLS_INSECURE:-true}
+      ca_file: ${env:MYSQL_CA_FILE}
+
+processors:
+  # Resource processor to add service.name and environment attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:SERVICE_NAME:-database-intelligence-collector}
+        action: upsert
+      - key: service.version
+        value: ${env:SERVICE_VERSION:-2.0.0}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENVIRONMENT:-development}
+        action: upsert
+      - key: host.name
+        value: ${env:HOSTNAME}
+        action: upsert
+  
+  # Attributes processor for additional metadata
+  attributes:
+    actions:
+      - key: collector.name
+        value: "database-intelligence"
+        action: insert
+      - key: telemetry.sdk.name
+        value: "opentelemetry"
+        action: insert
+      - key: telemetry.sdk.language
+        value: "go"
+        action: insert
+  
+  # Resource detection processor for automatic resource attributes
+  resourcedetection:
+    detectors: [env, system, docker, gcp, aws, azure]
+    timeout: 2s
+    override: false
+  
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: ${env:MEMORY_CHECK_INTERVAL:-1s}
+    limit_mib: ${env:MEMORY_LIMIT_MIB:-512}
+    spike_limit_mib: ${env:MEMORY_SPIKE_LIMIT_MIB:-128}
+    
+  # Batch processor for efficiency
+  batch:
+    timeout: ${env:BATCH_TIMEOUT:-1s}
+    send_batch_size: ${env:BATCH_SIZE:-1024}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE:-2048}
+  
+  # Filter processor for data reduction (optional)
+  filter/errors:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'IsMatch(name, "database\\.errors\\..*") and value == 0'
+
+exporters:
+  # Primary OTLP exporter to New Relic
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:OTLP_RETRY_INITIAL_INTERVAL:-5s}
+      max_interval: ${env:OTLP_RETRY_MAX_INTERVAL:-30s}
+      max_elapsed_time: ${env:OTLP_RETRY_MAX_ELAPSED_TIME:-300s}
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:OTLP_QUEUE_CONSUMERS:-10}
+      queue_size: ${env:OTLP_QUEUE_SIZE:-5000}
+    timeout: ${env:OTLP_TIMEOUT:-30s}
+  
+  # Optional Prometheus exporter for local metrics
+  prometheus:
+    endpoint: ${env:PROMETHEUS_ENDPOINT:-0.0.0.0:8889}
+    namespace: ${env:PROMETHEUS_NAMESPACE:-database_intelligence}
+    const_labels:
+      service: ${env:SERVICE_NAME:-database-intelligence-collector}
+      environment: ${env:DEPLOYMENT_ENVIRONMENT:-development}
+    metric_expiration: ${env:PROMETHEUS_METRIC_EXPIRATION:-10m}
+    enable_open_metrics: ${env:PROMETHEUS_ENABLE_OPEN_METRICS:-false}
+  
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:-normal}
+    sampling_initial: ${env:DEBUG_SAMPLING_INITIAL:-5}
+    sampling_thereafter: ${env:DEBUG_SAMPLING_THEREAFTER:-200}
+  
+  # File exporter for development/testing
+  file:
+    path: ${env:FILE_EXPORTER_PATH:-/tmp/otel-data.json}
+    format: ${env:FILE_EXPORTER_FORMAT:-json}
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: ${env:HEALTH_CHECK_ENDPOINT:-0.0.0.0:13133}
+    path: ${env:HEALTH_CHECK_PATH:-/}
+    check_collector_pipeline:
+      enabled: ${env:HEALTH_CHECK_PIPELINE_ENABLED:-true}
+      interval: ${env:HEALTH_CHECK_INTERVAL:-5m}
+      exporter_failure_threshold: ${env:HEALTH_CHECK_EXPORTER_FAILURE_THRESHOLD:-5}
+  
+  # Performance profiling
+  pprof:
+    endpoint: ${env:PPROF_ENDPOINT:-0.0.0.0:1777}
+    block_profile_fraction: ${env:PPROF_BLOCK_PROFILE_FRACTION:-0}
+    mutex_profile_fraction: ${env:PPROF_MUTEX_PROFILE_FRACTION:-0}
+    save_to_file: ${env:PPROF_SAVE_TO_FILE}
+  
+  # zPages for debugging
+  zpages:
+    endpoint: ${env:ZPAGES_ENDPOINT:-0.0.0.0:55679}
+  
+  # Memory ballast for heap management
+  memory_ballast:
+    size_mib: ${env:MEMORY_BALLAST_SIZE_MIB:-64}
+  
+  # File storage for persistence
+  file_storage:
+    directory: ${env:FILE_STORAGE_DIRECTORY:-/tmp/otel-storage}
+    timeout: ${env:FILE_STORAGE_TIMEOUT:-1s}
+    compaction:
+      directory: ${env:FILE_STORAGE_COMPACTION_DIRECTORY:-/tmp/otel-storage-compaction}
+      on_start: ${env:FILE_STORAGE_COMPACTION_ON_START:-false}
+      on_rebound: ${env:FILE_STORAGE_COMPACTION_ON_REBOUND:-true}
+      rebound_needed_threshold_mib: ${env:FILE_STORAGE_REBOUND_THRESHOLD_MIB:-100}
+      rebound_trigger_threshold_mib: ${env:FILE_STORAGE_REBOUND_TRIGGER_MIB:-150}
+
+service:
+  extensions: [health_check, pprof, zpages, memory_ballast, file_storage]
+  
+  pipelines:
+    # PostgreSQL metrics pipeline
+    metrics/postgresql:
+      receivers: [postgresql]
+      processors: [memory_limiter, resource, attributes, resourcedetection, batch]
+      exporters: [otlphttp/newrelic, prometheus]
+    
+    # MySQL metrics pipeline  
+    metrics/mysql:
+      receivers: [mysql]
+      processors: [memory_limiter, resource, attributes, resourcedetection, batch]
+      exporters: [otlphttp/newrelic, prometheus]
+    
+    # General OTLP metrics pipeline
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, attributes, resourcedetection, filter/errors, batch]
+      exporters: [otlphttp/newrelic, prometheus]
+    
+    # Traces pipeline
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, attributes, resourcedetection, batch]
+      exporters: [otlphttp/newrelic]
+    
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, attributes, resourcedetection, batch]
+      exporters: [otlphttp/newrelic]
+  
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      development: ${env:LOG_DEVELOPMENT:-false}
+      encoding: ${env:LOG_ENCODING:-json}
+      disable_caller: false
+      disable_stacktrace: false
+      output_paths: ["stdout"]
+      error_output_paths: ["stderr"]
+      initial_fields:
+        service: ${env:SERVICE_NAME:-database-intelligence-collector}
+        version: ${env:SERVICE_VERSION:-2.0.0}
+    
+    metrics:
+      level: ${env:TELEMETRY_METRICS_LEVEL:-basic}
+      address: ${env:TELEMETRY_METRICS_ADDRESS:-0.0.0.0:8888}
+      
+    traces:
+      processors:
+        - batch:
+            timeout: 1s
+            send_batch_size: 1024

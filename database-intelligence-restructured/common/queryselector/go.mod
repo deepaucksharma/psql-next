@@ -1,8 +1,6 @@
 module github.com/deepaksharma/db-otel/common/queryselector
 
-go 1.23.0
-
-toolchain go1.24.3
+go 1.22
 
 require (
 	github.com/deepaksharma/db-otel/common/featuredetector v0.0.0-00010101000000-000000000000

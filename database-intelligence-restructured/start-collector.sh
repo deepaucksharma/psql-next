@@ -80,7 +80,7 @@ mkdir -p "$RUNTIME_DIR"
 # Copy config to runtime directory with environment substitution
 CONFIG_FILE="$RUNTIME_DIR/collector-config.yaml"
 # Use basic config for now to avoid component issues
-envsubst < "$SCRIPT_DIR/config/collector-basic.yaml" > "$CONFIG_FILE"
+envsubst < "$SCRIPT_DIR/configs/basic.yaml" > "$CONFIG_FILE"
 echo "✅ Configuration prepared at: $CONFIG_FILE"
 
 # Start the collector

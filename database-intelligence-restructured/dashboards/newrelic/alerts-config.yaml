@@ -1,0 +1,322 @@
+# New Relic Alert Configurations for Database Intelligence
+# Import these alerts using New Relic's API or Terraform
+
+alerts:
+  - name: "Database Connection Pool Exhaustion"
+    description: "Alert when database connection pool usage exceeds threshold"
+    nrql: |
+      SELECT max(postgresql.backends / postgresql.backends.max * 100) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET database.name
+    conditions:
+      - type: "critical"
+        threshold: 90
+        threshold_duration: 300
+        threshold_occurrences: "all"
+      - type: "warning"
+        threshold: 80
+        threshold_duration: 300
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 120
+
+  - name: "Database Response Time Degradation"
+    description: "Alert when query response time increases significantly"
+    nrql: |
+      SELECT average(query.duration) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET database.name, database.type
+    conditions:
+      - type: "critical"
+        threshold: 1000  # 1 second
+        threshold_duration: 600
+        threshold_occurrences: "at_least_once"
+      - type: "warning"
+        threshold: 500   # 500ms
+        threshold_duration: 600
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 300
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Replication Lag"
+    description: "Alert when replication lag exceeds acceptable threshold"
+    nrql: |
+      SELECT max(postgresql.replication.lag) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND database.type = 'postgresql'
+      FACET primary.name, replica.name
+    conditions:
+      - type: "critical"
+        threshold: 60    # 60 seconds
+        threshold_duration: 300
+        threshold_occurrences: "all"
+      - type: "warning"
+        threshold: 30    # 30 seconds
+        threshold_duration: 300
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Cache Hit Ratio Low"
+    description: "Alert when cache hit ratio drops below threshold"
+    nrql: |
+      SELECT (sum(postgresql.cache.hit) / 
+              (sum(postgresql.cache.hit) + sum(postgresql.cache.miss))) * 100 as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET database.name
+    conditions:
+      - type: "critical"
+        threshold: 80
+        threshold_duration: 900
+        threshold_occurrences: "all"
+        operator: "below"
+      - type: "warning"
+        threshold: 85
+        threshold_duration: 900
+        threshold_occurrences: "all"
+        operator: "below"
+    signal:
+      aggregation_window: 300
+      aggregation_method: "event_flow"
+      aggregation_delay: 120
+
+  - name: "Database Lock Wait Spike"
+    description: "Alert when lock wait events increase significantly"
+    nrql: |
+      SELECT rate(sum(lock.wait.count), 1 minute) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET database.name, lock.type
+    conditions:
+      - type: "critical"
+        threshold: 10    # 10 lock waits per minute
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+      - type: "warning"
+        threshold: 5     # 5 lock waits per minute
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Error Rate High"
+    description: "Alert when database error rate exceeds threshold"
+    nrql: |
+      SELECT rate(count(*), 1 minute) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND (metricName = 'postgresql.errors' OR metricName = 'mysql.errors')
+      FACET database.name, error.type
+    conditions:
+      - type: "critical"
+        threshold: 5     # 5 errors per minute
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+      - type: "warning"
+        threshold: 2     # 2 errors per minute
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Circuit Breaker Activated"
+    description: "Alert when circuit breaker trips for a database"
+    nrql: |
+      SELECT latest(circuit.breaker.status) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND processor = 'circuitbreaker'
+      FACET database.name
+    conditions:
+      - type: "critical"
+        threshold: 1     # 1 = open/tripped
+        threshold_duration: 60
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 30
+
+  - name: "PII Data Detected"
+    description: "Alert when PII is detected in database queries or results"
+    nrql: |
+      SELECT count(*) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND processor = 'verification'
+      AND pii.detected = true
+      FACET pii.type, database.name
+    conditions:
+      - type: "critical"
+        threshold: 1     # Any PII detection
+        threshold_duration: 60
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 300
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Cost Budget Exceeded"
+    description: "Alert when database operation costs exceed budget"
+    nrql: |
+      SELECT (sum(cost.daily.usd) / latest(cost.budget.daily.usd)) * 100 as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND processor = 'costcontrol'
+    conditions:
+      - type: "critical"
+        threshold: 100   # 100% of budget
+        threshold_duration: 300
+        threshold_occurrences: "all"
+      - type: "warning"
+        threshold: 80    # 80% of budget
+        threshold_duration: 300
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 3600
+      aggregation_method: "event_flow"
+      aggregation_delay: 300
+
+  - name: "Slow Query Detected"
+    description: "Alert when queries exceed duration threshold"
+    nrql: |
+      SELECT count(*) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND query.duration > 5000  # 5 seconds
+      FACET database.name, query.text
+    conditions:
+      - type: "critical"
+        threshold: 10    # 10 slow queries
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+      - type: "warning"
+        threshold: 5     # 5 slow queries
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 300
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Table Bloat"
+    description: "Alert when table bloat exceeds threshold"
+    nrql: |
+      SELECT max(table.bloat.ratio) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND database.type = 'postgresql'
+      FACET database.name, table.name
+    conditions:
+      - type: "critical"
+        threshold: 2.0   # 2x bloat
+        threshold_duration: 3600
+        threshold_occurrences: "all"
+      - type: "warning"
+        threshold: 1.5   # 1.5x bloat
+        threshold_duration: 3600
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 3600
+      aggregation_method: "event_flow"
+      aggregation_delay: 300
+
+  - name: "Collector Health Check Failed"
+    description: "Alert when the collector itself is unhealthy"
+    nrql: |
+      SELECT uniqueCount(host.name) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET deployment.environment
+    conditions:
+      - type: "critical"
+        threshold: 1
+        threshold_duration: 300
+        threshold_occurrences: "all"
+        operator: "below"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 120
+      fill_option: "last_value"
+      fill_value: 0
+
+# Alert Policy Configuration
+policies:
+  - name: "Database Intelligence - Critical"
+    incident_preference: "per_condition_and_target"
+    channels:
+      - "email-oncall"
+      - "pagerduty-critical"
+      - "slack-database-alerts"
+    conditions:
+      - "Database Connection Pool Exhaustion"
+      - "Database Replication Lag"
+      - "Circuit Breaker Activated"
+      - "PII Data Detected"
+      - "Collector Health Check Failed"
+
+  - name: "Database Intelligence - Performance"
+    incident_preference: "per_condition"
+    channels:
+      - "email-team"
+      - "slack-database-alerts"
+    conditions:
+      - "Database Response Time Degradation"
+      - "Database Cache Hit Ratio Low"
+      - "Database Lock Wait Spike"
+      - "Slow Query Detected"
+
+  - name: "Database Intelligence - Operational"
+    incident_preference: "per_policy"
+    channels:
+      - "email-team"
+      - "slack-operations"
+    conditions:
+      - "Database Error Rate High"
+      - "Database Cost Budget Exceeded"
+      - "Database Table Bloat"
+
+# Notification Channels
+channels:
+  - name: "email-oncall"
+    type: "email"
+    configuration:
+      recipients: "oncall@example.com"
+      include_json_attachment: true
+
+  - name: "email-team"
+    type: "email"
+    configuration:
+      recipients: "database-team@example.com"
+
+  - name: "pagerduty-critical"
+    type: "pagerduty"
+    configuration:
+      service_key: "${PAGERDUTY_SERVICE_KEY}"
+
+  - name: "slack-database-alerts"
+    type: "slack"
+    configuration:
+      url: "${SLACK_WEBHOOK_URL}"
+      channel: "#database-alerts"
+
+  - name: "slack-operations"
+    type: "slack"
+    configuration:
+      url: "${SLACK_WEBHOOK_URL}"
+      channel: "#operations"

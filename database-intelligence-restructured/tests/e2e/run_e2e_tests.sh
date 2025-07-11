@@ -185,27 +185,31 @@ run_tests() {
     case "$test_suite" in
         "all")
             print_color $BLUE "Running all E2E test suites..."
-            go test $test_flags ./...
+            go test $test_flags ./suites -run TestAll
             ;;
         "comprehensive")
             print_color $BLUE "Running comprehensive E2E test..."
-            go test $test_flags -run TestComprehensiveE2E ./suites
+            go test $test_flags ./suites -run TestComprehensiveSuite
             ;;
-        "verification")
-            print_color $BLUE "Running New Relic verification tests..."
-            go test $test_flags -run TestNewRelicVerification ./suites
+        "custom-processors")
+            print_color $BLUE "Running custom processors tests..."
+            go test $test_flags ./suites -run TestCustomProcessorsSuite
             ;;
-        "adapters")
-            print_color $BLUE "Running adapter integration tests..."
-            go test $test_flags -run TestAdapterIntegration ./suites
+        "mode-comparison")
+            print_color $BLUE "Running mode comparison tests..."
+            go test $test_flags ./suites -run TestModeComparisonSuite
             ;;
-        "database")
-            print_color $BLUE "Running database verification tests..."
-            go test $test_flags -run TestDatabaseToNRDBVerification ./suites
+        "ash-plan")
+            print_color $BLUE "Running ASH and plan analysis tests..."
+            go test $test_flags ./suites -run TestASHPlanAnalysisSuite
             ;;
         "performance")
-            print_color $BLUE "Running performance tests..."
-            go test $test_flags -run TestHighVolumePerformance ./suites
+            print_color $BLUE "Running performance and scale tests..."
+            go test $test_flags ./suites -run TestPerformanceScaleSuite
+            ;;
+        "newrelic")
+            print_color $BLUE "Running New Relic validation tests..."
+            go test $test_flags ./suites -run TestNewRelicValidationSuite
             ;;
         *)
             print_color $RED "Unknown test suite: $test_suite"
@@ -307,12 +311,13 @@ Usage: $0 [TEST_SUITE] [OPTIONS]
 Run end-to-end tests for Database Intelligence project
 
 TEST_SUITE:
-    all            Run all test suites (default)
-    comprehensive  Run comprehensive E2E test suite
-    verification   Run New Relic verification tests
-    adapters       Run adapter integration tests
-    database       Run database to NRDB verification tests
-    performance    Run performance tests
+    all              Run all test suites (default)
+    comprehensive    Run comprehensive E2E test suite
+    custom-processors Run custom processors integration tests
+    mode-comparison  Run config-only vs enhanced mode comparison tests
+    ash-plan         Run ASH and plan analysis tests
+    performance      Run performance and scale tests
+    newrelic         Run New Relic validation tests
 
 OPTIONS:
     Environment variables:

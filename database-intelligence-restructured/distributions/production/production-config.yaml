@@ -8,17 +8,17 @@ receivers:
   
   postgresql:
     endpoint: ${DB_POSTGRES_HOST:localhost}:${DB_POSTGRES_PORT:5432}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    username: ${DB_POSTGRES_USER:postgres}
+    password: ${DB_POSTGRES_PASSWORD:postgres}
     databases:
-      - ${DB_NAME:postgres}
+      - ${DB_POSTGRES_DATABASE:postgres}
     collection_interval: 10s
   
   mysql:
     endpoint: ${DB_MYSQL_HOST:localhost}:${DB_MYSQL_PORT:3306}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
-    database: ${DB_NAME:mysql}
+    username: ${DB_MYSQL_USER:root}
+    password: ${DB_MYSQL_PASSWORD:mysql}
+    database: ${DB_MYSQL_DATABASE:mysql}
     collection_interval: 10s
 
 processors:
@@ -29,12 +29,24 @@ processors:
   memory_limiter:
     check_interval: 1s
     limit_mib: ${MEMORY_LIMIT_MIB:512}
+  
+  resource:
+    attributes:
+      - key: service.name
+        value: ${SERVICE_NAME:database-intelligence-collector}
+        action: upsert
+      - key: service.version
+        value: ${SERVICE_VERSION:2.0.0}
+        action: upsert
+      - key: deployment.environment
+        value: ${DEPLOYMENT_ENVIRONMENT:production}
+        action: upsert
 
 exporters:
   otlphttp:
-    endpoint: ${NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net}
+    endpoint: ${OTLP_ENDPOINT:https://otlp.nr-data.net}
     headers:
-      api-key: ${NEW_RELIC_API_KEY}
+      api-key: ${NEW_RELIC_LICENSE_KEY}
     compression: gzip
     retry_on_failure:
       enabled: true
@@ -54,21 +66,21 @@ service:
   pipelines:
     metrics/postgresql:
       receivers: [postgresql]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, resource, batch]
       exporters: [otlphttp]
     metrics/mysql:
       receivers: [mysql]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, resource, batch]
       exporters: [otlphttp]
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, resource, batch]
       exporters: [otlphttp]
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, resource, batch]
       exporters: [otlphttp]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, resource, batch]
       exporters: [otlphttp]

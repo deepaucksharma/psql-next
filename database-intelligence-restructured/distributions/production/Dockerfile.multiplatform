@@ -43,7 +43,7 @@ WORKDIR /app
 COPY --from=builder /build/database-intelligence /app/database-intelligence
 
 # Copy configuration
-COPY production-config.yaml /etc/database-intelligence/config.yaml
+COPY production-config-complete.yaml /etc/database-intelligence/config.yaml
 
 # Set ownership
 RUN chown -R otel:otel /app /etc/database-intelligence

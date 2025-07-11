@@ -1,3 +1,3 @@
-module github.com/deepaksharma/db-otel/components/internal/database
+module github.com/deepaksharma/db-otel/internal/database
 
-go 1.23.0
+go 1.22

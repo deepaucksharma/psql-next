@@ -107,17 +107,17 @@ build_e2e_collector() {
     fi
     
     # Create builder config if not exists
-    if [ ! -f "otelcol-builder-config.yaml" ]; then
-        log_error "Builder configuration not found: otelcol-builder-config.yaml"
+    if [ ! -f "tools/builder/otelcol-builder.yaml" ]; then
+        log_error "Builder configuration not found: tools/builder/otelcol-builder.yaml"
         return 1
     fi
     
     # Build with OCB
     log_info "Building collector with OCB..."
     if [ "$VERBOSE" = "true" ]; then
-        ocb --config=otelcol-builder-config.yaml --verbose
+        ocb --config=tools/builder/otelcol-builder.yaml --verbose
     else
-        ocb --config=otelcol-builder-config.yaml
+        ocb --config=tools/builder/otelcol-builder.yaml
     fi
     
     if [ -f "tests/e2e/e2e-test-collector" ]; then

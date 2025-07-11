@@ -1,8 +1,6 @@
-module github.com/deepaksharma/db-otel/components/tests/e2e
+module github.com/deepaksharma/db-otel/tests/e2e
 
-go 1.22.0
-
-toolchain go1.24.3
+go 1.22
 
 require (
 	github.com/go-sql-driver/mysql v1.9.3

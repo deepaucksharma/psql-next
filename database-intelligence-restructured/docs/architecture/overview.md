@@ -514,10 +514,11 @@ database-intelligence-mvp/
 │   ├── costcontrol/         # Budget management
 │   ├── nrerrormonitor/      # Error detection
 │   └── querycorrelator/     # Query correlation
-├── config/                  # Configuration files
-│   ├── collector-basic.yaml
-│   ├── collector-advanced.yaml
-│   └── collector-querylens.yaml
+├── configs/                 # Configuration files
+│   ├── basic.yaml          # Basic configuration
+│   ├── base.yaml           # Base configuration with all components
+│   ├── examples/           # Example configurations
+│   └── overlays/           # Environment-specific overlays
 ├── deployments/            # Deployment artifacts
 │   ├── docker/
 │   ├── kubernetes/

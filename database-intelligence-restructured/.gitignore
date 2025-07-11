@@ -41,3 +41,6 @@ tests/test.env
 
 # Generated files
 configs/generated/
+
+# Runtime files
+runtime/

@@ -1,6 +1,6 @@
 module github.com/deepaksharma/db-otel/distributions/production
 
-go 1.23.0
+go 1.22
 
 require (
 	// Consolidated components module

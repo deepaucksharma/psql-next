@@ -1,0 +1,362 @@
+# Database Intelligence Collector - Full Production Configuration
+# This configuration includes all custom components for advanced database monitoring
+
+receivers:
+  # Standard OTLP receiver
+  otlp:
+    protocols:
+      grpc:
+        endpoint: ${env:OTLP_GRPC_ENDPOINT:-0.0.0.0:4317}
+        max_recv_msg_size_mib: ${env:OTLP_MAX_RECV_MSG_SIZE:-32}
+      http:
+        endpoint: ${env:OTLP_HTTP_ENDPOINT:-0.0.0.0:4318}
+        max_request_body_size_mib: ${env:OTLP_MAX_REQUEST_BODY_SIZE:-32}
+  
+  # PostgreSQL standard metrics
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER}
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - ${env:POSTGRES_DB:-postgres}
+    collection_interval: ${env:POSTGRES_COLLECTION_INTERVAL:-60s}
+    tls:
+      insecure: ${env:POSTGRES_TLS_INSECURE:-true}
+      insecure_skip_verify: ${env:POSTGRES_TLS_INSECURE:-true}
+      ca_file: ${env:POSTGRES_CA_FILE}
+      cert_file: ${env:POSTGRES_CERT_FILE}
+      key_file: ${env:POSTGRES_KEY_FILE}
+  
+  # MySQL standard metrics
+  mysql:
+    endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DB:-mysql}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:-60s}
+    tls:
+      insecure: ${env:MYSQL_TLS_INSECURE:-true}
+      ca_file: ${env:MYSQL_CA_FILE}
+  
+  # Custom Enhanced SQL receiver for advanced queries
+  enhancedsql:
+    postgresql:
+      - endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+        username: ${env:POSTGRES_USER}
+        password: ${env:POSTGRES_PASSWORD}
+        database: ${env:POSTGRES_DB:-postgres}
+        collection_interval: ${env:ENHANCED_SQL_INTERVAL:-60s}
+        queries:
+          - name: "slow_queries"
+            sql: |
+              SELECT query, calls, total_time, mean_time, max_time
+              FROM pg_stat_statements
+              WHERE mean_time > 1000
+              ORDER BY mean_time DESC
+              LIMIT 20
+          - name: "table_bloat"
+            sql: |
+              SELECT schemaname, tablename, 
+                     pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
+              FROM pg_tables
+              WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+              ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+              LIMIT 20
+    mysql:
+      - endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+        username: ${env:MYSQL_USER}
+        password: ${env:MYSQL_PASSWORD}
+        database: ${env:MYSQL_DB:-mysql}
+        collection_interval: ${env:ENHANCED_SQL_INTERVAL:-60s}
+        queries:
+          - name: "slow_queries"
+            sql: |
+              SELECT DIGEST_TEXT, COUNT_STAR, SUM_TIMER_WAIT/1000000000 as total_time_ms
+              FROM performance_schema.events_statements_summary_by_digest
+              WHERE SUM_TIMER_WAIT > 1000000000
+              ORDER BY SUM_TIMER_WAIT DESC
+              LIMIT 20
+  
+  # Custom ASH (Active Session History) receiver
+  ash:
+    databases:
+      - type: postgresql
+        endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+        username: ${env:POSTGRES_USER}
+        password: ${env:POSTGRES_PASSWORD}
+        database: ${env:POSTGRES_DB:-postgres}
+        collection_interval: 10s
+        sample_interval: 1s
+      - type: mysql
+        endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+        username: ${env:MYSQL_USER}
+        password: ${env:MYSQL_PASSWORD}
+        database: ${env:MYSQL_DB:-mysql}
+        collection_interval: 10s
+        sample_interval: 1s
+  
+  # Kernel metrics receiver for system-level database metrics
+  kernelmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        enabled: true
+      memory:
+        enabled: true
+      disk:
+        enabled: true
+      network:
+        enabled: true
+      filesystem:
+        enabled: true
+
+processors:
+  # Resource processor for service identification
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:SERVICE_NAME:-database-intelligence-collector}
+        action: upsert
+      - key: service.version
+        value: ${env:SERVICE_VERSION:-2.0.0}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENVIRONMENT:-development}
+        action: upsert
+      - key: host.name
+        value: ${env:HOSTNAME}
+        action: upsert
+  
+  # Resource detection for cloud metadata
+  resourcedetection:
+    detectors: [env, system, docker, gcp, aws, azure]
+    timeout: 2s
+    override: false
+  
+  # Memory limiter (always first in pipeline)
+  memory_limiter:
+    check_interval: ${env:MEMORY_CHECK_INTERVAL:-1s}
+    limit_mib: ${env:MEMORY_LIMIT_MIB:-512}
+    spike_limit_mib: ${env:MEMORY_SPIKE_LIMIT_MIB:-128}
+  
+  # Custom adaptive sampler for intelligent sampling
+  adaptivesampler:
+    sampling_percentage: ${env:ADAPTIVE_SAMPLING_PERCENTAGE:-10}
+    max_traces_per_second: ${env:MAX_TRACES_PER_SECOND:-100}
+    cache_size: ${env:SAMPLED_CACHE_SIZE:-100000}
+    query_types:
+      select: ${env:SELECT_SAMPLING_PERCENTAGE:-5}
+      dml: ${env:DML_SAMPLING_PERCENTAGE:-50}
+      ddl: 100
+      audit: ${env:AUDIT_SAMPLING_PERCENTAGE:-1}
+  
+  # Circuit breaker to protect databases
+  circuit_breaker:
+    max_consecutive_failures: ${env:CIRCUIT_BREAKER_MAX_FAILURES:-5}
+    failure_threshold_percent: ${env:CIRCUIT_BREAKER_FAILURE_THRESHOLD:-50}
+    timeout: ${env:CIRCUIT_BREAKER_TIMEOUT:-30s}
+    recovery_timeout: ${env:CIRCUIT_BREAKER_RECOVERY_TIMEOUT:-60s}
+    per_database: ${env:PER_DATABASE_CIRCUIT:-true}
+    health_check_interval: ${env:HEALTH_CHECK_INTERVAL:-10s}
+  
+  # Plan attribute extractor for query analysis
+  planattributeextractor:
+    enabled: ${env:ENABLE_PLAN_ANALYSIS:-true}
+    cache_enabled: ${env:PLAN_CACHE_ENABLED:-true}
+    cache_size: ${env:PLAN_CACHE_SIZE:-1000}
+    cache_ttl: ${env:PLAN_CACHE_TTL:-3600s}
+    max_query_length: ${env:MAX_QUERY_LENGTH:-4096}
+    anonymize: ${env:ENABLE_ANONYMIZATION:-true}
+  
+  # Data verification and PII detection
+  verification:
+    pii_detection_enabled: ${env:ENABLE_PII_DETECTION:-true}
+    validation_enabled: ${env:ENABLE_DATA_VALIDATION:-true}
+    max_field_length: ${env:MAX_FIELD_LENGTH:-1000}
+    sample_rate: ${env:VERIFICATION_SAMPLE_RATE:-0.1}
+  
+  # Cost control processor
+  costcontrol:
+    daily_budget_usd: ${env:DAILY_BUDGET_USD:-100}
+    monthly_budget_usd: ${env:MONTHLY_BUDGET_USD:-3000}
+    cost_per_gb: ${env:COST_PER_GB:-0.25}
+    cost_per_million_events: ${env:COST_PER_MILLION_EVENTS:-2.00}
+    alert_threshold_percent: ${env:COST_ALERT_THRESHOLD:-80}
+    enforcement_enabled: ${env:COST_ENFORCEMENT_ENABLED:-false}
+  
+  # New Relic error monitoring
+  nrerrormonitor:
+    error_threshold: ${env:NR_ERROR_THRESHOLD:-10}
+    validation_interval: ${env:NR_VALIDATION_INTERVAL:-300s}
+    validation_enabled: ${env:ENABLE_NR_VALIDATION:-true}
+  
+  # Query correlation processor
+  querycorrelator:
+    correlation_window: ${env:CORRELATION_WINDOW:-30s}
+    max_correlations: ${env:MAX_CORRELATIONS:-1000}
+    trace_correlation_enabled: ${env:ENABLE_TRACE_CORRELATION:-true}
+  
+  # Standard batch processor (always last before export)
+  batch:
+    timeout: ${env:BATCH_TIMEOUT:-1s}
+    send_batch_size: ${env:BATCH_SIZE:-1024}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE:-2048}
+
+exporters:
+  # Primary OTLP exporter to New Relic
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:OTLP_RETRY_INITIAL_INTERVAL:-5s}
+      max_interval: ${env:OTLP_RETRY_MAX_INTERVAL:-30s}
+      max_elapsed_time: ${env:OTLP_RETRY_MAX_ELAPSED_TIME:-300s}
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:OTLP_QUEUE_CONSUMERS:-10}
+      queue_size: ${env:OTLP_QUEUE_SIZE:-5000}
+    timeout: ${env:OTLP_TIMEOUT:-30s}
+  
+  # Custom NRI exporter (New Relic Infrastructure format)
+  nri:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+    license_key: ${env:NEW_RELIC_LICENSE_KEY}
+    compress_payload: true
+    timeout: 30s
+  
+  # Prometheus exporter for local metrics
+  prometheus:
+    endpoint: ${env:PROMETHEUS_ENDPOINT:-0.0.0.0:8889}
+    namespace: ${env:PROMETHEUS_NAMESPACE:-database_intelligence}
+    const_labels:
+      service: ${env:SERVICE_NAME:-database-intelligence-collector}
+      environment: ${env:DEPLOYMENT_ENVIRONMENT:-development}
+  
+  # Debug exporter (disable in production)
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:-normal}
+    sampling_initial: ${env:DEBUG_SAMPLING_INITIAL:-5}
+    sampling_thereafter: ${env:DEBUG_SAMPLING_THEREAFTER:-200}
+
+extensions:
+  health_check:
+    endpoint: ${env:HEALTH_CHECK_ENDPOINT:-0.0.0.0:13133}
+    path: ${env:HEALTH_CHECK_PATH:-/}
+    check_collector_pipeline:
+      enabled: ${env:HEALTH_CHECK_PIPELINE_ENABLED:-true}
+      interval: ${env:HEALTH_CHECK_INTERVAL:-5m}
+      exporter_failure_threshold: ${env:HEALTH_CHECK_EXPORTER_FAILURE_THRESHOLD:-5}
+  
+  pprof:
+    endpoint: ${env:PPROF_ENDPOINT:-0.0.0.0:1777}
+    block_profile_fraction: ${env:PPROF_BLOCK_PROFILE_FRACTION:-0}
+    mutex_profile_fraction: ${env:PPROF_MUTEX_PROFILE_FRACTION:-0}
+  
+  zpages:
+    endpoint: ${env:ZPAGES_ENDPOINT:-0.0.0.0:55679}
+  
+  memory_ballast:
+    size_mib: ${env:MEMORY_BALLAST_SIZE_MIB:-64}
+  
+  file_storage:
+    directory: ${env:FILE_STORAGE_DIRECTORY:-/tmp/otel-storage}
+    timeout: ${env:FILE_STORAGE_TIMEOUT:-1s}
+
+service:
+  extensions: [health_check, pprof, zpages, memory_ballast, file_storage]
+  
+  pipelines:
+    # PostgreSQL metrics with full intelligence pipeline
+    metrics/postgresql:
+      receivers: [postgresql, enhancedsql, ash]
+      processors: 
+        - memory_limiter
+        - resource
+        - resourcedetection
+        - adaptivesampler
+        - circuit_breaker
+        - planattributeextractor
+        - verification
+        - costcontrol
+        - nrerrormonitor
+        - querycorrelator
+        - batch
+      exporters: [otlphttp/newrelic, nri, prometheus]
+    
+    # MySQL metrics with full intelligence pipeline
+    metrics/mysql:
+      receivers: [mysql, enhancedsql, ash]
+      processors:
+        - memory_limiter
+        - resource
+        - resourcedetection
+        - adaptivesampler
+        - circuit_breaker
+        - planattributeextractor
+        - verification
+        - costcontrol
+        - nrerrormonitor
+        - querycorrelator
+        - batch
+      exporters: [otlphttp/newrelic, nri, prometheus]
+    
+    # System metrics pipeline
+    metrics/system:
+      receivers: [kernelmetrics]
+      processors:
+        - memory_limiter
+        - resource
+        - resourcedetection
+        - batch
+      exporters: [otlphttp/newrelic, prometheus]
+    
+    # General OTLP metrics
+    metrics:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - resourcedetection
+        - batch
+      exporters: [otlphttp/newrelic, prometheus]
+    
+    # Traces pipeline
+    traces:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - resourcedetection
+        - adaptivesampler
+        - querycorrelator
+        - batch
+      exporters: [otlphttp/newrelic]
+    
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - resourcedetection
+        - verification
+        - batch
+      exporters: [otlphttp/newrelic]
+  
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      development: ${env:LOG_DEVELOPMENT:-false}
+      encoding: ${env:LOG_ENCODING:-json}
+      output_paths: ["stdout"]
+      error_output_paths: ["stderr"]
+      initial_fields:
+        service: ${env:SERVICE_NAME:-database-intelligence-collector}
+        version: ${env:SERVICE_VERSION:-2.0.0}
+    
+    metrics:
+      level: ${env:TELEMETRY_METRICS_LEVEL:-basic}
+      address: ${env:TELEMETRY_METRICS_ADDRESS:-0.0.0.0:8888}
