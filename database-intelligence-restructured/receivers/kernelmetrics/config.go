@@ -143,3 +143,32 @@ func DefaultConfig() *Config {
 		},
 	}
 }
+// CPUMetricsConfig configures CPU metrics collection
+type CPUMetricsConfig struct {
+	Enabled         bool `mapstructure:"enabled"`
+	DetailedMetrics bool `mapstructure:"detailed_metrics"`
+}
+
+// MemoryMetricsConfig configures memory metrics collection
+type MemoryMetricsConfig struct {
+	Enabled         bool `mapstructure:"enabled"`
+	DetailedMetrics bool `mapstructure:"detailed_metrics"`
+}
+
+// DiskMetricsConfig configures disk metrics collection
+type DiskMetricsConfig struct {
+	Enabled         bool `mapstructure:"enabled"`
+	DetailedMetrics bool `mapstructure:"detailed_metrics"`
+}
+
+// NetworkMetricsConfig configures network metrics collection
+type NetworkMetricsConfig struct {
+	Enabled         bool `mapstructure:"enabled"`
+	DetailedMetrics bool `mapstructure:"detailed_metrics"`
+}
+
+// ProcessMetricsConfig configures process metrics collection
+type ProcessMetricsConfig struct {
+	Enabled         bool `mapstructure:"enabled"`
+	TopProcessCount int  `mapstructure:"top_process_count"`
+}

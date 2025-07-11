@@ -1,24 +1,9 @@
 go 1.23.0
 
-toolchain go1.24.3
-
 use (
-	./common
-	./common/featuredetector
-	./common/queryselector
-	./distributions/minimal
 	./distributions/production
-	./exporters/nri
-	./extensions/healthcheck
+	./internal/database
 	./processors/adaptivesampler
-	./processors/circuitbreaker
-	./processors/costcontrol
-	./processors/nrerrormonitor
-	./processors/planattributeextractor
-	./processors/querycorrelator
-	./processors/verification
 	./receivers/ash
-	./receivers/enhancedsql
 	./receivers/kernelmetrics
-	./tests/e2e
 )

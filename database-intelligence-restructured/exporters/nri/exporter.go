@@ -2,102 +2,87 @@ package nri
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
-	
-	// Import rate limiter
-	// "github.com/database-intelligence/core/internal/ratelimit"
 )
 
-// nriMetricsExporter exports metrics in NRI format
+// nriMetricsExporter exports metrics to New Relic Infrastructure
 type nriMetricsExporter struct {
-	config      *Config
-	logger      *zap.Logger
-	writer      *nriWriter
-	// rateLimiter *ratelimit.DatabaseRateLimiter
-	mu          sync.Mutex
-	
-	// Compiled patterns for efficiency
+	config         *Config
+	logger         *zap.Logger
+	writer         nriWriter
 	metricPatterns map[string]*regexp.Regexp
-	
-	// Metrics tracking
-	exportSuccessCount uint64
-	exportErrorCount   uint64
-	rateLimitedCount   uint64
+	mu             sync.RWMutex
 }
 
-// nriLogsExporter exports logs as NRI events
+// nriLogsExporter exports logs to New Relic Infrastructure
 type nriLogsExporter struct {
-	config      *Config
-	logger      *zap.Logger
-	writer      *nriWriter
-	rateLimiter *ratelimit.DatabaseRateLimiter
-	mu          sync.Mutex
-	
-	// Compiled patterns
+	config       *Config
+	logger       *zap.Logger
+	writer       nriWriter
 	eventPatterns map[string]*regexp.Regexp
+	mu           sync.RWMutex
+}
+
+// start starts the exporter
+func (exp *nriMetricsExporter) start(ctx context.Context, host component.Host) error {
+	exp.logger.Info("Starting NRI metrics exporter",
+		zap.String("integration_name", exp.config.IntegrationName),
+		zap.String("output_mode", exp.config.OutputMode))
 	
-	// Metrics tracking
-	exportSuccessCount uint64
-	exportErrorCount   uint64
-	rateLimitedCount   uint64
+	// Compile metric patterns
+	exp.mu.Lock()
+	defer exp.mu.Unlock()
+	
+	for _, rule := range exp.config.MetricRules {
+		pattern, err := regexp.Compile(rule.SourcePattern)
+		if err != nil {
+			return fmt.Errorf("invalid metric pattern %s: %w", rule.SourcePattern, err)
+		}
+		exp.metricPatterns[rule.SourcePattern] = pattern
+	}
+	
+	return nil
 }
 
-// NRI data structures
-type nriPayload struct {
-	Name               string       `json:"name"`
-	IntegrationVersion string       `json:"integration_version"`
-	ProtocolVersion    string       `json:"protocol_version"`
-	Data               []nriEntity  `json:"data"`
+// shutdown stops the exporter
+func (exp *nriMetricsExporter) shutdown(ctx context.Context) error {
+	exp.logger.Info("Shutting down NRI metrics exporter")
+	return exp.writer.close()
 }
 
-type nriEntity struct {
-	Entity     nriEntityInfo        `json:"entity"`
-	Metrics    []nriMetric          `json:"metrics,omitempty"`
-	Events     []nriEvent           `json:"events,omitempty"`
-	Inventory  map[string]inventory `json:"inventory,omitempty"`
+// exportMetrics exports metrics to NRI
+func (exp *nriMetricsExporter) exportMetrics(ctx context.Context, md pmetric.Metrics) error {
+	// Convert metrics to NRI format
+	nriPayload := exp.convertMetrics(md)
+	
+	// Write payload
+	if err := exp.writer.write(nriPayload); err != nil {
+		return fmt.Errorf("failed to write metrics: %w", err)
+	}
+	
+	return nil
 }
 
-type nriEntityInfo struct {
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	DisplayName string            `json:"displayName,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-}
-
-type nriMetric struct {
-	EventType  string                 `json:"event_type"`
-	Timestamp  int64                  `json:"timestamp"`
-	Attributes map[string]interface{} `json:"attributes"`
-}
-
-type nriEvent struct {
-	EventType  string                 `json:"eventType"`
-	Timestamp  int64                  `json:"timestamp"`
-	Category   string                 `json:"category,omitempty"`
-	Summary    string                 `json:"summary"`
-	Attributes map[string]interface{} `json:"attributes"`
-}
-
-type inventory map[string]interface{}
-
-// newMetricsExporter creates a new NRI metrics exporter
-func newMetricsExporter(config *Config, settings exporter.Settings) (*nriMetricsExporter, error) {
-	writer, err := newNRIWriter(config, settings.Logger)
+// newMetricsExporter creates a new metrics exporter
+func newMetricsExporter(config *Config, settings component.TelemetrySettings) (*nriMetricsExporter, error) {
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+	
+	// Create writer
+	writer, err := newNRIWriter(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create writer: %w", err)
 	}
 	
 	exp := &nriMetricsExporter{
@@ -107,54 +92,20 @@ func newMetricsExporter(config *Config, settings exporter.Settings) (*nriMetrics
 		metricPatterns: make(map[string]*regexp.Regexp),
 	}
 	
-	// Initialize rate limiter if configured
-	if config.RateLimiting.Enabled {
-		rateLimitConfig := ratelimit.RateLimiterConfig{
-			DefaultRPS:     config.RateLimiting.RPS,
-			DefaultBurst:   config.RateLimiting.Burst,
-			GlobalMaxRPS:   config.RateLimiting.GlobalMaxRPS,
-			GlobalMaxBurst: config.RateLimiting.GlobalMaxBurst,
-			EnableAdaptive: config.RateLimiting.EnableAdaptive,
-			MinRPS:         config.RateLimiting.MinRPS,
-			MaxRPS:         config.RateLimiting.MaxRPS,
-			EnableMetrics:  true,
-		}
-		
-		// Convert per-database limits
-		if config.RateLimiting.DatabaseLimits != nil {
-			rateLimitConfig.DatabaseLimits = make(map[string]ratelimit.DatabaseLimit)
-			for db, limit := range config.RateLimiting.DatabaseLimits {
-				rateLimitConfig.DatabaseLimits[db] = ratelimit.DatabaseLimit{
-					RPS:   limit.RPS,
-					Burst: limit.Burst,
-				}
-			}
-		}
-		
-		exp.rateLimiter = ratelimit.NewDatabaseRateLimiter(rateLimitConfig, settings.Logger)
-		settings.Logger.Info("Rate limiting enabled for NRI exporter",
-			zap.Float64("default_rps", config.RateLimiting.RPS),
-			zap.Int("default_burst", config.RateLimiting.Burst))
-	}
-	
-	// Compile metric patterns
-	for _, rule := range config.MetricRules {
-		pattern := strings.ReplaceAll(rule.SourcePattern, "*", ".*")
-		re, err := regexp.Compile("^" + pattern + "$")
-		if err != nil {
-			return nil, fmt.Errorf("invalid metric pattern %s: %w", rule.SourcePattern, err)
-		}
-		exp.metricPatterns[rule.SourcePattern] = re
-	}
-	
 	return exp, nil
 }
 
-// newLogsExporter creates a new NRI logs exporter
-func newLogsExporter(config *Config, settings exporter.Settings) (*nriLogsExporter, error) {
-	writer, err := newNRIWriter(config, settings.Logger)
+// newLogsExporter creates a new logs exporter
+func newLogsExporter(config *Config, settings component.TelemetrySettings) (*nriLogsExporter, error) {
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+	
+	// Create writer
+	writer, err := newNRIWriter(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create writer: %w", err)
 	}
 	
 	exp := &nriLogsExporter{
@@ -164,709 +115,593 @@ func newLogsExporter(config *Config, settings exporter.Settings) (*nriLogsExport
 		eventPatterns: make(map[string]*regexp.Regexp),
 	}
 	
-	// Initialize rate limiter if configured (same config as metrics)
-	if config.RateLimiting.Enabled {
-		rateLimitConfig := ratelimit.RateLimiterConfig{
-			DefaultRPS:     config.RateLimiting.RPS,
-			DefaultBurst:   config.RateLimiting.Burst,
-			GlobalMaxRPS:   config.RateLimiting.GlobalMaxRPS,
-			GlobalMaxBurst: config.RateLimiting.GlobalMaxBurst,
-			EnableAdaptive: config.RateLimiting.EnableAdaptive,
-			MinRPS:         config.RateLimiting.MinRPS,
-			MaxRPS:         config.RateLimiting.MaxRPS,
-			EnableMetrics:  true,
-		}
-		
-		// Convert per-database limits
-		if config.RateLimiting.DatabaseLimits != nil {
-			rateLimitConfig.DatabaseLimits = make(map[string]ratelimit.DatabaseLimit)
-			for db, limit := range config.RateLimiting.DatabaseLimits {
-				rateLimitConfig.DatabaseLimits[db] = ratelimit.DatabaseLimit{
-					RPS:   limit.RPS,
-					Burst: limit.Burst,
-				}
-			}
-		}
-		
-		exp.rateLimiter = ratelimit.NewDatabaseRateLimiter(rateLimitConfig, settings.Logger)
-	}
-	
-	// Compile event patterns
-	for _, rule := range config.EventRules {
-		pattern := strings.ReplaceAll(rule.SourcePattern, "*", ".*")
-		re, err := regexp.Compile("^" + pattern + "$")
-		if err != nil {
-			return nil, fmt.Errorf("invalid event pattern %s: %w", rule.SourcePattern, err)
-		}
-		exp.eventPatterns[rule.SourcePattern] = re
-	}
-	
 	return exp, nil
 }
 
-// start initializes the exporter
-func (e *nriMetricsExporter) start(ctx context.Context, host component.Host) error {
-	return e.writer.start()
-}
-
-// shutdown cleans up the exporter
-func (e *nriMetricsExporter) shutdown(ctx context.Context) error {
-	return e.writer.close()
-}
-
-// exportMetrics exports metrics in NRI format
-func (e *nriMetricsExporter) exportMetrics(ctx context.Context, md pmetric.Metrics) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+// start starts the logs exporter
+func (exp *nriLogsExporter) start(ctx context.Context, host component.Host) error {
+	exp.logger.Info("Starting NRI logs exporter",
+		zap.String("integration_name", exp.config.IntegrationName),
+		zap.String("output_mode", exp.config.OutputMode))
 	
-	// Apply rate limiting if enabled
-	if e.rateLimiter != nil {
-		// Extract database name from resource attributes
-		database := e.extractDatabaseName(md)
-		
-		// Check rate limit
-		if !e.rateLimiter.Allow(ctx, database) {
-			e.rateLimitedCount++
-			e.logger.Debug("Export rate limited",
-				zap.String("database", database),
-				zap.Uint64("total_rate_limited", e.rateLimitedCount))
-			return fmt.Errorf("rate limit exceeded for database: %s", database)
+	// Compile event patterns
+	exp.mu.Lock()
+	defer exp.mu.Unlock()
+	
+	for _, rule := range exp.config.EventRules {
+		pattern, err := regexp.Compile(rule.SourcePattern)
+		if err != nil {
+			return fmt.Errorf("invalid event pattern %s: %w", rule.SourcePattern, err)
 		}
+		exp.eventPatterns[rule.SourcePattern] = pattern
 	}
 	
-	// Convert metrics to NRI format
-	payload := e.convertToNRI(md)
-	
-	// Write payload
-	err := e.writer.write(payload)
-	if err != nil {
-		e.exportErrorCount++
-		return err
-	}
-	
-	e.exportSuccessCount++
 	return nil
 }
 
-// convertToNRI converts OpenTelemetry metrics to NRI format
-func (e *nriMetricsExporter) convertToNRI(md pmetric.Metrics) *nriPayload {
-	payload := &nriPayload{
-		Name:               e.config.IntegrationName,
-		IntegrationVersion: e.config.IntegrationVersion,
-		ProtocolVersion:    fmt.Sprintf("%d", e.config.ProtocolVersion),
-		Data:               []nriEntity{},
+// shutdown stops the logs exporter
+func (exp *nriLogsExporter) shutdown(ctx context.Context) error {
+	exp.logger.Info("Shutting down NRI logs exporter")
+	return exp.writer.close()
+}
+
+// exportLogs exports logs to NRI
+func (exp *nriLogsExporter) exportLogs(ctx context.Context, ld plog.Logs) error {
+	// Convert logs to NRI events
+	nriPayload := exp.convertLogs(ld)
+	
+	// Write payload
+	if err := exp.writer.write(nriPayload); err != nil {
+		return fmt.Errorf("failed to write logs: %w", err)
 	}
 	
-	// Group metrics by entity
-	entities := make(map[string]*nriEntity)
+	return nil
+}
+
+// convertMetrics converts OTel metrics to NRI format
+func (exp *nriMetricsExporter) convertMetrics(md pmetric.Metrics) interface{} {
+	exp.mu.RLock()
+	defer exp.mu.RUnlock()
 	
+	// Create NRI payload
+	payload := map[string]interface{}{
+		"name":                exp.config.IntegrationName,
+		"integration_version": exp.config.IntegrationVersion,
+		"protocol_version":    exp.config.ProtocolVersion,
+		"data":                []interface{}{},
+	}
+	
+	data := make([]interface{}, 0)
+	
+	// Process resource metrics
 	rms := md.ResourceMetrics()
 	for i := 0; i < rms.Len(); i++ {
 		rm := rms.At(i)
 		resource := rm.Resource()
 		
-		// Create entity key
-		entityKey := e.getEntityKey(resource.Attributes())
-		
-		// Get or create entity
-		entity, exists := entities[entityKey]
-		if !exists {
-			entity = &nriEntity{
-				Entity: e.createEntityInfo(resource.Attributes()),
-				Metrics: []nriMetric{},
-			}
-			entities[entityKey] = entity
-		}
+		// Create entity from resource
+		entity := exp.createEntity(resource)
 		
 		// Process scope metrics
 		sms := rm.ScopeMetrics()
 		for j := 0; j < sms.Len(); j++ {
 			sm := sms.At(j)
-			metrics := sm.Metrics()
 			
+			// Process metrics
+			metrics := sm.Metrics()
 			for k := 0; k < metrics.Len(); k++ {
 				metric := metrics.At(k)
-				nriMetrics := e.convertMetric(metric, resource.Attributes())
-				entity.Metrics = append(entity.Metrics, nriMetrics...)
-			}
-		}
-	}
-	
-	// Add entities to payload
-	for _, entity := range entities {
-		payload.Data = append(payload.Data, *entity)
-	}
-	
-	return payload
-}
-
-// convertMetric converts a single metric to NRI format
-func (e *nriMetricsExporter) convertMetric(metric pmetric.Metric, resourceAttrs pcommon.Map) []nriMetric {
-	var nriMetrics []nriMetric
-	
-	// Find matching rule
-	var matchedRule *MetricRule
-	for _, rule := range e.config.MetricRules {
-		if re, ok := e.metricPatterns[rule.SourcePattern]; ok {
-			if re.MatchString(metric.Name()) {
-				matchedRule = &rule
-				break
-			}
-		}
-	}
-	
-	if matchedRule == nil {
-		// No matching rule, use default conversion
-		matchedRule = &MetricRule{
-			TargetName:  metric.Name(),
-			NRIType:     "GAUGE",
-			ScaleFactor: 1.0,
-		}
-	}
-	
-	// Convert based on metric type
-	switch metric.Type() {
-	case pmetric.MetricTypeGauge:
-		nriMetrics = e.convertGauge(metric.Gauge(), metric.Name(), matchedRule, resourceAttrs)
-	case pmetric.MetricTypeSum:
-		nriMetrics = e.convertSum(metric.Sum(), metric.Name(), matchedRule, resourceAttrs)
-	case pmetric.MetricTypeHistogram:
-		nriMetrics = e.convertHistogram(metric.Histogram(), metric.Name(), matchedRule, resourceAttrs)
-	}
-	
-	return nriMetrics
-}
-
-// convertGauge converts gauge metrics
-func (e *nriMetricsExporter) convertGauge(gauge pmetric.Gauge, name string, rule *MetricRule, resourceAttrs pcommon.Map) []nriMetric {
-	var metrics []nriMetric
-	
-	dps := gauge.DataPoints()
-	for i := 0; i < dps.Len(); i++ {
-		dp := dps.At(i)
-		
-		metric := nriMetric{
-			EventType:  e.config.IntegrationName + "Sample",
-			Timestamp:  dp.Timestamp().AsTime().Unix(),
-			Attributes: make(map[string]interface{}),
-		}
-		
-		// Set metric name and value
-		targetName := e.applyNameTemplate(rule.TargetName, name)
-		metric.Attributes[targetName] = dp.DoubleValue() * rule.ScaleFactor
-		metric.Attributes["metricType"] = rule.NRIType
-		
-		// Add resource attributes
-		resourceAttrs.Range(func(k string, v pcommon.Value) bool {
-			metric.Attributes[k] = v.AsString()
-			return true
-		})
-		
-		// Add data point attributes with mapping
-		dp.Attributes().Range(func(k string, v pcommon.Value) bool {
-			mappedKey := k
-			if mapped, ok := rule.AttributeMappings[k]; ok {
-				mappedKey = mapped
-			}
-			
-			// Check include/exclude
-			if e.shouldIncludeAttribute(k, rule) {
-				metric.Attributes[mappedKey] = v.AsString()
-			}
-			return true
-		})
-		
-		metrics = append(metrics, metric)
-	}
-	
-	return metrics
-}
-
-// convertSum converts sum metrics
-func (e *nriMetricsExporter) convertSum(sum pmetric.Sum, name string, rule *MetricRule, resourceAttrs pcommon.Map) []nriMetric {
-	var metrics []nriMetric
-	
-	dps := sum.DataPoints()
-	for i := 0; i < dps.Len(); i++ {
-		dp := dps.At(i)
-		
-		metric := nriMetric{
-			EventType:  e.config.IntegrationName + "Sample",
-			Timestamp:  dp.Timestamp().AsTime().Unix(),
-			Attributes: make(map[string]interface{}),
-		}
-		
-		// Determine NRI type based on temporality
-		nriType := rule.NRIType
-		if nriType == "" {
-			if sum.IsMonotonic() {
-				nriType = "RATE"
-			} else {
-				nriType = "DELTA"
-			}
-		}
-		
-		// Set metric name and value
-		targetName := e.applyNameTemplate(rule.TargetName, name)
-		metric.Attributes[targetName] = dp.DoubleValue() * rule.ScaleFactor
-		metric.Attributes["metricType"] = nriType
-		
-		// Add attributes
-		resourceAttrs.Range(func(k string, v pcommon.Value) bool {
-			metric.Attributes[k] = v.AsString()
-			return true
-		})
-		
-		dp.Attributes().Range(func(k string, v pcommon.Value) bool {
-			mappedKey := k
-			if mapped, ok := rule.AttributeMappings[k]; ok {
-				mappedKey = mapped
-			}
-			
-			if e.shouldIncludeAttribute(k, rule) {
-				metric.Attributes[mappedKey] = v.AsString()
-			}
-			return true
-		})
-		
-		metrics = append(metrics, metric)
-	}
-	
-	return metrics
-}
-
-// convertHistogram converts histogram metrics
-func (e *nriMetricsExporter) convertHistogram(hist pmetric.Histogram, name string, rule *MetricRule, resourceAttrs pcommon.Map) []nriMetric {
-	var metrics []nriMetric
-	
-	dps := hist.DataPoints()
-	for i := 0; i < dps.Len(); i++ {
-		dp := dps.At(i)
-		
-		// Create base metric for summary statistics
-		baseMetric := nriMetric{
-			EventType:  e.config.IntegrationName + "Sample",
-			Timestamp:  dp.Timestamp().AsTime().Unix(),
-			Attributes: make(map[string]interface{}),
-		}
-		
-		// Add resource and datapoint attributes
-		resourceAttrs.Range(func(k string, v pcommon.Value) bool {
-			baseMetric.Attributes[k] = v.AsString()
-			return true
-		})
-		
-		dp.Attributes().Range(func(k string, v pcommon.Value) bool {
-			mappedKey := k
-			if mapped, ok := rule.AttributeMappings[k]; ok {
-				mappedKey = mapped
-			}
-			
-			if e.shouldIncludeAttribute(k, rule) {
-				baseMetric.Attributes[mappedKey] = v.AsString()
-			}
-			return true
-		})
-		
-		// Add summary statistics
-		targetName := e.applyNameTemplate(rule.TargetName, name)
-		
-		// Count
-		countMetric := baseMetric
-		countMetric.Attributes = copyAttributes(baseMetric.Attributes)
-		countMetric.Attributes[targetName+".count"] = float64(dp.Count())
-		countMetric.Attributes["metricType"] = "GAUGE"
-		metrics = append(metrics, countMetric)
-		
-		// Sum
-		if dp.HasSum() {
-			sumMetric := baseMetric
-			sumMetric.Attributes = copyAttributes(baseMetric.Attributes)
-			sumMetric.Attributes[targetName+".sum"] = dp.Sum() * rule.ScaleFactor
-			sumMetric.Attributes["metricType"] = "GAUGE"
-			metrics = append(metrics, sumMetric)
-		}
-		
-		// Min
-		if dp.HasMin() {
-			minMetric := baseMetric
-			minMetric.Attributes = copyAttributes(baseMetric.Attributes)
-			minMetric.Attributes[targetName+".min"] = dp.Min() * rule.ScaleFactor
-			minMetric.Attributes["metricType"] = "GAUGE"
-			metrics = append(metrics, minMetric)
-		}
-		
-		// Max
-		if dp.HasMax() {
-			maxMetric := baseMetric
-			maxMetric.Attributes = copyAttributes(baseMetric.Attributes)
-			maxMetric.Attributes[targetName+".max"] = dp.Max() * rule.ScaleFactor
-			maxMetric.Attributes["metricType"] = "GAUGE"
-			metrics = append(metrics, maxMetric)
-		}
-		
-		// Percentiles from explicit bounds
-		if dp.ExplicitBounds().Len() > 0 {
-			percentiles := calculatePercentilesFromHistogram(dp)
-			for p, value := range percentiles {
-				pMetric := baseMetric
-				pMetric.Attributes = copyAttributes(baseMetric.Attributes)
-				pMetric.Attributes[fmt.Sprintf("%s.p%d", targetName, p)] = value * rule.ScaleFactor
-				pMetric.Attributes["metricType"] = "GAUGE"
-				metrics = append(metrics, pMetric)
-			}
-		}
-	}
-	
-	return metrics
-}
-
-// Helper functions
-
-func (e *nriMetricsExporter) getEntityKey(attrs pcommon.Map) string {
-	// Create a unique key for the entity based on identifying attributes
-	var parts []string
-	
-	// Common database identifiers
-	identifiers := []string{"db.system", "db.name", "host.name", "service.name"}
-	
-	for _, id := range identifiers {
-		if val, ok := attrs.Get(id); ok {
-			parts = append(parts, val.AsString())
-		}
-	}
-	
-	if len(parts) == 0 {
-		return "default"
-	}
-	
-	return strings.Join(parts, ":")
-}
-
-func (e *nriMetricsExporter) createEntityInfo(attrs pcommon.Map) nriEntityInfo {
-	info := nriEntityInfo{
-		Type:     e.config.Entity.Type,
-		Metadata: make(map[string]string),
-	}
-	
-	// Set entity name
-	if e.config.Entity.NameSource != "" {
-		if val, ok := attrs.Get(e.config.Entity.NameSource); ok {
-			info.Name = val.AsString()
-		}
-	}
-	
-	if info.Name == "" {
-		info.Name = "unknown"
-	}
-	
-	// Set display name using template
-	if e.config.Entity.DisplayNameTemplate != "" {
-		// Simple template replacement
-		displayName := e.config.Entity.DisplayNameTemplate
-		attrs.Range(func(k string, v pcommon.Value) bool {
-			placeholder := "{{." + k + "}}"
-			displayName = strings.ReplaceAll(displayName, placeholder, v.AsString())
-			return true
-		})
-		info.DisplayName = displayName
-	}
-	
-	// Add configured attributes
-	for k, v := range e.config.Entity.Attributes {
-		info.Metadata[k] = v
-	}
-	
-	// Add selected resource attributes as metadata
-	attrs.Range(func(k string, v pcommon.Value) bool {
-		if strings.HasPrefix(k, "db.") || strings.HasPrefix(k, "host.") {
-			info.Metadata[k] = v.AsString()
-		}
-		return true
-	})
-	
-	return info
-}
-
-func (e *nriMetricsExporter) applyNameTemplate(template, metricName string) string {
-	// Extract metric suffix
-	parts := strings.Split(metricName, ".")
-	suffix := parts[len(parts)-1]
-	
-	// Replace placeholders
-	result := strings.ReplaceAll(template, "{{.metric_suffix}}", suffix)
-	result = strings.ReplaceAll(result, "{{.metric_name}}", metricName)
-	
-	return result
-}
-
-func (e *nriMetricsExporter) shouldIncludeAttribute(attr string, rule *MetricRule) bool {
-	// Check exclude list first
-	for _, excluded := range rule.ExcludeAttributes {
-		if attr == excluded {
-			return false
-		}
-	}
-	
-	// If include list is specified, attribute must be in it
-	if len(rule.IncludeAttributes) > 0 {
-		for _, included := range rule.IncludeAttributes {
-			if attr == included {
-				return true
-			}
-		}
-		return false
-	}
-	
-	// Default to include
-	return true
-}
-
-func copyAttributes(attrs map[string]interface{}) map[string]interface{} {
-	copy := make(map[string]interface{})
-	for k, v := range attrs {
-		copy[k] = v
-	}
-	return copy
-}
-
-func calculatePercentilesFromHistogram(dp pmetric.HistogramDataPoint) map[int]float64 {
-	// Simplified percentile calculation from histogram buckets
-	// In production, this would use proper statistical methods
-	percentiles := make(map[int]float64)
-	
-	if dp.Count() == 0 {
-		return percentiles
-	}
-	
-	// Calculate approximate percentiles
-	totalCount := dp.Count()
-	p50Count := uint64(float64(totalCount) * 0.5)
-	p90Count := uint64(float64(totalCount) * 0.9)
-	p95Count := uint64(float64(totalCount) * 0.95)
-	p99Count := uint64(float64(totalCount) * 0.99)
-	
-	var cumulativeCount uint64
-	bounds := dp.ExplicitBounds()
-	buckets := dp.BucketCounts()
-	
-	for i := 0; i < buckets.Len() && i < bounds.Len(); i++ {
-		cumulativeCount += buckets.At(i)
-		
-		if cumulativeCount >= p50Count && percentiles[50] == 0 {
-			percentiles[50] = bounds.At(i)
-		}
-		if cumulativeCount >= p90Count && percentiles[90] == 0 {
-			percentiles[90] = bounds.At(i)
-		}
-		if cumulativeCount >= p95Count && percentiles[95] == 0 {
-			percentiles[95] = bounds.At(i)
-		}
-		if cumulativeCount >= p99Count && percentiles[99] == 0 {
-			percentiles[99] = bounds.At(i)
-		}
-	}
-	
-	return percentiles
-}
-
-// Logs exporter methods
-
-func (e *nriLogsExporter) start(ctx context.Context, host component.Host) error {
-	return e.writer.start()
-}
-
-func (e *nriLogsExporter) shutdown(ctx context.Context) error {
-	return e.writer.close()
-}
-
-func (e *nriLogsExporter) exportLogs(ctx context.Context, ld plog.Logs) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	
-	// Apply rate limiting if enabled
-	if e.rateLimiter != nil {
-		// Extract database name from resource attributes
-		database := e.extractDatabaseNameFromLogs(ld)
-		
-		// Check rate limit
-		if !e.rateLimiter.Allow(ctx, database) {
-			e.rateLimitedCount++
-			e.logger.Debug("Export rate limited",
-				zap.String("database", database),
-				zap.Uint64("total_rate_limited", e.rateLimitedCount))
-			return fmt.Errorf("rate limit exceeded for database: %s", database)
-		}
-	}
-	
-	// Convert logs to NRI events
-	payload := e.convertLogsToNRI(ld)
-	
-	// Write payload
-	err := e.writer.write(payload)
-	if err != nil {
-		e.exportErrorCount++
-		return err
-	}
-	
-	e.exportSuccessCount++
-	return nil
-}
-
-func (e *nriLogsExporter) convertLogsToNRI(ld plog.Logs) *nriPayload {
-	payload := &nriPayload{
-		Name:               e.config.IntegrationName,
-		IntegrationVersion: e.config.IntegrationVersion,
-		ProtocolVersion:    fmt.Sprintf("%d", e.config.ProtocolVersion),
-		Data:               []nriEntity{},
-	}
-	
-	// Group events by entity
-	entities := make(map[string]*nriEntity)
-	
-	rls := ld.ResourceLogs()
-	for i := 0; i < rls.Len(); i++ {
-		rl := rls.At(i)
-		resource := rl.Resource()
-		
-		// Create entity key
-		entityKey := e.getEntityKey(resource.Attributes())
-		
-		// Get or create entity
-		entity, exists := entities[entityKey]
-		if !exists {
-			entity = &nriEntity{
-				Entity: e.createEntityInfo(resource.Attributes()),
-				Events: []nriEvent{},
-			}
-			entities[entityKey] = entity
-		}
-		
-		// Process scope logs
-		sls := rl.ScopeLogs()
-		for j := 0; j < sls.Len(); j++ {
-			sl := sls.At(j)
-			logRecords := sl.LogRecords()
-			
-			for k := 0; k < logRecords.Len(); k++ {
-				logRecord := logRecords.At(k)
-				event := e.convertLogRecord(logRecord, resource.Attributes())
-				if event != nil {
-					entity.Events = append(entity.Events, *event)
+				
+				// Convert metric based on matching rules
+				if nriMetrics := exp.convertMetric(metric, resource); len(nriMetrics) > 0 {
+					entityData := map[string]interface{}{
+						"entity":  entity,
+						"metrics": nriMetrics,
+					}
+					data = append(data, entityData)
 				}
 			}
 		}
 	}
 	
-	// Add entities to payload
-	for _, entity := range entities {
-		if len(entity.Events) > 0 {
-			payload.Data = append(payload.Data, *entity)
-		}
-	}
-	
+	payload["data"] = data
 	return payload
 }
 
-func (e *nriLogsExporter) convertLogRecord(lr plog.LogRecord, resourceAttrs pcommon.Map) *nriEvent {
-	// Find matching event rule
-	var matchedRule *EventRule
+// convertLogs converts OTel logs to NRI events
+func (exp *nriLogsExporter) convertLogs(ld plog.Logs) interface{} {
+	exp.mu.RLock()
+	defer exp.mu.RUnlock()
 	
-	// Check body for pattern matching
-	body := lr.Body().AsString()
-	for _, rule := range e.config.EventRules {
-		if re, ok := e.eventPatterns[rule.SourcePattern]; ok {
-			if re.MatchString(body) {
+	// Create NRI payload
+	payload := map[string]interface{}{
+		"name":                exp.config.IntegrationName,
+		"integration_version": exp.config.IntegrationVersion,
+		"protocol_version":    exp.config.ProtocolVersion,
+		"data":                []interface{}{},
+	}
+	
+	data := make([]interface{}, 0)
+	
+	// Process resource logs
+	rls := ld.ResourceLogs()
+	for i := 0; i < rls.Len(); i++ {
+		rl := rls.At(i)
+		resource := rl.Resource()
+		
+		// Create entity from resource
+		entity := exp.createEntity(resource)
+		
+		// Process scope logs
+		sls := rl.ScopeLogs()
+		for j := 0; j < sls.Len(); j++ {
+			sl := sls.At(j)
+			
+			// Process log records
+			logs := sl.LogRecords()
+			for k := 0; k < logs.Len(); k++ {
+				log := logs.At(k)
+				
+				// Convert log to event based on matching rules
+				if event := exp.convertLogToEvent(log, resource); event != nil {
+					entityData := map[string]interface{}{
+						"entity": entity,
+						"events": []interface{}{event},
+					}
+					data = append(data, entityData)
+				}
+			}
+		}
+	}
+	
+	payload["data"] = data
+	return payload
+}
+
+// createEntity creates an NRI entity from resource attributes
+func (exp *nriMetricsExporter) createEntity(resource pcommon.Resource) map[string]interface{} {
+	entity := map[string]interface{}{
+		"type": exp.config.Entity.Type,
+	}
+	
+	// Get entity name from configured source
+	attrs := resource.Attributes()
+	if nameValue, ok := attrs.Get(exp.config.Entity.NameSource); ok {
+		entity["name"] = nameValue.AsString()
+	} else {
+		entity["name"] = "unknown"
+	}
+	
+	// Set display name if template is configured
+	if exp.config.Entity.DisplayNameTemplate != "" {
+		entity["displayName"] = exp.expandTemplate(exp.config.Entity.DisplayNameTemplate, attrs)
+	}
+	
+	// Add configured attributes
+	if len(exp.config.Entity.Attributes) > 0 {
+		entity["metadata"] = exp.config.Entity.Attributes
+	}
+	
+	return entity
+}
+
+// createEntity creates an NRI entity from resource attributes (logs exporter)
+func (exp *nriLogsExporter) createEntity(resource pcommon.Resource) map[string]interface{} {
+	entity := map[string]interface{}{
+		"type": exp.config.Entity.Type,
+	}
+	
+	// Get entity name from configured source
+	attrs := resource.Attributes()
+	if nameValue, ok := attrs.Get(exp.config.Entity.NameSource); ok {
+		entity["name"] = nameValue.AsString()
+	} else {
+		entity["name"] = "unknown"
+	}
+	
+	// Set display name if template is configured
+	if exp.config.Entity.DisplayNameTemplate != "" {
+		entity["displayName"] = exp.expandTemplate(exp.config.Entity.DisplayNameTemplate, attrs)
+	}
+	
+	// Add configured attributes
+	if len(exp.config.Entity.Attributes) > 0 {
+		entity["metadata"] = exp.config.Entity.Attributes
+	}
+	
+	return entity
+}
+
+// convertMetric converts a single metric based on rules
+func (exp *nriMetricsExporter) convertMetric(metric pmetric.Metric, resource pcommon.Resource) []map[string]interface{} {
+	metricName := metric.Name()
+	
+	// Find matching rule
+	var matchedRule *MetricRule
+	for _, rule := range exp.config.MetricRules {
+		if pattern, ok := exp.metricPatterns[rule.SourcePattern]; ok && pattern.MatchString(metricName) {
+			matchedRule = &rule
+			break
+		}
+	}
+	
+	if matchedRule == nil {
+		return nil
+	}
+	
+	// Convert based on metric type
+	var nriMetrics []map[string]interface{}
+	
+	switch metric.Type() {
+	case pmetric.MetricTypeGauge:
+		nriMetrics = exp.convertGauge(metric.Gauge(), metricName, matchedRule)
+	case pmetric.MetricTypeSum:
+		nriMetrics = exp.convertSum(metric.Sum(), metricName, matchedRule)
+	case pmetric.MetricTypeHistogram:
+		nriMetrics = exp.convertHistogram(metric.Histogram(), metricName, matchedRule)
+	case pmetric.MetricTypeSummary:
+		nriMetrics = exp.convertSummary(metric.Summary(), metricName, matchedRule)
+	}
+	
+	return nriMetrics
+}
+
+// convertGauge converts a gauge metric
+func (exp *nriMetricsExporter) convertGauge(gauge pmetric.Gauge, metricName string, rule *MetricRule) []map[string]interface{} {
+	var metrics []map[string]interface{}
+	
+	dps := gauge.DataPoints()
+	for i := 0; i < dps.Len(); i++ {
+		dp := dps.At(i)
+		
+		// Create NRI metric
+		nriMetric := map[string]interface{}{
+			"name":      exp.expandMetricName(rule.TargetName, metricName),
+			"type":      rule.NRIType,
+			"timestamp": dp.Timestamp().AsTime().Unix(),
+		}
+		
+		// Set value based on type
+		switch dp.ValueType() {
+		case pmetric.NumberDataPointValueTypeInt:
+			nriMetric["value"] = float64(dp.IntValue()) * rule.ScaleFactor
+		case pmetric.NumberDataPointValueTypeDouble:
+			nriMetric["value"] = dp.DoubleValue() * rule.ScaleFactor
+		}
+		
+		// Add attributes
+		attrs := exp.filterAttributes(dp.Attributes(), rule)
+		if len(attrs) > 0 {
+			nriMetric["attributes"] = attrs
+		}
+		
+		metrics = append(metrics, nriMetric)
+	}
+	
+	return metrics
+}
+
+// convertSum converts a sum metric
+func (exp *nriMetricsExporter) convertSum(sum pmetric.Sum, metricName string, rule *MetricRule) []map[string]interface{} {
+	var metrics []map[string]interface{}
+	
+	// Determine NRI type based on sum properties
+	nriType := rule.NRIType
+	if nriType == "" {
+		if sum.IsMonotonic() {
+			nriType = "CUMULATIVE"
+		} else {
+			nriType = "GAUGE"
+		}
+	}
+	
+	dps := sum.DataPoints()
+	for i := 0; i < dps.Len(); i++ {
+		dp := dps.At(i)
+		
+		// Create NRI metric
+		nriMetric := map[string]interface{}{
+			"name":      exp.expandMetricName(rule.TargetName, metricName),
+			"type":      nriType,
+			"timestamp": dp.Timestamp().AsTime().Unix(),
+		}
+		
+		// Set value based on type
+		switch dp.ValueType() {
+		case pmetric.NumberDataPointValueTypeInt:
+			nriMetric["value"] = float64(dp.IntValue()) * rule.ScaleFactor
+		case pmetric.NumberDataPointValueTypeDouble:
+			nriMetric["value"] = dp.DoubleValue() * rule.ScaleFactor
+		}
+		
+		// Add attributes
+		attrs := exp.filterAttributes(dp.Attributes(), rule)
+		if len(attrs) > 0 {
+			nriMetric["attributes"] = attrs
+		}
+		
+		metrics = append(metrics, nriMetric)
+	}
+	
+	return metrics
+}
+
+// convertHistogram converts a histogram metric
+func (exp *nriMetricsExporter) convertHistogram(histogram pmetric.Histogram, metricName string, rule *MetricRule) []map[string]interface{} {
+	var metrics []map[string]interface{}
+	
+	dps := histogram.DataPoints()
+	for i := 0; i < dps.Len(); i++ {
+		dp := dps.At(i)
+		
+		// Create summary metrics
+		baseAttrs := exp.filterAttributes(dp.Attributes(), rule)
+		timestamp := dp.Timestamp().AsTime().Unix()
+		
+		// Count metric
+		metrics = append(metrics, map[string]interface{}{
+			"name":       exp.expandMetricName(rule.TargetName+".count", metricName),
+			"type":       "CUMULATIVE",
+			"value":      float64(dp.Count()),
+			"timestamp":  timestamp,
+			"attributes": baseAttrs,
+		})
+		
+		// Sum metric
+		if dp.HasSum() {
+			metrics = append(metrics, map[string]interface{}{
+				"name":       exp.expandMetricName(rule.TargetName+".sum", metricName),
+				"type":       "CUMULATIVE",
+				"value":      dp.Sum() * rule.ScaleFactor,
+				"timestamp":  timestamp,
+				"attributes": baseAttrs,
+			})
+		}
+		
+		// Bucket metrics
+		buckets := dp.BucketCounts()
+		bounds := dp.ExplicitBounds()
+		for j := 0; j < buckets.Len() && j < bounds.Len(); j++ {
+			bucketAttrs := make(map[string]interface{})
+			for k, v := range baseAttrs {
+				bucketAttrs[k] = v
+			}
+			bucketAttrs["bucket.max"] = bounds.At(j)
+			
+			metrics = append(metrics, map[string]interface{}{
+				"name":       exp.expandMetricName(rule.TargetName+".bucket", metricName),
+				"type":       "CUMULATIVE",
+				"value":      float64(buckets.At(j)),
+				"timestamp":  timestamp,
+				"attributes": bucketAttrs,
+			})
+		}
+	}
+	
+	return metrics
+}
+
+// convertSummary converts a summary metric
+func (exp *nriMetricsExporter) convertSummary(summary pmetric.Summary, metricName string, rule *MetricRule) []map[string]interface{} {
+	var metrics []map[string]interface{}
+	
+	dps := summary.DataPoints()
+	for i := 0; i < dps.Len(); i++ {
+		dp := dps.At(i)
+		
+		// Create summary metrics
+		baseAttrs := exp.filterAttributes(dp.Attributes(), rule)
+		timestamp := dp.Timestamp().AsTime().Unix()
+		
+		// Count metric
+		metrics = append(metrics, map[string]interface{}{
+			"name":       exp.expandMetricName(rule.TargetName+".count", metricName),
+			"type":       "CUMULATIVE",
+			"value":      float64(dp.Count()),
+			"timestamp":  timestamp,
+			"attributes": baseAttrs,
+		})
+		
+		// Sum metric
+		metrics = append(metrics, map[string]interface{}{
+			"name":       exp.expandMetricName(rule.TargetName+".sum", metricName),
+			"type":       "CUMULATIVE",
+			"value":      dp.Sum() * rule.ScaleFactor,
+			"timestamp":  timestamp,
+			"attributes": baseAttrs,
+		})
+		
+		// Quantile metrics
+		quantiles := dp.QuantileValues()
+		for j := 0; j < quantiles.Len(); j++ {
+			q := quantiles.At(j)
+			quantileAttrs := make(map[string]interface{})
+			for k, v := range baseAttrs {
+				quantileAttrs[k] = v
+			}
+			quantileAttrs["quantile"] = q.Quantile()
+			
+			metrics = append(metrics, map[string]interface{}{
+				"name":       exp.expandMetricName(rule.TargetName+".quantile", metricName),
+				"type":       "GAUGE",
+				"value":      q.Value() * rule.ScaleFactor,
+				"timestamp":  timestamp,
+				"attributes": quantileAttrs,
+			})
+		}
+	}
+	
+	return metrics
+}
+
+// convertLogToEvent converts a log record to an NRI event
+func (exp *nriLogsExporter) convertLogToEvent(log plog.LogRecord, resource pcommon.Resource) map[string]interface{} {
+	// Get log attributes
+	attrs := log.Attributes()
+	
+	// Check if log matches any event rule
+	var matchedRule *EventRule
+	for _, rule := range exp.config.EventRules {
+		if pattern, ok := exp.eventPatterns[rule.SourcePattern]; ok {
+			// Check various fields for pattern match
+			if pattern.MatchString(log.Body().AsString()) ||
+				pattern.MatchString(log.SeverityText()) {
 				matchedRule = &rule
+				break
+			}
+			
+			// Check attributes
+			attrs.Range(func(k string, v pcommon.Value) bool {
+				if pattern.MatchString(k) || pattern.MatchString(v.AsString()) {
+					matchedRule = &rule
+					return false
+				}
+				return true
+			})
+			
+			if matchedRule != nil {
 				break
 			}
 		}
 	}
 	
 	if matchedRule == nil {
-		// No matching rule, skip
 		return nil
 	}
 	
-	event := &nriEvent{
-		EventType:  matchedRule.EventType,
-		Timestamp:  lr.Timestamp().AsTime().Unix(),
-		Category:   matchedRule.Category,
-		Attributes: make(map[string]interface{}),
+	// Create NRI event
+	event := map[string]interface{}{
+		"eventType": matchedRule.EventType,
+		"category":  matchedRule.Category,
+		"timestamp": log.Timestamp().AsTime().Unix(),
 	}
 	
-	// Build summary using template
-	summary := matchedRule.SummaryTemplate
-	lr.Attributes().Range(func(k string, v pcommon.Value) bool {
-		placeholder := "{{." + k + "}}"
-		summary = strings.ReplaceAll(summary, placeholder, v.AsString())
-		return true
-	})
-	event.Summary = summary
-	
-	// Add attributes
-	resourceAttrs.Range(func(k string, v pcommon.Value) bool {
-		event.Attributes[k] = v.AsString()
-		return true
-	})
-	
-	lr.Attributes().Range(func(k string, v pcommon.Value) bool {
-		mappedKey := k
-		if mapped, ok := matchedRule.AttributeMappings[k]; ok {
-			mappedKey = mapped
-		}
-		event.Attributes[mappedKey] = v.AsString()
-		return true
-	})
+	// Set summary
+	if matchedRule.SummaryTemplate != "" {
+		event["summary"] = exp.expandTemplate(matchedRule.SummaryTemplate, attrs)
+	} else {
+		event["summary"] = log.Body().AsString()
+	}
 	
 	// Add severity
-	event.Attributes["severity"] = lr.SeverityText()
+	if log.SeverityText() != "" {
+		event["severity"] = log.SeverityText()
+	}
+	
+	// Map attributes
+	eventAttrs := make(map[string]interface{})
+	
+	// Apply attribute mappings
+	if len(matchedRule.AttributeMappings) > 0 {
+		for source, target := range matchedRule.AttributeMappings {
+			if value, ok := attrs.Get(source); ok {
+				eventAttrs[target] = value.AsString()
+			}
+		}
+	} else {
+		// Add all attributes
+		attrs.Range(func(k string, v pcommon.Value) bool {
+			eventAttrs[k] = v.AsString()
+			return true
+		})
+	}
+	
+	if len(eventAttrs) > 0 {
+		event["attributes"] = eventAttrs
+	}
 	
 	return event
 }
 
-// extractDatabaseName extracts database name from metrics for rate limiting
-func (e *nriMetricsExporter) extractDatabaseName(md pmetric.Metrics) string {
-	if md.ResourceMetrics().Len() > 0 {
-		rm := md.ResourceMetrics().At(0)
-		if val, ok := rm.Resource().Attributes().Get("db.name"); ok {
-			return val.AsString()
+// filterAttributes filters attributes based on rules
+func (exp *nriMetricsExporter) filterAttributes(attrs pcommon.Map, rule *MetricRule) map[string]interface{} {
+	result := make(map[string]interface{})
+	
+	// Apply attribute mappings if configured
+	if len(rule.AttributeMappings) > 0 {
+		for source, target := range rule.AttributeMappings {
+			if value, ok := attrs.Get(source); ok {
+				result[target] = value.AsString()
+			}
 		}
-		if val, ok := rm.Resource().Attributes().Get("db.system"); ok {
-			return val.AsString()
-		}
+		return result
 	}
-	return "default"
+	
+	// Otherwise, apply include/exclude filters
+	attrs.Range(func(k string, v pcommon.Value) bool {
+		// Check exclude list
+		excluded := false
+		for _, pattern := range rule.ExcludeAttributes {
+			if matched, _ := regexp.MatchString(pattern, k); matched {
+				excluded = true
+				break
+			}
+		}
+		
+		if excluded {
+			return true
+		}
+		
+		// Check include list
+		if len(rule.IncludeAttributes) > 0 {
+			included := false
+			for _, pattern := range rule.IncludeAttributes {
+				if matched, _ := regexp.MatchString(pattern, k); matched {
+					included = true
+					break
+				}
+			}
+			
+			if !included {
+				return true
+			}
+		}
+		
+		// Add attribute
+		result[k] = v.AsString()
+		return true
+	})
+	
+	return result
 }
 
-// extractDatabaseNameFromLogs extracts database name from logs for rate limiting
-func (e *nriLogsExporter) extractDatabaseNameFromLogs(ld plog.Logs) string {
-	if ld.ResourceLogs().Len() > 0 {
-		rl := ld.ResourceLogs().At(0)
-		if val, ok := rl.Resource().Attributes().Get("db.name"); ok {
-			return val.AsString()
-		}
-		if val, ok := rl.Resource().Attributes().Get("db.system"); ok {
-			return val.AsString()
-		}
-	}
-	return "default"
+// expandMetricName expands metric name template
+func (exp *nriMetricsExporter) expandMetricName(template, originalName string) string {
+	// Extract metric suffix from original name
+	parts := strings.Split(originalName, ".")
+	suffix := parts[len(parts)-1]
+	
+	// Simple template expansion
+	result := strings.ReplaceAll(template, "{{.metric_suffix}}", suffix)
+	result = strings.ReplaceAll(result, "{{.metric_name}}", originalName)
+	
+	return result
 }
 
-// GetMetrics returns exporter metrics including rate limiter stats
-func (e *nriMetricsExporter) GetMetrics() map[string]interface{} {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+// expandTemplate expands a template with attributes
+func (exp *nriMetricsExporter) expandTemplate(template string, attrs pcommon.Map) string {
+	result := template
 	
-	metrics := map[string]interface{}{
-		"export_success_count": e.exportSuccessCount,
-		"export_error_count":   e.exportErrorCount,
-		"rate_limited_count":   e.rateLimitedCount,
-	}
+	// Simple template expansion
+	attrs.Range(func(k string, v pcommon.Value) bool {
+		placeholder := fmt.Sprintf("{{.%s}}", k)
+		result = strings.ReplaceAll(result, placeholder, v.AsString())
+		return true
+	})
 	
-	if e.rateLimiter != nil {
-		metrics["rate_limiter"] = e.rateLimiter.GetMetrics()
-	}
+	return result
+}
+
+// expandTemplate expands a template with attributes (logs exporter)
+func (exp *nriLogsExporter) expandTemplate(template string, attrs pcommon.Map) string {
+	result := template
 	
-	return metrics
+	// Simple template expansion
+	attrs.Range(func(k string, v pcommon.Value) bool {
+		placeholder := fmt.Sprintf("{{.%s}}", k)
+		result = strings.ReplaceAll(result, placeholder, v.AsString())
+		return true
+	})
+	
+	return result
 }

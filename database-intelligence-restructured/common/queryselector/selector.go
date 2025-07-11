@@ -183,8 +183,8 @@ func (qs *QuerySelector) meetsRequirements(features *featuredetector.FeatureSet,
 	}
 	
 	// Check version requirements
-	if query.Requirements.MinimumVersion != "" && features.DatabaseVersion != "" {
-		if !isVersionSufficient(features.DatabaseVersion, query.Requirements.MinimumVersion) {
+	if query.Requirements.MinimumVersion != "" && features.ServerVersion != "" {
+		if !isVersionSufficient(features.ServerVersion, query.Requirements.MinimumVersion) {
 			return false
 		}
 	}

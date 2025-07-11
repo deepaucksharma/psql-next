@@ -3,7 +3,29 @@ module github.com/database-intelligence/distributions/production
 go 1.23.0
 
 require (
+	// Custom exporters
+	github.com/database-intelligence/exporters/nri v0.0.0-00010101000000-000000000000
+
+	// Custom processors
+	github.com/database-intelligence/processors/adaptivesampler v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence/processors/circuitbreaker v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence/processors/costcontrol v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence/processors/nrerrormonitor v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence/processors/planattributeextractor v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence/processors/querycorrelator v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence/processors/verification v0.0.0-00010101000000-000000000000
+
+	// Custom receivers
+	github.com/database-intelligence/receivers/ash v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence/receivers/kernelmetrics v0.0.0-00010101000000-000000000000
+	// Core OpenTelemetry components
 	go.opentelemetry.io/collector/component v1.35.0
+	go.opentelemetry.io/collector/confmap v1.35.0
+	go.opentelemetry.io/collector/confmap/provider/envprovider v1.35.0
+	go.opentelemetry.io/collector/confmap/provider/fileprovider v1.35.0
+	go.opentelemetry.io/collector/confmap/provider/httpprovider v1.35.0
+	go.opentelemetry.io/collector/confmap/provider/httpsprovider v1.35.0
+	go.opentelemetry.io/collector/confmap/provider/yamlprovider v1.35.0
 	go.opentelemetry.io/collector/connector v0.129.0
 	go.opentelemetry.io/collector/exporter v0.129.0
 	go.opentelemetry.io/collector/exporter/debugexporter v0.129.0
@@ -21,6 +43,9 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+
+	// Common modules
+	github.com/database-intelligence/common/featuredetector v0.0.0-00010101000000-000000000000 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/ebitengine/purego v0.8.4 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -62,6 +87,9 @@ require (
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
@@ -81,7 +109,6 @@ require (
 	go.opentelemetry.io/collector/config/configretry v1.35.0 // indirect
 	go.opentelemetry.io/collector/config/configtelemetry v0.129.0 // indirect
 	go.opentelemetry.io/collector/config/configtls v1.35.0 // indirect
-	go.opentelemetry.io/collector/confmap v1.35.0 // indirect
 	go.opentelemetry.io/collector/confmap/xconfmap v0.129.0 // indirect
 	go.opentelemetry.io/collector/connector/connectortest v0.129.0 // indirect
 	go.opentelemetry.io/collector/connector/xconnector v0.129.0 // indirect
@@ -156,4 +183,39 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
+)
+
+require (
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/go-redis/redis/v8 v8.11.5 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/lib/pq v1.10.9 // indirect
+	go.opentelemetry.io/collector/scraper v0.129.0 // indirect
+	go.opentelemetry.io/collector/scraper/scraperhelper v0.129.0 // indirect
+)
+
+// Replace directives for local modules
+replace (
+	// Common modules
+	github.com/database-intelligence/common/featuredetector => ../../common/featuredetector
+	github.com/database-intelligence/common/queryselector => ../../common/queryselector
+
+	// Custom exporters
+	github.com/database-intelligence/exporters/nri => ../../exporters/nri
+
+	// Internal modules
+	github.com/database-intelligence/internal/database => ../../internal/database
+
+	// Custom processors
+	github.com/database-intelligence/processors/adaptivesampler => ../../processors/adaptivesampler
+	github.com/database-intelligence/processors/circuitbreaker => ../../processors/circuitbreaker
+	github.com/database-intelligence/processors/costcontrol => ../../processors/costcontrol
+	github.com/database-intelligence/processors/nrerrormonitor => ../../processors/nrerrormonitor
+	github.com/database-intelligence/processors/planattributeextractor => ../../processors/planattributeextractor
+	github.com/database-intelligence/processors/querycorrelator => ../../processors/querycorrelator
+	github.com/database-intelligence/processors/verification => ../../processors/verification
+
+	// Custom receivers
+	github.com/database-intelligence/receivers/ash => ../../receivers/ash
+	github.com/database-intelligence/receivers/kernelmetrics => ../../receivers/kernelmetrics
 )

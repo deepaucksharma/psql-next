@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: database-intelligence
-  labels:
-    name: database-intelligence
-    monitoring: enabled
-    app.kubernetes.io/name: database-intelligence
-    app.kubernetes.io/component: monitoring

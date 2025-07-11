@@ -168,12 +168,12 @@ func (aa *AdaptiveAlgorithm) applyRateLimiting(queryID string, proposedRate floa
     currentVolume := aa.getCurrentSamplingVolume()
     
     // If we're under the limit, use proposed rate
-    if currentVolume < aa.config.MaxSamplesPerSecond*0.8 {
+    if currentVolume < float64(aa.config.MaxRecordsPerSecond)*0.8 {
         return proposedRate
     }
     
     // If we're near the limit, reduce sampling
-    reductionFactor := aa.config.MaxSamplesPerSecond / currentVolume
+    reductionFactor := float64(aa.config.MaxRecordsPerSecond) / currentVolume
     return proposedRate * reductionFactor * 0.8 // 80% to leave headroom
 }
 

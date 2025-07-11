@@ -167,3 +167,14 @@ func DefaultConfig() *Config {
 		},
 	}
 }
+const (
+	defaultSessionsQuery = `SELECT * FROM v$session WHERE status = 'ACTIVE'`
+	defaultHistoryQuery  = `SELECT * FROM v$active_session_history WHERE sample_time > :1`
+)
+
+// Config with additional fields
+type ConfigWithInterval struct {
+	Config
+	CollectionInterval time.Duration     `mapstructure:"collection_interval"`
+	Queries            map[string]string `mapstructure:"queries"`
+}

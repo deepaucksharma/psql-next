@@ -4,20 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
-	"go.opentelemetry.io/collector/scraper/scraperhelper"
 )
 
 const (
-	// typeStr is the type of the receiver
-	typeStr = "kernelmetrics"
-	// stability is the stability level of the receiver
-	stability = component.StabilityLevelAlpha
+	typeStr   = "kernelmetrics"
+	stability = component.StabilityLevelBeta
 )
+
+var errConfigNotKM = errors.New("config is not for kernel metrics receiver")
 
 // NewFactory creates a new kernel metrics receiver factory
 func NewFactory() receiver.Factory {
@@ -28,7 +26,7 @@ func NewFactory() receiver.Factory {
 	)
 }
 
-// createDefaultConfig creates the default configuration for the receiver
+// createDefaultConfig creates the default configuration
 func createDefaultConfig() component.Config {
 	return DefaultConfig()
 }
@@ -40,25 +38,24 @@ func createMetricsReceiver(
 	cfg component.Config,
 	consumer consumer.Metrics,
 ) (receiver.Metrics, error) {
-	// Check platform support
-	if runtime.GOOS != "linux" {
-		return nil, fmt.Errorf("kernel metrics receiver is only supported on Linux, current OS: %s", runtime.GOOS)
-	}
-	
 	kmCfg, ok := cfg.(*Config)
 	if !ok {
-		return nil, errors.New("invalid config type")
+		return nil, errConfigNotKM
 	}
 
-	scraper, err := newScraper(kmCfg, settings)
-	if err != nil {
-		return nil, err
+	// Validate the configuration
+	if err := kmCfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	return scraperhelper.NewScraperControllerReceiver(
-		&kmCfg.ControllerConfig,
-		settings,
-		consumer,
-		scraperhelper.AddScraper(scraper),
-	)
+	// Create the receiver
+	r := &kernelMetricsReceiver{
+		config:       kmCfg,
+		logger:       settings.Logger,
+		consumer:     consumer,
+		shutdownChan: make(chan struct{}),
+	}
+
+	// Return the receiver directly since it implements receiver.Metrics
+	return r, nil
 }

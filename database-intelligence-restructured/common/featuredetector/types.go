@@ -210,11 +210,11 @@ func (bd *BaseDetector) ValidateQuery(query *QueryDefinition) error {
 	}
 	
 	// Check minimum version if specified
-	if query.Requirements.MinimumVersion != "" && features.DatabaseVersion != "" {
-		if !isVersionSufficient(features.DatabaseVersion, query.Requirements.MinimumVersion) {
+	if query.Requirements.MinimumVersion != "" && features.ServerVersion != "" {
+		if !isVersionSufficient(features.ServerVersion, query.Requirements.MinimumVersion) {
 			return &MissingFeatureError{
 				FeatureType: "version",
-				FeatureName: fmt.Sprintf("minimum version %s (current: %s)", query.Requirements.MinimumVersion, features.DatabaseVersion),
+				FeatureName: fmt.Sprintf("minimum version %s (current: %s)", query.Requirements.MinimumVersion, features.ServerVersion),
 			}
 		}
 	}

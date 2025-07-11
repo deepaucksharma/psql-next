@@ -1,0 +1,90 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 100
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  
+  # Custom processors
+  circuitbreaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_threshold: 3
+    timeout: 30s
+    half_open_max_requests: 3
+  
+  costcontrol:
+    enabled: true
+    limits:
+      max_metrics_per_minute: 10000
+      max_logs_per_minute: 5000
+      max_traces_per_minute: 1000
+    action_on_limit: "drop"
+  
+  nrerrormonitor:
+    enabled: true
+    capture_stack_traces: true
+    max_stack_trace_depth: 50
+  
+  planattributeextractor:
+    enabled: true
+    extract_explain_plan: true
+    extract_query_hash: true
+  
+  querycorrelator:
+    enabled: true
+    correlation_window: 5m
+    max_queries_per_window: 1000
+  
+  verification:
+    enabled: true
+    verify_checksums: true
+    verify_timestamps: true
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+  
+  nri:
+    integration_name: "database-intelligence"
+    output_mode: "stdout"
+    entity:
+      type: "DATABASE"
+      name_source: "service.name"
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - batch
+        - circuitbreaker
+        - costcontrol
+        - planattributeextractor
+        - querycorrelator
+        - verification
+      exporters: [debug, nri]
+    
+    logs:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - batch
+        - nrerrormonitor
+      exporters: [debug, nri]
+  
+  telemetry:
+    logs:
+      level: info

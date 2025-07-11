@@ -42,21 +42,19 @@ func createMetricsExporter(
 		return nil, errors.New("invalid config type")
 	}
 	
-	exp, err := newMetricsExporter(nriCfg, settings)
+	exp, err := newMetricsExporter(nriCfg, settings.TelemetrySettings)
 	if err != nil {
 		return nil, err
 	}
 	
-	return exporterhelper.NewMetricsExporter(
+	return exporterhelper.NewMetrics(
 		ctx,
 		settings,
 		cfg,
 		exp.exportMetrics,
 		exporterhelper.WithStart(exp.start),
 		exporterhelper.WithShutdown(exp.shutdown),
-		exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: nriCfg.Timeout}),
-		exporterhelper.WithRetry(nriCfg.BackOffConfig),
-		exporterhelper.WithQueue(exporterhelper.NewDefaultQueueSettings()),
+		exporterhelper.WithTimeout(exporterhelper.TimeoutConfig{Timeout: nriCfg.Timeout}),
 	)
 }
 
@@ -71,20 +69,18 @@ func createLogsExporter(
 		return nil, errors.New("invalid config type")
 	}
 	
-	exp, err := newLogsExporter(nriCfg, settings)
+	exp, err := newLogsExporter(nriCfg, settings.TelemetrySettings)
 	if err != nil {
 		return nil, err
 	}
 	
-	return exporterhelper.NewLogsExporter(
+	return exporterhelper.NewLogs(
 		ctx,
 		settings,
 		cfg,
 		exp.exportLogs,
 		exporterhelper.WithStart(exp.start),
 		exporterhelper.WithShutdown(exp.shutdown),
-		exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: nriCfg.Timeout}),
-		exporterhelper.WithRetry(nriCfg.BackOffConfig),
-		exporterhelper.WithQueue(exporterhelper.NewDefaultQueueSettings()),
+		exporterhelper.WithTimeout(exporterhelper.TimeoutConfig{Timeout: nriCfg.Timeout}),
 	)
 }

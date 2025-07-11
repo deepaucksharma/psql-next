@@ -1,0 +1,80 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 100
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  
+  # Metrics-only processors
+  nrerrormonitor:
+    # Uses default configuration for metric error monitoring
+  
+  querycorrelator:
+    retention_period: 5m
+    cleanup_interval: 1m
+    enable_table_correlation: true
+    enable_database_correlation: true
+    max_queries_tracked: 1000
+  
+  # Logs-only processors
+  circuit_breaker:
+    # Uses default configuration for log circuit breaking
+  
+  planattributeextractor:
+    # Uses default configuration for extracting plan attributes from logs
+  
+  verification:
+    # Uses default configuration for log verification
+  
+  # All telemetry types processor
+  costcontrol:
+    # Uses default configuration for cost control across all signal types
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+  
+  nri:
+    integration_name: "database-intelligence"
+    output_mode: "stdout"
+    entity:
+      type: "DATABASE"
+      name_source: "service.name"
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - batch
+        - costcontrol
+        - nrerrormonitor
+        - querycorrelator
+      exporters: [debug, nri]
+    
+    logs:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - batch
+        - costcontrol
+        - circuit_breaker
+        - planattributeextractor
+        - verification
+      exporters: [debug, nri]
+  
+  telemetry:
+    logs:
+      level: info
