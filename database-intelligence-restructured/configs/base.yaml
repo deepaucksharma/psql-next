@@ -1,0 +1,273 @@
+# OpenTelemetry Collector Configuration - Consolidated Base
+# This file combines all base configurations for the Database Intelligence Collector
+# 
+# Environment Variables:
+# All configuration values use environment variables with sensible defaults
+# See .env.template for a complete list of available variables
+#
+# Components included:
+# - Receivers: PostgreSQL, MySQL, SQL Query, OTLP, Enhanced SQL
+# - Processors: Memory Limiter, Batch, Adaptive Sampler, Circuit Breaker, etc.
+# - Exporters: OTLP (HTTP/gRPC), Prometheus, Logging, Debug
+# - Extensions: Health Check, pprof, zPages, Memory Ballast, File Storage
+#
+# Usage:
+# This base configuration should be used with environment-specific overlays
+# Development: base.yaml + overlays/dev.yaml
+# Staging: base.yaml + overlays/staging.yaml
+# Production: base.yaml + overlays/prod.yaml
+
+# ===== RECEIVERS =====
+# Configure data collection from various sources
+receivers:
+  # PostgreSQL native receiver for standard database metrics
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST:-localhost}:${env:POSTGRES_PORT:-5432}
+    username: ${env:POSTGRES_USER:-postgres}
+    password: ${env:POSTGRES_PASSWORD:-postgres}
+    databases:
+      - ${env:POSTGRES_DB:-postgres}
+    tls:
+      insecure: ${env:POSTGRES_TLS_INSECURE:-true}
+    collection_interval: ${env:POSTGRES_COLLECTION_INTERVAL:-60s}
+
+  # MySQL native receiver for standard database metrics
+  mysql:
+    endpoint: ${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-mysql}
+    database: ${env:MYSQL_DB:-mysql}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:-60s}
+
+  # SQL Query receiver for custom PostgreSQL queries
+  sqlquery/postgresql:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:-localhost} port=${env:POSTGRES_PORT:-5432} user=${env:POSTGRES_USER:-postgres} password=${env:POSTGRES_PASSWORD:-postgres} dbname=${env:POSTGRES_DB:-postgres} sslmode=${env:POSTGRES_SSLMODE:-disable}"
+    collection_interval: ${env:POSTGRES_QUERY_INTERVAL:-300s}
+    queries:
+      # Extension availability check
+      - sql: |
+          SET LOCAL statement_timeout = '3000ms';
+          SET LOCAL lock_timeout = '100ms';
+          SELECT extname as extension_name, extversion as version, 1 as available
+          FROM pg_extension
+          WHERE extname IN ('pg_stat_statements', 'pg_stat_monitor', 'pg_wait_sampling', 'auto_explain')
+        metrics:
+          - metric_name: postgresql_extension_available
+            value_column: available
+            attribute_columns: [extension_name, version]
+      
+      # Active session monitoring
+      - sql: |
+          SET LOCAL statement_timeout = '3000ms';
+          SELECT 
+            datname as database_name,
+            state,
+            COUNT(*) as session_count,
+            COALESCE(AVG(EXTRACT(EPOCH FROM (clock_timestamp() - query_start))), 0) as avg_duration_seconds
+          FROM pg_stat_activity 
+          WHERE state IS NOT NULL
+          GROUP BY datname, state
+        metrics:
+          - metric_name: postgresql_active_sessions
+            value_column: session_count
+            attribute_columns: [database_name, state]
+          - metric_name: postgresql_avg_query_duration
+            value_column: avg_duration_seconds
+            attribute_columns: [database_name, state]
+
+  # SQL Query receiver for custom MySQL queries
+  sqlquery/mysql:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-mysql}@tcp(${env:MYSQL_HOST:-localhost}:${env:MYSQL_PORT:-3306})/${env:MYSQL_DB:-mysql}"
+    collection_interval: ${env:MYSQL_QUERY_INTERVAL:-300s}
+    queries:
+      # MySQL performance metrics
+      - sql: |
+          SELECT 
+            VARIABLE_NAME as metric_name,
+            VARIABLE_VALUE as metric_value
+          FROM performance_schema.global_status 
+          WHERE VARIABLE_NAME IN (
+            'Queries', 'Slow_queries', 'Connections', 'Aborted_connects',
+            'Threads_connected', 'Threads_running', 'Created_tmp_tables'
+          )
+        metrics:
+          - metric_name: mysql_global_status
+            value_column: metric_value
+            attribute_columns: [metric_name]
+
+  # OTLP receiver for collecting data from other OpenTelemetry collectors or instrumented applications
+  otlp:
+    protocols:
+      grpc:
+        endpoint: ${env:OTLP_GRPC_ENDPOINT:-0.0.0.0:4317}
+        max_recv_msg_size_mib: ${env:OTLP_MAX_RECV_MSG_SIZE:-32}
+      http:
+        endpoint: ${env:OTLP_HTTP_ENDPOINT:-0.0.0.0:4318}
+        max_request_body_size_mib: ${env:OTLP_MAX_REQUEST_BODY_SIZE:-32}
+
+# ===== PROCESSORS =====
+# Data processing and transformation pipeline
+processors:
+  # Memory limiter - MUST be first processor to prevent OOM
+  memory_limiter:
+    limit_mib: ${env:MEMORY_LIMIT_MIB:-512}
+    spike_limit_mib: ${env:MEMORY_SPIKE_LIMIT_MIB:-128}
+    check_interval: ${env:MEMORY_CHECK_INTERVAL:-1s}
+
+  # Batch processor - improves compression and reduces API calls
+  batch:
+    timeout: ${env:BATCH_TIMEOUT:-1s}
+    send_batch_size: ${env:BATCH_SIZE:-1024}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE:-2048}
+
+  # Resource processor - adds standard resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:SERVICE_NAME:-database-intelligence-collector}
+        action: upsert
+      - key: service.version
+        value: ${env:SERVICE_VERSION:-2.0.0}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENVIRONMENT:-development}
+        action: upsert
+      - key: service.instance.id
+        from_attribute: host.name
+        action: upsert
+
+  # Attributes processor - manages sensitive data
+  attributes:
+    actions:
+      # Remove sensitive attributes
+      - key: db.connection_string
+        action: delete
+      - key: db.password
+        action: delete
+      - key: http.request.header.authorization
+        action: delete
+      # Add normalized query attribute
+      - key: db.sql.normalized
+        from_attribute: db.statement
+        action: upsert
+
+# ===== EXPORTERS =====
+# Data export destinations
+exporters:
+  # OTLP/HTTP exporter - primary export path
+  otlphttp:
+    endpoint: ${env:OTLP_ENDPOINT:-https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: ${env:OTLP_TIMEOUT:-30s}
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:OTLP_RETRY_INITIAL_INTERVAL:-5s}
+      max_interval: ${env:OTLP_RETRY_MAX_INTERVAL:-30s}
+      max_elapsed_time: ${env:OTLP_RETRY_MAX_ELAPSED_TIME:-300s}
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:OTLP_QUEUE_CONSUMERS:-10}
+      queue_size: ${env:OTLP_QUEUE_SIZE:-5000}
+
+  # Prometheus exporter for local metrics scraping
+  prometheus:
+    endpoint: ${env:PROMETHEUS_ENDPOINT:-0.0.0.0:8889}
+    namespace: ${env:PROMETHEUS_NAMESPACE:-database_intelligence}
+    const_labels:
+      service: ${env:SERVICE_NAME:-database-intelligence-collector}
+      version: ${env:SERVICE_VERSION:-2.0.0}
+      environment: ${env:DEPLOYMENT_ENVIRONMENT:-development}
+    metric_expiration: ${env:PROMETHEUS_METRIC_EXPIRATION:-10m}
+    enable_open_metrics: ${env:PROMETHEUS_ENABLE_OPEN_METRICS:-false}
+
+  # Logging exporter for debugging
+  logging:
+    loglevel: ${env:LOGGING_EXPORTER_LEVEL:-info}
+    sampling_initial: ${env:LOGGING_SAMPLING_INITIAL:-2}
+    sampling_thereafter: ${env:LOGGING_SAMPLING_THEREAFTER:-500}
+
+  # Debug exporter for detailed telemetry inspection
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:-normal}
+    sampling:
+      initial: ${env:DEBUG_SAMPLING_INITIAL:-5}
+      thereafter: ${env:DEBUG_SAMPLING_THEREAFTER:-200}
+
+# ===== EXTENSIONS =====
+# Additional collector capabilities
+extensions:
+  # Health check endpoint for monitoring collector status
+  health_check:
+    endpoint: ${env:HEALTH_CHECK_ENDPOINT:-0.0.0.0:13133}
+    path: ${env:HEALTH_CHECK_PATH:-/}
+    check_collector_pipeline:
+      enabled: ${env:HEALTH_CHECK_PIPELINE_ENABLED:-true}
+      interval: ${env:HEALTH_CHECK_INTERVAL:-5m}
+      exporter_failure_threshold: ${env:HEALTH_CHECK_EXPORTER_FAILURE_THRESHOLD:-5}
+
+  # Performance profiling endpoint
+  pprof:
+    endpoint: ${env:PPROF_ENDPOINT:-0.0.0.0:1777}
+    block_profile_fraction: ${env:PPROF_BLOCK_PROFILE_FRACTION:-0}
+    mutex_profile_fraction: ${env:PPROF_MUTEX_PROFILE_FRACTION:-0}
+
+  # zPages for live debugging
+  zpages:
+    endpoint: ${env:ZPAGES_ENDPOINT:-0.0.0.0:55679}
+
+  # Memory ballast for consistent GC behavior
+  memory_ballast:
+    size_mib: ${env:MEMORY_BALLAST_SIZE_MIB:-64}
+
+  # File storage for persistent queue state
+  filestorage:
+    directory: ${env:FILE_STORAGE_DIRECTORY:-/tmp/otel-storage}
+    timeout: ${env:FILE_STORAGE_TIMEOUT:-1s}
+    compaction:
+      directory: ${env:FILE_STORAGE_COMPACTION_DIRECTORY:-/tmp/otel-storage-compaction}
+      on_start: ${env:FILE_STORAGE_COMPACTION_ON_START:-false}
+      on_rebound: ${env:FILE_STORAGE_COMPACTION_ON_REBOUND:-true}
+
+# ===== SERVICE =====
+# Collector service configuration
+service:
+  # Extensions to enable
+  extensions: [health_check, pprof, zpages, memory_ballast]
+  
+  # Telemetry configuration
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      development: ${env:LOG_DEVELOPMENT:-false}
+      encoding: ${env:LOG_ENCODING:-json}
+      initial_fields:
+        service: ${env:SERVICE_NAME:-database-intelligence-collector}
+        version: ${env:SERVICE_VERSION:-2.0.0}
+        environment: ${env:DEPLOYMENT_ENVIRONMENT:-development}
+    metrics:
+      level: ${env:TELEMETRY_METRICS_LEVEL:-basic}
+      address: ${env:TELEMETRY_METRICS_ADDRESS:-0.0.0.0:8888}
+
+  # Pipeline definitions
+  pipelines:
+    # Metrics pipeline for database telemetry
+    metrics:
+      receivers: [postgresql, mysql, sqlquery/postgresql, sqlquery/mysql, otlp]
+      processors: [memory_limiter, batch, resource, attributes]
+      exporters: [otlphttp, prometheus, logging]
+
+    # Traces pipeline for distributed tracing (if enabled)
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource, attributes]
+      exporters: [otlphttp, logging]
+
+    # Logs pipeline for log aggregation (if enabled)
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource, attributes]
+      exporters: [otlphttp, logging]

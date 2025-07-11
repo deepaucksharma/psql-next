@@ -16,20 +16,20 @@ import (
 	"go.opentelemetry.io/collector/receiver/otlpreceiver"
 	
 	// Custom receivers
-	"github.com/database-intelligence/receivers/ash"
-	"github.com/database-intelligence/receivers/kernelmetrics"
+	"github.com/deepaksharma/db-otel/components/receivers/ash"
+	"github.com/deepaksharma/db-otel/components/receivers/kernelmetrics"
 	
 	// Custom processors
-	"github.com/database-intelligence/processors/adaptivesampler"
-	"github.com/database-intelligence/processors/circuitbreaker"
-	"github.com/database-intelligence/processors/costcontrol"
-	"github.com/database-intelligence/processors/nrerrormonitor"
-	"github.com/database-intelligence/processors/planattributeextractor"
-	"github.com/database-intelligence/processors/querycorrelator"
-	"github.com/database-intelligence/processors/verification"
+	"github.com/deepaksharma/db-otel/components/processors/adaptivesampler"
+	"github.com/deepaksharma/db-otel/components/processors/circuitbreaker"
+	"github.com/deepaksharma/db-otel/components/processors/costcontrol"
+	"github.com/deepaksharma/db-otel/components/processors/nrerrormonitor"
+	"github.com/deepaksharma/db-otel/components/processors/planattributeextractor"
+	"github.com/deepaksharma/db-otel/components/processors/querycorrelator"
+	"github.com/deepaksharma/db-otel/components/processors/verification"
 	
 	// Custom exporters
-	"github.com/database-intelligence/exporters/nri"
+	"github.com/deepaksharma/db-otel/components/exporters/nri"
 )
 
 // componentsComplete provides all available components

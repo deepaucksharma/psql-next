@@ -12,10 +12,10 @@ import (
     "go.opentelemetry.io/collector/processor"
     "go.opentelemetry.io/collector/receiver"
     
-    "github.com/database-intelligence/processors"
-    "github.com/database-intelligence/receivers"
-    "github.com/database-intelligence/exporters"
-    "github.com/database-intelligence/extensions"
+    "github.com/deepaksharma/db-otel/components/processors"
+    "github.com/deepaksharma/db-otel/components/receivers"
+    "github.com/deepaksharma/db-otel/components/exporters"
+    "github.com/deepaksharma/db-otel/components/extensions"
 )
 
 func main() {

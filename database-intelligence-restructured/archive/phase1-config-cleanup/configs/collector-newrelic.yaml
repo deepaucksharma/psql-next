@@ -1,0 +1,188 @@
+# Database Intelligence Collector Configuration for New Relic
+# This configuration includes all custom components and sends data to New Relic
+
+receivers:
+  # Standard OTLP receiver for application metrics
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Active Session History receiver
+  ash:
+    driver: postgres
+    datasource: "host=localhost port=5432 user=postgres password=devpassword123 dbname=testdb sslmode=disable"
+    collection_interval: 30s
+    enable_wait_analysis: true
+    enable_blocking_analysis: true
+    query_categories:
+      - name: "slow_queries"
+        threshold_ms: 1000
+      - name: "critical_queries"
+        threshold_ms: 5000
+
+  # Kernel metrics receiver (eBPF-based)
+  kernelmetrics:
+    target_process:
+      process_name: "postgres"
+    programs:
+      db_query_trace: true
+      cpu_profile: true
+      file_io_trace: true
+      lock_trace: true
+    collection_interval: 10s
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  
+  # Batch processor for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+  
+  # Adaptive sampler for logs
+  adaptivesampler:
+    default_sample_rate: 0.1
+    max_sample_rate: 1.0
+    min_sample_rate: 0.01
+    adjustment_period: 60s
+    rules:
+      - name: "error_logs"
+        condition: 'severity_text == "ERROR"'
+        sample_rate: 1.0
+      - name: "slow_queries"
+        condition: 'attributes["duration_ms"] > 1000'
+        sample_rate: 0.5
+  
+  # Circuit breaker for reliability
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_timeout: 30s
+    half_open_requests: 3
+  
+  # Cost control processor
+  costcontrol:
+    daily_limit_gb: 100
+    hourly_limit_gb: 10
+    enforce_limits: false
+    metrics_to_drop_when_limit_reached:
+      - "debug.*"
+      - "test.*"
+  
+  # NR error monitor
+  nrerrormonitor:
+    error_patterns:
+      - pattern: "license.*invalid"
+        category: "licensing"
+      - pattern: "rate.*limit"
+        category: "rate_limiting"
+      - pattern: "connection.*refused"
+        category: "connectivity"
+  
+  # Query correlator
+  querycorrelator:
+    retention_period: 5m
+    enable_table_correlation: true
+    enable_index_correlation: true
+    correlation_attributes:
+      - "query_id"
+      - "session_id"
+      - "user_id"
+  
+  # Plan attribute extractor
+  planattributeextractor:
+    extract_costs: true
+    extract_row_estimates: true
+    extract_operation_types: true
+  
+  # Verification processor
+  verification:
+    verify_attributes: true
+    verify_timestamps: true
+    add_verification_metadata: true
+
+exporters:
+  # Debug exporter for local troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+  
+  # New Relic OTLP exporter
+  otlp/newrelic:
+    endpoint: "otlp.nr-data.net:4317"
+    headers:
+      api-key: "${NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+  
+  # NRI exporter for Infrastructure integration
+  nri:
+    integration_name: "database-intelligence"
+    integration_version: "1.0.0"
+    protocol_version: 4
+    output_mode: "stdout"
+    entity_metadata:
+      name: "database-intelligence-collector"
+      type: "OTEL_COLLECTOR"
+      tags:
+        environment: "development"
+        service: "database-intelligence"
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: :13133
+    path: "/health"
+  
+  # Performance profiler
+  pprof:
+    endpoint: :1777
+  
+  # zPages for debugging
+  zpages:
+    endpoint: :55679
+
+service:
+  # Extensions to enable
+  extensions: [health_check, pprof, zpages]
+  
+  # Telemetry configuration
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+    metrics:
+      level: detailed
+      address: :8888
+  
+  # Pipeline definitions
+  pipelines:
+    # Metrics pipeline
+    metrics/database:
+      receivers: [otlp, ash, kernelmetrics]
+      processors: [memory_limiter, batch, costcontrol, nrerrormonitor, querycorrelator]
+      exporters: [debug, otlp/newrelic]
+    
+    # Logs pipeline
+    logs/database:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, costcontrol, adaptivesampler, circuit_breaker, planattributeextractor, verification]
+      exporters: [debug, otlp/newrelic]
+    
+    # Traces pipeline
+    traces/database:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, adaptivesampler, planattributeextractor]
+      exporters: [debug, otlp/newrelic]
