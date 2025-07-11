@@ -1,0 +1,50 @@
+# Environment files
+.env
+.env.local
+.env.production
+*.env
+
+# MySQL data
+mysql/data/
+mysql_primary_data/
+mysql_replica_data/
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
+.venv
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+
+# Docker volumes
+volumes/
+
+# Backup files
+*.bak
+*.backup
+
+# New Relic specific
+newrelic.ini
+newrelic_agent.log

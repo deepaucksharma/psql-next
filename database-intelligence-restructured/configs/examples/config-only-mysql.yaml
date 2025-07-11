@@ -1,0 +1,386 @@
+# MySQL Configuration for Config-Only Mode
+# Uses standard OpenTelemetry MySQL receiver - no custom code required
+
+# Environment variables:
+# - MYSQL_ENDPOINT: MySQL connection string (e.g., mysql://host:3306)
+# - MYSQL_USERNAME: MySQL username
+# - MYSQL_PASSWORD: MySQL password
+# - NEW_RELIC_OTLP_ENDPOINT: New Relic OTLP endpoint
+# - NEW_RELIC_LICENSE_KEY: New Relic license key
+# - SERVICE_NAME: Service identifier
+# - ENVIRONMENT: Environment name
+
+receivers:
+  # MySQL metrics receiver
+  mysql:
+    endpoint: "${MYSQL_ENDPOINT}"
+    username: "${MYSQL_USERNAME}"
+    password: "${MYSQL_PASSWORD}"
+    collection_interval: 30s
+    transport: tcp
+    tls:
+      insecure_skip_verify: true
+    
+    # Enable all available metrics
+    metrics:
+      mysql.buffer_pool.pages:
+        enabled: true
+      mysql.buffer_pool.data_pages:
+        enabled: true
+      mysql.buffer_pool.page_flushes:
+        enabled: true
+      mysql.buffer_pool.operations:
+        enabled: true
+      mysql.buffer_pool.limit:
+        enabled: true
+      mysql.buffer_pool.usage:
+        enabled: true
+      mysql.commands:
+        enabled: true
+      mysql.prepared_statements:
+        enabled: true
+      mysql.handlers:
+        enabled: true
+      mysql.double_writes:
+        enabled: true
+      mysql.log_operations:
+        enabled: true
+      mysql.operations:
+        enabled: true
+      mysql.page_operations:
+        enabled: true
+      mysql.row_locks:
+        enabled: true
+      mysql.row_operations:
+        enabled: true
+      mysql.locks:
+        enabled: true
+      mysql.sorts:
+        enabled: true
+      mysql.threads:
+        enabled: true
+      mysql.created_tmp_disk_tables:
+        enabled: true
+      mysql.created_tmp_files:
+        enabled: true
+      mysql.created_tmp_tables:
+        enabled: true
+      mysql.connection.count:
+        enabled: true
+      mysql.connection.errors:
+        enabled: true
+      mysql.innodb_data_reads:
+        enabled: true
+      mysql.innodb_data_writes:
+        enabled: true
+      mysql.innodb_log_waits:
+        enabled: true
+      mysql.innodb_row_lock_time:
+        enabled: true
+      mysql.innodb_row_lock_waits:
+        enabled: true
+      mysql.key_cache_reads:
+        enabled: true
+      mysql.key_cache_writes:
+        enabled: true
+      mysql.key_cache_write_requests:
+        enabled: true
+      mysql.key_cache_read_requests:
+        enabled: true
+      mysql.opened_files:
+        enabled: true
+      mysql.opened_tables:
+        enabled: true
+      mysql.opened_table_definitions:
+        enabled: true
+      mysql.qcache_hits:
+        enabled: true
+      mysql.qcache_inserts:
+        enabled: true
+      mysql.qcache_lowmem_prunes:
+        enabled: true
+      mysql.qcache_not_cached:
+        enabled: true
+      mysql.queries:
+        enabled: true
+      mysql.questions:
+        enabled: true
+      mysql.select_full_join:
+        enabled: true
+      mysql.select_full_range_join:
+        enabled: true
+      mysql.select_range:
+        enabled: true
+      mysql.select_range_check:
+        enabled: true
+      mysql.select_scan:
+        enabled: true
+      mysql.slow_queries:
+        enabled: true
+      mysql.aborted_clients:
+        enabled: true
+      mysql.aborted_connects:
+        enabled: true
+      mysql.locked_connects:
+        enabled: true
+      mysql.table_locks_immediate:
+        enabled: true
+      mysql.table_locks_waited:
+        enabled: true
+      mysql.table_open_cache:
+        enabled: true
+      mysql.table_open_cache_hits:
+        enabled: true
+      mysql.table_open_cache_misses:
+        enabled: true
+      mysql.table_open_cache_overflows:
+        enabled: true
+      mysql.global_status.uptime:
+        enabled: true
+      mysql.global_status.bytes_received:
+        enabled: true
+      mysql.global_status.bytes_sent:
+        enabled: true
+      mysql.global_status.max_used_connections:
+        enabled: true
+      mysql.global_status.threads_connected:
+        enabled: true
+      mysql.global_status.threads_running:
+        enabled: true
+
+  # SQL query receiver for custom MySQL metrics
+  sqlquery/mysql:
+    driver: mysql
+    datasource: "${MYSQL_USERNAME}:${MYSQL_PASSWORD}@tcp(${MYSQL_HOST}:${MYSQL_PORT})/"
+    collection_interval: 60s
+    queries:
+      # Active connections by user and host
+      - sql: |
+          SELECT 
+            user,
+            host,
+            db,
+            command,
+            time,
+            state,
+            COUNT(*) as connection_count
+          FROM information_schema.processlist
+          WHERE command != 'Sleep'
+          GROUP BY user, host, db, command, state
+        metrics:
+          - metric_name: mysql.connections.active_by_user
+            value_column: connection_count
+            value_type: gauge
+            attribute_columns:
+              - user
+              - host
+              - db
+              - command
+              - state
+
+      # Long running queries
+      - sql: |
+          SELECT 
+            COUNT(*) as long_queries,
+            MAX(time) as max_duration
+          FROM information_schema.processlist
+          WHERE command != 'Sleep' AND time > 60
+        metrics:
+          - metric_name: mysql.queries.long_running.count
+            value_column: long_queries
+            value_type: gauge
+          - metric_name: mysql.queries.duration.max
+            value_column: max_duration
+            value_type: gauge
+            unit: s
+
+      # Table statistics
+      - sql: |
+          SELECT 
+            table_schema,
+            table_name,
+            table_rows,
+            data_length,
+            index_length,
+            data_length + index_length as total_size
+          FROM information_schema.tables
+          WHERE table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+            AND table_type = 'BASE TABLE'
+          ORDER BY total_size DESC
+          LIMIT 20
+        metrics:
+          - metric_name: mysql.table.rows
+            value_column: table_rows
+            value_type: gauge
+            attribute_columns:
+              - table_schema
+              - table_name
+          - metric_name: mysql.table.data_size
+            value_column: data_length
+            value_type: gauge
+            unit: By
+            attribute_columns:
+              - table_schema
+              - table_name
+          - metric_name: mysql.table.index_size
+            value_column: index_length
+            value_type: gauge
+            unit: By
+            attribute_columns:
+              - table_schema
+              - table_name
+
+      # InnoDB buffer pool efficiency
+      - sql: |
+          SELECT 
+            (SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests') as read_requests,
+            (SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_reads') as disk_reads,
+            ((SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests') - 
+             (SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_reads')) / 
+            (SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests') * 100 as hit_ratio
+        metrics:
+          - metric_name: mysql.innodb.buffer_pool.hit_ratio
+            value_column: hit_ratio
+            value_type: gauge
+            unit: "%"
+
+      # Replication lag (if slave)
+      - sql: |
+          SELECT 
+            Seconds_Behind_Master as lag_seconds
+          FROM information_schema.processlist
+          WHERE command = 'Binlog Dump'
+        metrics:
+          - metric_name: mysql.replication.lag
+            value_column: lag_seconds
+            value_type: gauge
+            unit: s
+
+  # Host metrics
+  hostmetrics:
+    root_path: /
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+          system.memory.usage:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+
+processors:
+  # Memory limiter
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Resource metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: "${SERVICE_NAME}"
+        action: upsert
+      - key: deployment.environment
+        value: "${ENVIRONMENT}"
+        action: upsert
+      - key: db.system
+        value: "mysql"
+        action: insert
+      - key: mysql.version
+        value: "${MYSQL_VERSION}"
+        action: insert
+
+  # Transform for units
+  transform:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - set(unit, "By") where name =~ "mysql.*\\.size$"
+          - set(unit, "1") where name =~ "mysql.*\\.count$"
+          - set(unit, "%") where name =~ "mysql.*\\.ratio$"
+
+  # Attributes cleanup
+  attributes:
+    actions:
+      - key: password
+        action: delete
+      - key: mysql.query
+        action: delete
+
+  # Convert counters to rate
+  cumulativetodelta:
+    include:
+      match_type: regexp
+      metric_names:
+        - "mysql.commands.*"
+        - "mysql.handlers.*"
+        - "mysql.operations.*"
+        - "mysql.queries"
+        - "mysql.questions"
+        - "mysql.slow_queries"
+        - "mysql.bytes.*"
+        - "mysql.innodb_data.*"
+        - "mysql.row_operations.*"
+
+  # Batch for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+exporters:
+  # OTLP to New Relic
+  otlp:
+    endpoint: "${NEW_RELIC_OTLP_ENDPOINT}"
+    headers:
+      api-key: "${NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+
+service:
+  pipelines:
+    metrics:
+      receivers:
+        - mysql
+        - sqlquery/mysql
+        - hostmetrics
+      processors:
+        - memory_limiter
+        - resource
+        - transform
+        - attributes
+        - cumulativetodelta
+        - batch
+      exporters:
+        - otlp
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888

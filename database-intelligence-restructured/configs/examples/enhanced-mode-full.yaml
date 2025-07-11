@@ -1,0 +1,969 @@
+# Enhanced Mode Full Configuration
+# This configuration uses custom receivers and processors for advanced database intelligence
+# Requires custom OTel Collector build with enhanced components
+
+# Environment variables required:
+# - DB_ENDPOINT: Database connection string (e.g., postgresql://host:5432/dbname)
+# - DB_USERNAME: Database username with read permissions
+# - DB_PASSWORD: Database password
+# - DB_HOST: Database host (for separate connections)
+# - DB_PORT: Database port
+# - NEW_RELIC_OTLP_ENDPOINT: New Relic OTLP endpoint (e.g., https://otlp.nr-data.net:4318)
+# - NEW_RELIC_LICENSE_KEY: New Relic license key
+# - SERVICE_NAME: Service identifier (e.g., postgresql-prod-01)
+# - ENVIRONMENT: Environment name (dev/staging/prod)
+# - CLUSTER_NAME: Cluster identifier (if applicable)
+
+receivers:
+  # Standard PostgreSQL receiver for basic metrics
+  postgresql:
+    endpoint: "${DB_ENDPOINT}"
+    username: "${DB_USERNAME}"
+    password: "${DB_PASSWORD}"
+    databases:
+      - "*"
+    collection_interval: 30s
+    transport: tcp
+    tls:
+      insecure_skip_verify: false
+    metrics:
+      postgresql.bgwriter.buffers.allocated:
+        enabled: true
+      postgresql.bgwriter.buffers.writes:
+        enabled: true
+      postgresql.bgwriter.checkpoint.count:
+        enabled: true
+      postgresql.bgwriter.duration:
+        enabled: true
+      postgresql.bgwriter.maxwritten:
+        enabled: true
+      postgresql.blocks:
+        enabled: true
+      postgresql.commits:
+        enabled: true
+      postgresql.connection.max:
+        enabled: true
+      postgresql.connection.count:
+        enabled: true
+      postgresql.database.count:
+        enabled: true
+      postgresql.database.size:
+        enabled: true
+      postgresql.deadlocks:
+        enabled: true
+      postgresql.index.scans:
+        enabled: true
+      postgresql.index.size:
+        enabled: true
+      postgresql.operations:
+        enabled: true
+      postgresql.replication.data_delay:
+        enabled: true
+      postgresql.rollbacks:
+        enabled: true
+      postgresql.rows:
+        enabled: true
+      postgresql.sequential_scans:
+        enabled: true
+      postgresql.table.count:
+        enabled: true
+      postgresql.table.size:
+        enabled: true
+      postgresql.table.vacuum.count:
+        enabled: true
+      postgresql.temp_files:
+        enabled: true
+      postgresql.wal.age:
+        enabled: true
+      postgresql.wal.lag:
+        enabled: true
+
+  # Enhanced SQL receiver for advanced query analytics
+  enhancedsql:
+    endpoint: "${DB_ENDPOINT}"
+    username: "${DB_USERNAME}"
+    password: "${DB_PASSWORD}"
+    collection_interval: 10s
+    query_timeout: 5s
+    max_concurrent_queries: 5
+    
+    features:
+      query_stats:
+        enabled: true
+        source: pg_stat_statements
+        top_n_queries: 200
+        min_execution_time: 50ms
+        capture_bind_parameters: false
+        group_by:
+          - normalized_query
+          - database
+          - user
+        capture_histograms: true
+        percentiles: [50, 75, 90, 95, 99]
+        
+      execution_plans:
+        enabled: true
+        capture_actual_plans: false
+        explain_analyze: false
+        plan_cache_size: 1000
+        regression_threshold: 1.5
+        track_plan_changes: true
+        
+      wait_events:
+        enabled: true
+        sampling_rate: 1.0
+        event_categories:
+          - Client
+          - IO
+          - IPC
+          - Lock
+          - Timeout
+          
+      lock_analysis:
+        enabled: true
+        blocking_threshold: 100ms
+        deadlock_detection: true
+        capture_lock_graph: true
+        
+    postgresql:
+      extensions_required:
+        - pg_stat_statements
+      statement_timeout: 5s
+      lock_timeout: 1s
+
+  # Active Session History receiver
+  ash:
+    endpoint: "${DB_ENDPOINT}"
+    username: "${DB_USERNAME}"
+    password: "${DB_PASSWORD}"
+    
+    sampling:
+      interval: 1s
+      jitter: 100ms
+      timeout: 500ms
+      max_sessions: 1000
+      batch_size: 100
+      
+    retention:
+      in_memory: 1h
+      on_disk: 24h
+      compression: true
+      compression_level: 6
+      
+    features:
+      session_sampling:
+        enabled: true
+        include_idle: false
+        include_system: false
+        capture_sql: true
+        capture_plan: false
+        sql_length_limit: 1000
+        
+      wait_analysis:
+        enabled: true
+        categorization: true
+        correlation: true
+        wait_chains: true
+        
+      blocking_analysis:
+        enabled: true
+        min_blocking_duration: 100ms
+        max_chain_depth: 10
+        capture_blocker_sql: true
+        
+      anomaly_detection:
+        enabled: true
+        algorithms:
+          - sudden_spike
+          - gradual_drift
+          - pattern_break
+        sensitivity: medium
+        
+    storage:
+      type: circular_buffer
+      size_mb: 100
+      overflow_strategy: drop_oldest
+
+  # Host metrics receiver
+  hostmetrics:
+    root_path: /
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+          system.memory.usage:
+            enabled: true
+      disk:
+        include_devices:
+          match_type: regexp
+          devices: ["^/dev/(sd[a-z]|nvme\\d+n\\d+)$"]
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.io_time:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+          system.disk.pending_operations:
+            enabled: true
+      filesystem:
+        include_fs_types:
+          match_type: strict
+          fs_types: ["ext4", "xfs", "zfs"]
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      network:
+        include_interfaces:
+          match_type: regexp
+          interfaces: ["^(eth|ens|eno|enp)\\d+$"]
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.errors:
+            enabled: true
+          system.network.dropped:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+          system.cpu.load_average.15m:
+            enabled: true
+      processes:
+        include:
+          names: ["postgres", "postmaster"]
+          match_type: regexp
+        metrics:
+          process.cpu.utilization:
+            enabled: true
+          process.memory.physical:
+            enabled: true
+          process.memory.virtual:
+            enabled: true
+          process.disk.io:
+            enabled: true
+
+  # SQL query receiver for custom metrics
+  sqlquery:
+    driver: postgres
+    datasource: "host=${DB_HOST} port=${DB_PORT} user=${DB_USERNAME} password=${DB_PASSWORD} sslmode=require"
+    collection_interval: 60s
+    queries:
+      # Long running queries with details
+      - sql: |
+          SELECT 
+            pid,
+            usename,
+            application_name,
+            client_addr,
+            query_start,
+            state,
+            wait_event_type,
+            wait_event,
+            SUBSTRING(query, 1, 100) as query_sample,
+            EXTRACT(epoch FROM (now() - query_start)) as duration_seconds
+          FROM pg_stat_activity
+          WHERE state = 'active' 
+            AND query NOT LIKE '%pg_stat_activity%'
+            AND EXTRACT(epoch FROM (now() - query_start)) > 60
+          ORDER BY duration_seconds DESC
+          LIMIT 10
+        metrics:
+          - metric_name: postgresql.queries.long_running.details
+            value_column: duration_seconds
+            value_type: gauge
+            unit: s
+            attribute_columns:
+              - pid
+              - usename
+              - application_name
+              - wait_event_type
+              - wait_event
+
+      # Table bloat estimation
+      - sql: |
+          WITH constants AS (
+            SELECT current_setting('block_size')::numeric AS bs, 23 AS hdr, 8 AS ma
+          ),
+          no_stats AS (
+            SELECT table_schema, table_name, 
+              n_live_tup::numeric as est_rows,
+              pg_table_size(relid)::numeric as table_size
+            FROM information_schema.columns
+              JOIN pg_stat_user_tables as psut
+                ON table_schema = psut.schemaname
+                AND table_name = psut.relname
+              LEFT OUTER JOIN pg_stats
+                ON table_schema = pg_stats.schemaname
+                  AND table_name = pg_stats.tablename
+                  AND column_name = attname 
+            WHERE attname IS NULL
+              AND table_schema NOT IN ('pg_catalog', 'information_schema')
+            GROUP BY table_schema, table_name, relid, n_live_tup
+          ),
+          null_headers AS (
+            SELECT
+              hdr+1+(sum(case when null_frac <> 0 THEN 1 else 0 END)/8) as nullhdr,
+              SUM((1-null_frac)*avg_width) as datawidth,
+              MAX(null_frac) as maxfracsum,
+              schemaname,
+              tablename,
+              hdr, ma, bs
+            FROM pg_stats CROSS JOIN constants
+              LEFT OUTER JOIN no_stats
+                ON schemaname = no_stats.table_schema
+                AND tablename = no_stats.table_name
+            WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+              AND no_stats.table_name IS NULL
+              AND EXISTS ( SELECT 1
+                FROM information_schema.columns
+                  WHERE schemaname = columns.table_schema
+                    AND tablename = columns.table_name )
+            GROUP BY schemaname, tablename, hdr, ma, bs
+          ),
+          data_headers AS (
+            SELECT
+              ma, bs, hdr, schemaname, tablename,
+              (datawidth+(hdr+ma-(case when hdr%ma=0 THEN ma ELSE hdr%ma END)))::numeric AS datahdr,
+              (maxfracsum*(nullhdr+ma-(case when nullhdr%ma=0 THEN ma ELSE nullhdr%ma END))) AS nullhdr2
+            FROM null_headers
+          ),
+          table_estimates AS (
+            SELECT schemaname, tablename, bs,
+              reltuples::numeric as est_rows, relpages * bs as table_bytes,
+            CEIL((reltuples*
+                  (datahdr + nullhdr2 + 4 + ma -
+                    (CASE WHEN datahdr%ma=0
+                      THEN ma ELSE datahdr%ma END)
+                  )/(bs-20))) * bs AS expected_bytes,
+              reltoastrelid
+            FROM data_headers
+              JOIN pg_class ON tablename = relname
+              JOIN pg_namespace ON relnamespace = pg_namespace.oid
+                AND schemaname = nspname
+            WHERE pg_class.relkind = 'r'
+          ),
+          estimates_with_toast AS (
+            SELECT schemaname, tablename, 
+              TRUE as can_estimate,
+              est_rows,
+              table_bytes + ( coalesce(toast.relpages, 0) * bs ) as table_bytes,
+              expected_bytes + ( ceil( coalesce(toast.reltuples, 0) / 4 ) * bs ) as expected_bytes
+            FROM table_estimates
+              LEFT OUTER JOIN pg_class as toast
+                ON table_estimates.reltoastrelid = toast.oid
+                  AND toast.relkind = 't'
+          ),
+          table_estimates_plus AS (
+            SELECT current_database() as databasename,
+                  schemaname, tablename, can_estimate, 
+                  est_rows,
+                  CASE WHEN table_bytes > 0
+                    THEN table_bytes::NUMERIC
+                    ELSE NULL::NUMERIC END
+                    AS table_bytes,
+                  CASE WHEN expected_bytes > 0 AND table_bytes > 0
+                    AND expected_bytes <= table_bytes
+                    THEN (table_bytes - expected_bytes)::NUMERIC
+                    ELSE 0::NUMERIC END
+                    AS bloat_bytes
+            FROM estimates_with_toast
+              UNION ALL
+            SELECT current_database() as databasename, 
+              table_schema, table_name, FALSE, 
+              est_rows, table_size,
+              NULL::NUMERIC
+            FROM no_stats
+          ),
+          bloat_data AS (
+            select current_database() as databasename,
+              schemaname, tablename, can_estimate, 
+              table_bytes, bloat_bytes,
+              round(bloat_bytes*100/table_bytes) as bloat_ratio
+            FROM table_estimates_plus
+          )
+          SELECT schemaname, tablename, bloat_bytes, bloat_ratio
+          FROM bloat_data
+          WHERE table_bytes > 1024*1024*10  -- 10MB minimum
+            AND bloat_ratio > 20  -- 20% minimum bloat
+          ORDER BY bloat_bytes DESC
+          LIMIT 20
+        metrics:
+          - metric_name: postgresql.table.bloat.bytes
+            value_column: bloat_bytes
+            value_type: gauge
+            unit: By
+            attribute_columns:
+              - schemaname
+              - tablename
+          - metric_name: postgresql.table.bloat.ratio
+            value_column: bloat_ratio
+            value_type: gauge
+            unit: "%"
+            attribute_columns:
+              - schemaname
+              - tablename
+
+processors:
+  # Memory limiter - first processor to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 2048
+    spike_limit_mib: 512
+
+  # Adaptive sampler for intelligent data reduction
+  adaptive_sampler:
+    # Global settings
+    max_metrics_per_minute: 5000000
+    evaluation_interval: 30s
+    
+    # Sampling rules by priority
+    rules:
+      # Critical metrics - always collect
+      - name: "Critical Infrastructure"
+        metric_pattern: "^(postgresql\\.connections\\.|postgresql\\.locks\\.|postgresql\\.deadlocks)"
+        base_rate: 1.0
+        importance_score: 1.0
+        spike_detection:
+          enabled: false
+          
+      # Query performance - sample with spike detection
+      - name: "Query Performance"
+        metric_pattern: "^postgresql\\.query\\."
+        base_rate: 0.1
+        importance_score: 0.8
+        spike_detection:
+          enabled: true
+          threshold: 2.0
+          increase_rate: 10.0
+          lookback_window: 5m
+        conditions:
+          # Always sample slow queries
+          - attribute: "query.duration"
+            operator: ">"
+            value: 1000
+            sample_rate: 1.0
+            
+      # ASH data - aggressive sampling
+      - name: "Active Session History"
+        metric_pattern: "^database\\.ash\\."
+        base_rate: 0.05
+        importance_score: 0.7
+        spike_detection:
+          enabled: true
+          threshold: 3.0
+          increase_rate: 5.0
+          
+      # Table/Index metrics - low frequency
+      - name: "Table and Index Stats"
+        metric_pattern: "^postgresql\\.(table|index)\\."
+        base_rate: 0.01
+        importance_score: 0.5
+        spike_detection:
+          enabled: false
+    
+    # Load-based adjustments
+    load_shedding:
+      enabled: true
+      cpu_threshold: 70
+      memory_threshold: 80
+      adjustment_factor: 0.5
+
+  # Circuit breaker to protect database
+  circuitbreaker:
+    # State configuration
+    failure_threshold: 5
+    success_threshold: 3
+    timeout: 60s
+    half_open_max_requests: 10
+    
+    # Monitoring thresholds
+    thresholds:
+      database_cpu_percent: 85
+      collector_cpu_percent: 80
+      query_time_ms: 2000
+      error_rate: 0.2
+      memory_usage_percent: 90
+      
+    # Actions when open
+    when_open:
+      emit_metrics: true
+      log_level: warn
+      drop_metrics:
+        - "postgresql.query.*"
+        - "database.ash.*"
+        - "postgresql.table.*"
+        
+    # Gradual recovery
+    recovery:
+      strategy: exponential
+      initial_interval: 10s
+      max_interval: 300s
+
+  # Plan attribute extractor for query intelligence
+  planattributeextractor:
+    # Plan extraction settings
+    extract_fields:
+      - plan_hash
+      - total_cost
+      - startup_cost
+      - plan_rows
+      - plan_width
+      - actual_time_total
+      - actual_rows_total
+      - loops
+      - node_types
+      - join_types
+      - scan_types
+      
+    # Regression detection
+    regression_detection:
+      enabled: true
+      history_size: 100
+      thresholds:
+        cost_increase: 1.5
+        time_increase: 2.0
+        rows_error: 10.0
+      emit_events: true
+      
+    # Plan stability scoring
+    plan_stability:
+      enabled: true
+      track_changes: true
+      volatility_window: 24h
+      stability_metrics:
+        - change_frequency
+        - performance_variance
+        - cost_variance
+        
+    # Plan recommendations
+    recommendations:
+      enabled: true
+      rules:
+        - missing_index
+        - inefficient_join
+        - full_table_scan
+        - high_cost_sort
+
+  # Verification processor for data quality
+  verification:
+    # PII detection and removal
+    pii_detection:
+      enabled: true
+      scan_attributes: true
+      scan_metric_names: false
+      patterns:
+        - name: "SSN"
+          pattern: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+          action: redact
+        - name: "Email"
+          pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+          action: hash
+        - name: "Credit Card"
+          pattern: "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b"
+          action: remove
+        - name: "Phone"
+          pattern: "\\b\\d{3}[\\s.-]?\\d{3}[\\s.-]?\\d{4}\\b"
+          action: redact
+          
+    # Cardinality management
+    cardinality_limits:
+      max_series_per_metric: 50000
+      max_attributes_per_metric: 20
+      max_unique_values_per_attribute: 1000
+      action_on_exceed: drop_metric
+      exempt_metrics:
+        - "postgresql.connections.*"
+        - "postgresql.locks.*"
+        
+    # Schema validation
+    schema_validation:
+      enabled: true
+      enforce_types: true
+      enforce_units: true
+      fix_invalid: true
+      
+    # Data quality checks
+    quality_checks:
+      - name: "timestamp_freshness"
+        max_age: 5m
+      - name: "value_range"
+        rules:
+          - metric: "*.utilization"
+            min: 0
+            max: 100
+          - metric: "*.ratio"
+            min: 0
+            max: 1
+
+  # Cost control processor
+  costcontrol:
+    # Budget configuration
+    budget:
+      max_dpm: 10000000  # 10M data points per minute
+      max_series: 1000000  # 1M unique series
+      evaluation_interval: 1m
+      
+    # Priority tiers
+    priority_rules:
+      - name: "Critical"
+        priority: 100
+        pattern: "^(postgresql\\.connections\\.|postgresql\\.transactions\\.|postgresql\\.locks\\.)"
+        guaranteed_percent: 30
+        
+      - name: "Performance"
+        priority: 80
+        pattern: "^(postgresql\\.query\\.|postgresql\\.cache\\.|database\\.ash\\.)"
+        guaranteed_percent: 30
+        
+      - name: "Diagnostic"
+        priority: 60
+        pattern: "^(postgresql\\.plan\\.|postgresql\\.wait\\.)"
+        guaranteed_percent: 20
+        
+      - name: "Maintenance"
+        priority: 40
+        pattern: "^(postgresql\\.table\\.|postgresql\\.index\\.|postgresql\\.vacuum\\.)"
+        guaranteed_percent: 10
+        
+      - name: "Optional"
+        priority: 20
+        pattern: ".*"
+        guaranteed_percent: 10
+        
+    # Drop strategy when over budget
+    drop_strategy:
+      method: priority_based
+      preserve_recent: 5m
+      emit_drop_metrics: true
+      
+    # Cost tracking
+    cost_tracking:
+      enabled: true
+      emit_cost_metrics: true
+      breakdown_by:
+        - metric_name
+        - service_name
+        - environment
+
+  # NR error monitor for integration health
+  nrerrormonitor:
+    # Error patterns to monitor
+    monitor_patterns:
+      - type: integration_error
+        pattern: "NrIntegrationError"
+        severity: high
+        
+      - type: rate_limit
+        pattern: "429|rate.limit|quota.exceeded"
+        severity: critical
+        
+      - type: schema_violation
+        pattern: "invalid.metric|schema.error"
+        severity: medium
+        
+      - type: cardinality_limit
+        pattern: "cardinality|too.many.series"
+        severity: high
+        
+      - type: authentication
+        pattern: "401|403|invalid.api.key"
+        severity: critical
+        
+    # Monitoring configuration
+    monitoring:
+      check_interval: 30s
+      error_threshold: 10
+      time_window: 5m
+      
+    # Actions on errors
+    actions:
+      emit_metrics: true
+      emit_events: true
+      adjust_collection:
+        rate_limit:
+          action: backoff
+          factor: 0.5
+        cardinality_limit:
+          action: reduce_cardinality
+          
+    # Self-healing
+    self_healing:
+      enabled: true
+      strategies:
+        - retry_with_backoff
+        - reduce_batch_size
+        - increase_intervals
+
+  # Query correlator for transaction tracking
+  querycorrelator:
+    # Correlation keys
+    correlation_keys:
+      primary:
+        - session_id
+        - transaction_id
+      secondary:
+        - application_name
+        - user_name
+        - client_addr
+      custom:
+        - request_id
+        - trace_id
+        
+    # Correlation settings
+    correlation_window: 300s
+    max_correlation_depth: 20
+    emit_correlation_metrics: true
+    
+    # Transaction tracking
+    transaction_tracking:
+      enabled: true
+      capture_transaction_flow: true
+      include_lock_waits: true
+      include_query_plans: false
+      
+    # Trace generation
+    trace_generation:
+      enabled: true
+      sampling_rate: 0.1
+      include_query_text: true
+      max_span_events: 100
+      
+    # Dependency mapping
+    dependency_mapping:
+      enabled: true
+      map_types:
+        - query_to_table
+        - transaction_to_query
+        - session_to_transaction
+
+  # Resource processor for metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: "${SERVICE_NAME}"
+        action: upsert
+      - key: deployment.environment
+        value: "${ENVIRONMENT}"
+        action: upsert
+      - key: db.system
+        value: "postgresql"
+        action: insert
+      - key: db.name
+        value: "${DATABASE_NAME}"
+        action: insert
+      - key: cluster.name
+        value: "${CLUSTER_NAME}"
+        action: insert
+      - key: instrumentation.provider
+        value: "opentelemetry"
+        action: insert
+      - key: telemetry.sdk.name
+        value: "opentelemetry"
+        action: insert
+      - key: telemetry.sdk.language
+        value: "go"
+        action: insert
+      - key: telemetry.auto.version
+        value: "${OTEL_VERSION}"
+        action: insert
+
+  # Transform processor for metric adjustments
+  transform:
+    error_mode: ignore
+    metric_statements:
+      # Unit corrections
+      - context: metric
+        statements:
+          - set(unit, "By") where name == "postgresql.database.size"
+          - set(unit, "By") where name == "postgresql.table.size"
+          - set(unit, "ms") where name == "postgresql.query.duration"
+          - set(unit, "1") where name == "postgresql.connections.active"
+          - set(unit, "%") where name =~ ".*\\.utilization$"
+          
+      # Calculated metrics
+      - context: datapoint
+        statements:
+          # Cache hit ratio
+          - set(metric.name, "postgresql.cache.hit_ratio") where metric.name == "postgresql.blocks"
+          - set(value, (attributes["hit"] / (attributes["hit"] + attributes["read"])) * 100) where metric.name == "postgresql.cache.hit_ratio"
+
+  # Attributes processor for cleanup
+  attributes:
+    actions:
+      # Remove sensitive data
+      - key: password
+        action: delete
+      - key: query.text
+        action: delete
+      - key: user.email
+        action: delete
+        
+      # Hash high cardinality values
+      - key: client.address
+        action: hash
+      - key: query.normalized
+        action: hash
+        
+      # Normalize values
+      - key: db.operation
+        action: extract
+        pattern: ^(SELECT|INSERT|UPDATE|DELETE).*
+        
+      # Add standard labels
+      - key: telemetry.pipeline
+        value: enhanced
+        action: insert
+
+  # Convert cumulative to delta
+  cumulativetodelta:
+    include:
+      match_type: regexp
+      metric_names:
+        - "postgresql.commits"
+        - "postgresql.rollbacks"
+        - "postgresql.blocks.*"
+        - "postgresql.rows.*"
+        - "postgresql.operations.*"
+        - "postgresql.bgwriter.*"
+        - "postgresql.deadlocks"
+        - "postgresql.temp_files.*"
+
+  # Batch processor for efficiency
+  batch:
+    timeout: 5s
+    send_batch_size: 5000
+    send_batch_max_size: 10000
+
+exporters:
+  # OTLP exporter to New Relic
+  otlp:
+    endpoint: "${NEW_RELIC_OTLP_ENDPOINT}"
+    headers:
+      api-key: "${NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 10000
+      storage: file_storage
+
+  # Prometheus exporter for self-monitoring
+  prometheus:
+    endpoint: "0.0.0.0:9090"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Debug exporter (disable in production)
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 1000
+
+extensions:
+  # Health check
+  health_check:
+    endpoint: "0.0.0.0:13133"
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: 15s
+      exporter_failure_threshold: 5
+
+  # Performance profiler
+  pprof:
+    endpoint: "0.0.0.0:1777"
+    block_profile_fraction: 0
+    mutex_profile_fraction: 0
+
+  # File storage for persistence
+  file_storage:
+    directory: /var/lib/otelcol/file_storage
+    timeout: 10s
+    compaction:
+      on_start: true
+      directory: /var/lib/otelcol/file_storage/compaction
+      max_transaction_size: 65536
+
+  # Memory ballast for stable performance
+  memory_ballast:
+    size_mib: 256
+
+service:
+  # Enable extensions
+  extensions: 
+    - health_check
+    - pprof
+    - file_storage
+    - memory_ballast
+  
+  # Pipeline configuration
+  pipelines:
+    # Enhanced metrics pipeline
+    metrics/enhanced:
+      receivers:
+        - postgresql
+        - enhancedsql
+        - ash
+        - hostmetrics
+        - sqlquery
+      processors:
+        - memory_limiter
+        - adaptive_sampler
+        - circuitbreaker
+        - planattributeextractor
+        - verification
+        - costcontrol
+        - nrerrormonitor
+        - querycorrelator
+        - resource
+        - transform
+        - attributes
+        - cumulativetodelta
+        - batch
+      exporters:
+        - otlp
+        - prometheus
+        # - debug  # Uncomment for troubleshooting
+
+  # Telemetry configuration
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: otel-collector-enhanced
+        version: "${OTEL_VERSION}"
+      output_paths:
+        - /var/log/otelcol/collector.log
+        - stdout
+    
+    metrics:
+      address: 0.0.0.0:8888
+      level: detailed
+      readers:
+        - periodic:
+            interval: 30s
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8889
+
+    resource:
+      service.name: "otel-collector-enhanced"
+      service.version: "${OTEL_VERSION}"
+      deployment.environment: "${ENVIRONMENT}"

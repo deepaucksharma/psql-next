@@ -1,0 +1,58 @@
+[mysqld]
+# Basic Settings
+server-id = 1
+log_bin = mysql-bin
+binlog_format = ROW
+gtid_mode = ON
+enforce_gtid_consistency = ON
+
+# Performance Schema Settings
+performance_schema = ON
+performance_schema_max_digest_length = 4096
+performance_schema_max_sql_text_length = 4096
+performance_schema_max_table_instances = 10000
+performance_schema_max_table_handles = 10000
+
+# InnoDB Settings for better monitoring
+innodb_monitor_enable = all
+innodb_status_output = ON
+innodb_status_output_locks = ON
+innodb_buffer_pool_size = 256M
+innodb_log_file_size = 64M
+
+# Slow Query Log
+slow_query_log = ON
+slow_query_log_file = /var/log/mysql/slow-query.log
+long_query_time = 1
+log_queries_not_using_indexes = ON
+
+# General Log (disable in production)
+general_log = OFF
+general_log_file = /var/log/mysql/general.log
+
+# Connection Settings
+max_connections = 200
+max_connect_errors = 100
+connect_timeout = 10
+
+# Thread Settings
+thread_cache_size = 16
+thread_stack = 256K
+
+# Query Cache (deprecated in MySQL 8.0)
+# query_cache_type = 0
+# query_cache_size = 0
+
+# Temporary Tables
+tmp_table_size = 32M
+max_heap_table_size = 32M
+
+# Binary Log Settings
+expire_logs_days = 7
+max_binlog_size = 100M
+binlog_cache_size = 1M
+
+# Replication Settings
+log_slave_updates = ON
+relay_log = relay-bin
+relay_log_recovery = ON

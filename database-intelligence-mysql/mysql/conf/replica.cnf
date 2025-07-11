@@ -1,0 +1,57 @@
+[mysqld]
+# Basic Settings
+server-id = 2
+log_bin = mysql-bin
+binlog_format = ROW
+gtid_mode = ON
+enforce_gtid_consistency = ON
+
+# Replica Settings
+read_only = ON
+super_read_only = ON
+relay_log = relay-bin
+relay_log_recovery = ON
+log_slave_updates = ON
+
+# Performance Schema Settings
+performance_schema = ON
+performance_schema_max_digest_length = 4096
+performance_schema_max_sql_text_length = 4096
+performance_schema_max_table_instances = 10000
+performance_schema_max_table_handles = 10000
+
+# InnoDB Settings for better monitoring
+innodb_monitor_enable = all
+innodb_status_output = ON
+innodb_status_output_locks = ON
+innodb_buffer_pool_size = 256M
+innodb_log_file_size = 64M
+
+# Slow Query Log
+slow_query_log = ON
+slow_query_log_file = /var/log/mysql/slow-query.log
+long_query_time = 1
+log_queries_not_using_indexes = ON
+
+# Connection Settings
+max_connections = 150
+max_connect_errors = 100
+connect_timeout = 10
+
+# Thread Settings
+thread_cache_size = 16
+thread_stack = 256K
+
+# Temporary Tables
+tmp_table_size = 32M
+max_heap_table_size = 32M
+
+# Binary Log Settings
+expire_logs_days = 7
+max_binlog_size = 100M
+binlog_cache_size = 1M
+
+# Replica-specific settings
+slave_parallel_workers = 4
+slave_parallel_type = LOGICAL_CLOCK
+slave_preserve_commit_order = ON

@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  mysql-primary:
+    image: mysql:8.0
+    container_name: mysql-primary
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_USER: ${MYSQL_USER:-appuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql/init:/docker-entrypoint-initdb.d
+      - mysql_primary_data:/var/lib/mysql
+      - ./mysql/conf/primary.cnf:/etc/mysql/conf.d/custom.cnf
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 5
+      interval: 10s
+    networks:
+      - mysql-network
+
+  mysql-replica:
+    image: mysql:8.0
+    container_name: mysql-replica
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_USER: ${MYSQL_USER:-appuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./mysql/init:/docker-entrypoint-initdb.d
+      - mysql_replica_data:/var/lib/mysql
+      - ./mysql/conf/replica.cnf:/etc/mysql/conf.d/custom.cnf
+    command: --default-authentication-plugin=mysql_native_password
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 5
+      interval: 10s
+    networks:
+      - mysql-network
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    environment:
+      # MySQL Configuration
+      MYSQL_PRIMARY_ENDPOINT: mysql-primary:3306
+      MYSQL_REPLICA_ENDPOINT: mysql-replica:3306
+      MYSQL_USER: otel_monitor
+      MYSQL_PASSWORD: ${MYSQL_MONITOR_PASSWORD:-otelmonitorpass}
+      MYSQL_DATABASE: ""
+      MYSQL_VERSION: "8.0"
+      
+      # New Relic Configuration
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      
+      # Environment Settings
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      NAMESPACE: docker
+      TEAM_NAME: ${TEAM_NAME:-database-team}
+      SERVICE_NAME: ${SERVICE_NAME:-mysql-monitoring}
+      COST_CENTER: ${COST_CENTER:-engineering}
+      
+      # Cloud Provider Settings
+      CLOUD_PROVIDER: ${CLOUD_PROVIDER:-docker}
+      CLOUD_REGION: ${CLOUD_REGION:-local}
+      
+      # Resource limits
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: "1750MiB"
+    volumes:
+      - ./otel/config/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "13133:13133" # Health check extension
+      - "55679:55679" # zPages extension
+      - "1777:1777"   # pprof extension
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+      mysql-replica:
+        condition: service_healthy
+    networks:
+      - mysql-network
+    restart: unless-stopped
+
+  # Sample application to generate MySQL traffic
+  mysql-app:
+    image: python:3.9-slim
+    container_name: mysql-app
+    environment:
+      MYSQL_HOST: mysql-primary
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-appuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+    volumes:
+      - ./app:/app
+    working_dir: /app
+    command: python app.py
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    networks:
+      - mysql-network
+    restart: unless-stopped
+
+networks:
+  mysql-network:
+    driver: bridge
+
+volumes:
+  mysql_primary_data:
+  mysql_replica_data:
