@@ -1,0 +1,73 @@
+# Enterprise Database Intelligence Collector
+# Includes custom components for enhanced mode
+# Multi-stage build for security and size optimization
+
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+# Install dependencies
+RUN apk add --no-cache git make ca-certificates
+
+# Set working directory
+WORKDIR /build
+
+# Copy entire project
+COPY . .
+
+# Install builder
+RUN go install go.opentelemetry.io/collector/cmd/builder@v0.105.0
+
+# Build the collector with all custom components
+RUN builder --config=otelcol-builder-config-complete.yaml
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates
+
+# Create non-root user
+RUN adduser -D -u 10001 otel
+
+# Copy binary from builder
+COPY --from=builder /build/distributions/production/database-intelligence-collector /otelcol
+
+# Set ownership
+RUN chown -R otel:otel /otelcol
+
+# Switch to non-root user
+USER otel
+
+# Labels
+LABEL maintainer="New Relic"
+LABEL description="Database Intelligence Collector - Enterprise Mode"
+LABEL version="2.0.0"
+LABEL features="ash,enhanced-sql,plan-extraction,adaptive-sampling,ohi-transform"
+
+# Environment variables
+ENV OTEL_RESOURCE_ATTRIBUTES="service.name=database-intelligence-enterprise"
+ENV GOGC=80
+ENV GOMEMLIMIT=1800MiB
+
+# Expose ports
+EXPOSE 4317  # OTLP gRPC
+EXPOSE 4318  # OTLP HTTP  
+EXPOSE 8888  # Prometheus metrics
+EXPOSE 8889  # Internal metrics
+EXPOSE 13133 # Health check
+EXPOSE 13134 # Enhanced health check
+EXPOSE 55679 # zpages
+EXPOSE 9090  # Prometheus exporter
+EXPOSE 9092  # Enhanced Prometheus exporter
+EXPOSE 1777  # pprof
+
+# Volume for file storage
+VOLUME ["/var/lib/otelcol"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/otelcol", "--config", "dry-run"]
+
+# Default command
+ENTRYPOINT ["/otelcol"]
+CMD ["--config", "/etc/otelcol/config.yaml"]

@@ -14,11 +14,16 @@ type Config struct {
 	scraperhelper.ControllerConfig `mapstructure:",squash"`
 	
 	// Database connection settings
-	Driver     string `mapstructure:"driver"`
-	DataSource string `mapstructure:"datasource"`
+	Driver              string `mapstructure:"driver"`
+	Datasource          string `mapstructure:"datasource"`
+	Database            string `mapstructure:"database"`
 	
 	// Collection settings
-	SamplingConfig SamplingConfig `mapstructure:"sampling"`
+	CollectionInterval  time.Duration   `mapstructure:"collection_interval"`
+	SamplingConfig      SamplingConfig  `mapstructure:"sampling"`
+	SamplingRate        float64         `mapstructure:"sampling_rate"`
+	IncludeIdleSessions bool            `mapstructure:"include_idle_sessions"`
+	LongRunningThreshold time.Duration  `mapstructure:"long_running_threshold"`
 	
 	// Storage settings
 	BufferSize         int           `mapstructure:"buffer_size"`
@@ -68,13 +73,13 @@ func (cfg *Config) Validate() error {
 		return errors.New("driver must be specified")
 	}
 	
-	if cfg.DataSource == "" {
+	if cfg.Datasource == "" {
 		return errors.New("datasource must be specified")
 	}
 	
 	// Validate supported drivers
 	switch cfg.Driver {
-	case "postgres", "pgx":
+	case "postgres", "postgresql", "pgx", "mysql":
 		// Supported
 	default:
 		return fmt.Errorf("unsupported driver: %s", cfg.Driver)

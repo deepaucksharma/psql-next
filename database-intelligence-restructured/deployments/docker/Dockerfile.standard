@@ -1,0 +1,34 @@
+# Standard Database Intelligence Collector
+# Uses standard OpenTelemetry Collector Contrib image
+# For config-only mode - no custom components
+
+FROM otel/opentelemetry-collector-contrib:0.105.0
+
+# Labels
+LABEL maintainer="New Relic"
+LABEL description="Database Intelligence Collector - Standard Mode"
+LABEL version="2.0.0"
+
+# Create user for security
+USER 10001
+
+# Environment variables with defaults
+ENV OTEL_RESOURCE_ATTRIBUTES="service.name=database-intelligence"
+ENV GOGC=80
+ENV GOMEMLIMIT=450MiB
+
+# Expose ports
+EXPOSE 4317  # OTLP gRPC
+EXPOSE 4318  # OTLP HTTP  
+EXPOSE 8888  # Prometheus metrics
+EXPOSE 13133 # Health check
+EXPOSE 55679 # zpages
+EXPOSE 9090  # Prometheus exporter
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD ["/otelcol-contrib", "--config", "dry-run"]
+
+# Default command (config must be mounted)
+ENTRYPOINT ["/otelcol-contrib"]
+CMD ["--config", "/etc/otelcol/config.yaml"]

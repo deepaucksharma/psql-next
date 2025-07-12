@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -43,23 +44,33 @@ func (tc *TestCollector) Start(config string) error {
 	// Build collector command
 	collectorBinary := os.Getenv("COLLECTOR_BINARY")
 	if collectorBinary == "" {
-		// Try to find the collector binary
-		possiblePaths := []string{
-			"../../working-collector/collector",
-			"../../core/cmd/collector/collector",
-			"./collector",
-			"otelcol-custom",
-		}
-		
-		for _, path := range possiblePaths {
-			if _, err := os.Stat(path); err == nil {
-				collectorBinary = path
-				break
+		// Determine which collector to use based on test mode
+		testMode := os.Getenv("TEST_MODE")
+		if testMode == "enhanced" {
+			// Look for custom built collector
+			possiblePaths := []string{
+				"../../distributions/production/database-intelligence-collector",
+				"../../distributions/enterprise/database-intelligence-collector",
+				"./database-intelligence-collector",
 			}
-		}
-		
-		if collectorBinary == "" {
-			return fmt.Errorf("collector binary not found")
+			
+			for _, path := range possiblePaths {
+				if _, err := os.Stat(path); err == nil {
+					collectorBinary = path
+					break
+				}
+			}
+			
+			if collectorBinary == "" {
+				return fmt.Errorf("enhanced collector binary not found - run 'make build-collector' first")
+			}
+		} else {
+			// Use standard otel collector
+			collectorBinary = "otel/opentelemetry-collector-contrib:0.105.0"
+			// If running in Docker, we'll handle this differently
+			if _, err := exec.LookPath("docker"); err == nil {
+				return tc.startWithDocker(configPath, logFile)
+			}
 		}
 	}
 	
@@ -200,18 +211,58 @@ func (tc *TestCollector) VerifyProcessorEnabled(processorName string) error {
 	return nil
 }
 
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[0:len(substr)] == substr ||
-		len(s) > len(substr) && containsHelper(s[1:], substr)
+// startWithDocker starts the collector using Docker
+func (tc *TestCollector) startWithDocker(configPath string, logFile *os.File) error {
+	// Docker run command for standard collector
+	dockerArgs := []string{
+		"run", "-d",
+		"--name", fmt.Sprintf("e2e-test-collector-%d", time.Now().Unix()),
+		"--network", "host", // Use host network for simplicity in tests
+		"-v", fmt.Sprintf("%s:/etc/otelcol/config.yaml:ro", configPath),
+	}
+	
+	// Add environment variables
+	envVars := []string{
+		fmt.Sprintf("TEST_DB_HOST=%s", tc.env.PostgresHost),
+		fmt.Sprintf("TEST_DB_PORT=%d", tc.env.PostgresPort),
+		fmt.Sprintf("TEST_DB_USER=%s", tc.env.PostgresUser),
+		fmt.Sprintf("TEST_DB_PASS=%s", tc.env.PostgresPassword),
+		fmt.Sprintf("TEST_DB_NAME=%s", tc.env.PostgresDatabase),
+		fmt.Sprintf("TEST_RUN_ID=%s", tc.env.TestRunID),
+	}
+	
+	for _, env := range envVars {
+		dockerArgs = append(dockerArgs, "-e", env)
+	}
+	
+	// Add the image and config
+	dockerArgs = append(dockerArgs, 
+		"otel/opentelemetry-collector-contrib:0.105.0",
+		"--config", "/etc/otelcol/config.yaml",
+	)
+	
+	// Start the container
+	tc.cmd = exec.Command("docker", dockerArgs...)
+	tc.cmd.Stdout = logFile
+	tc.cmd.Stderr = logFile
+	
+	if err := tc.cmd.Run(); err != nil {
+		return fmt.Errorf("failed to start docker container: %w", err)
+	}
+	
+	// Get container ID from output
+	containerID := strings.TrimSpace(string(tc.cmd.Stdout.(*os.File).Name()))
+	
+	// Store container ID for cleanup
+	tc.cmd = exec.Command("docker", "logs", "-f", containerID)
+	tc.cmd.Stdout = logFile
+	tc.cmd.Stderr = logFile
+	go tc.cmd.Run()
+	
+	return nil
 }
 
-func containsHelper(s, substr string) bool {
-	if len(s) < len(substr) {
-		return false
-	}
-	if s[0:len(substr)] == substr {
-		return true
-	}
-	return containsHelper(s[1:], substr)
+// Helper function
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

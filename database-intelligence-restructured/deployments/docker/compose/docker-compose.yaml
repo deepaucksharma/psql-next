@@ -69,11 +69,11 @@ services:
   # DATABASE INTELLIGENCE COLLECTOR
   # =============================================================================
   
-  collector:
-    build:
-      context: .
-      dockerfile: deployments/docker/dockerfiles/Dockerfile.custom
-    container_name: database-intelligence-collector
+  # Standard collector (config-only mode)
+  collector-standard:
+    image: newrelic/database-intelligence:${DOCKER_TAG:-latest}
+    container_name: database-intelligence-standard
+    profiles: ["standard"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,6 +119,69 @@ services:
       - ENABLE_QUERY_CORRELATOR=true
       - ENABLE_PII_DETECTION=true
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Enterprise collector (enhanced mode with custom components)
+  collector-enterprise:
+    image: newrelic/database-intelligence-enterprise:${DOCKER_TAG:-latest}
+    container_name: database-intelligence-enterprise
+    profiles: ["enterprise"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Internal metrics
+      - "8889:8889"   # Enhanced internal metrics
+      - "13133:13133" # Health check
+      - "13134:13134" # Enhanced health check
+      - "55679:55679" # zPages
+      - "9090:9090"   # Prometheus
+      - "9092:9092"   # Enhanced Prometheus
+      - "1777:1777"   # pprof
+    volumes:
+      - ../../../configs/examples/enhanced-mode-corrected.yaml:/etc/otelcol/config.yaml
+      - ./telemetry-output:/app/output
+      - collector_data:/var/lib/otelcol
+    environment:
+      # Database connections
+      - DB_POSTGRES_HOST=postgres
+      - DB_POSTGRES_PORT=5432
+      - DB_POSTGRES_USER=postgres
+      - DB_POSTGRES_PASSWORD=password
+      - DB_POSTGRES_DATABASE=testdb
+      - DB_MYSQL_HOST=mysql
+      - DB_MYSQL_PORT=3306
+      - DB_MYSQL_USER=root
+      - DB_MYSQL_PASSWORD=password
+      - DB_MYSQL_DATABASE=testdb
+      
+      # Export configuration
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-your_key_here}
+      - NEW_RELIC_OTLP_ENDPOINT=${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net:4318}
+      - NEW_RELIC_ACCOUNT_ID=${NEW_RELIC_ACCOUNT_ID}
+      - NEW_RELIC_API_KEY=${NEW_RELIC_API_KEY}
+      - DEPLOYMENT_ENVIRONMENT=docker-compose
+      - SERVICE_NAME=database-intelligence-enterprise
+      - SERVICE_VERSION=2.0.0
+      
+      # Feature flags for enhanced mode
+      - ENABLE_ENHANCED_MODE=true
+      - ENABLE_ASH_COLLECTION=true
+      - ENABLE_QUERY_PLANS=true
+      - ENABLE_PII_DETECTION=true
+      - ENABLE_ADAPTIVE_SAMPLER=true
+      - ENABLE_CIRCUIT_BREAKER=true
+      - ENABLE_COST_CONTROL=true
+      - ENABLE_OHI_TRANSFORM=true
+    command: ["--config=/etc/otelcol/config.yaml"]
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:13133/health"]
       interval: 30s
@@ -184,6 +247,7 @@ services:
 volumes:
   postgres_data:
   mysql_data:
+  collector_data:
 
 networks:
   default:

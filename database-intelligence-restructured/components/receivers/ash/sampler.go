@@ -2,6 +2,7 @@ package ash
 
 import (
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,18 +91,15 @@ func (s *AdaptiveSampler) CalculateSampleRate(sessionCount int) float64 {
 }
 
 // ShouldSample determines if a specific session should be sampled
-func (s *AdaptiveSampler) ShouldSample(session *Session, baseRate float64) bool {
+func (s *AdaptiveSampler) ShouldSample(session *ASHSample, baseRate float64) bool {
 	// Always sample critical sessions regardless of rate
-	if s.config.AlwaysSampleBlocked && session.BlockingPID != nil && *session.BlockingPID > 0 {
+	if s.config.AlwaysSampleBlocked && session.BlockingPID > 0 {
 		return true
 	}
 	
 	// Always sample long-running queries
-	if s.config.AlwaysSampleLongRunning && session.QueryStart != nil {
-		duration := time.Since(*session.QueryStart)
-		if duration > 5*time.Minute {
-			return true
-		}
+	if s.config.AlwaysSampleLongRunning && session.QueryDuration > 5*time.Minute {
+		return true
 	}
 	
 	// Always sample maintenance operations
@@ -118,7 +116,7 @@ func (s *AdaptiveSampler) ShouldSample(session *Session, baseRate float64) bool 
 	}
 	
 	// Increase sampling for waiting sessions
-	if session.WaitEvent != nil {
+	if session.WaitEvent != "" {
 		multiplier *= 1.5
 	}
 	
@@ -210,9 +208,9 @@ func (s *AdaptiveSampler) isMaintenanceQuery(query string) bool {
 		"CHECKPOINT",
 	}
 	
-	upperQuery := query[:min(100, len(query))] // Check first 100 chars
+	upperQuery := strings.ToUpper(query[:min(100, len(query))]) // Check first 100 chars
 	for _, keyword := range maintenanceKeywords {
-		if contains(upperQuery, keyword) {
+		if strings.Contains(upperQuery, keyword) {
 			return true
 		}
 	}
@@ -232,9 +230,9 @@ func (s *AdaptiveSampler) isHighImpactQuery(query string) bool {
 		"ALTER TABLE",
 	}
 	
-	upperQuery := query[:min(50, len(query))] // Check first 50 chars
+	upperQuery := strings.ToUpper(query[:min(50, len(query))]) // Check first 50 chars
 	for _, pattern := range highImpactPatterns {
-		if contains(upperQuery, pattern) {
+		if strings.Contains(upperQuery, pattern) {
 			return true
 		}
 	}
@@ -256,6 +254,3 @@ func min(a, b int) int {
 	return b
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr
-}

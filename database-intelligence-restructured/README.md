@@ -4,159 +4,205 @@ Monitor PostgreSQL and MySQL databases using OpenTelemetry Collector with New Re
 
 ## 🚀 Quick Start
 
-### Option 1: Config-Only Mode (Recommended)
-No custom code needed - just YAML configuration with standard OTel components.
+### Config-Only Mode (Production Ready)
+Works with standard OpenTelemetry Collector Contrib - no custom components needed.
 
 ```bash
 # 1. Set environment variables
 export NEW_RELIC_LICENSE_KEY="your-key-here"
-export DB_ENDPOINT="postgresql://localhost:5432/mydb"
-export DB_USERNAME="monitor_user"
-export DB_PASSWORD="secure_password"
+export DB_POSTGRES_HOST="localhost"
+export DB_POSTGRES_PORT="5432"
+export DB_POSTGRES_USER="monitor_user"
+export DB_POSTGRES_PASSWORD="secure_password"
+export DB_POSTGRES_DATABASE="postgres"
+export SERVICE_NAME="postgresql-prod-01"
+export ENVIRONMENT="production"
 
 # 2. Deploy with Docker
 docker run -d \
   --name otelcol-db \
-  -v $(pwd)/configs/examples/config-only-base.yaml:/etc/otelcol/config.yaml \
+  -v $(pwd)/configs/examples/config-only-working.yaml:/etc/otelcol/config.yaml \
   --env-file .env \
   otel/opentelemetry-collector-contrib:latest \
   --config=/etc/otelcol/config.yaml
 ```
 
-### Option 2: Enhanced Mode
-Advanced features with custom components for enterprise use cases.
+### Enhanced Mode (Requires Custom Build)
+⚠️ **Note**: Enhanced mode requires building a custom collector with our components. See [Building Custom Collector](#building-custom-collector) below.
 
 ```bash
-# Use our enhanced distribution
-docker run -d \
-  --name otelcol-db-enhanced \
-  -v $(pwd)/configs/examples/enhanced-mode-full.yaml:/etc/otelcol/config.yaml \
-  --env-file .env \
-  dbotel/collector-enhanced:latest
+# Build the custom collector first
+make build-collector
+
+# Run with enhanced configuration
+./bin/database-intelligence-collector \
+  --config=configs/examples/enhanced-mode-corrected.yaml
 ```
 
 ## 📊 What You Get
 
-### Core Metrics (Config-Only)
-- **Connections**: Active, idle, max connections
-- **Performance**: Query rates, transaction throughput
-- **Resources**: CPU, memory, disk I/O, cache hit ratios
-- **Health**: Replication lag, deadlocks, errors
+### Core Metrics (Config-Only Mode) - Available Now
+- **Connections**: Active, idle, max connections by state
+- **Performance**: Commits, rollbacks, blocks hit/read
+- **Database Size**: Database and table sizes
+- **Query Performance**: Long-running query detection
+- **Table Health**: Bloat estimation, vacuum stats
+- **Host Metrics**: CPU, memory, disk, network
 
-### Advanced Analytics (Enhanced Mode)
-- **Query Intelligence**: Execution plans, performance regression detection
-- **Active Session History**: 1-second sampling of database activity
+### Advanced Features (Enhanced Mode) - Custom Build Required
+- **Query Plan Analysis**: Extract and analyze execution plans
+- **Active Session History (ASH)**: 1-second sampling of activity
 - **Smart Sampling**: Adaptive collection based on load
-- **Cost Control**: Stay within metric budgets
+- **Cost Control**: Stay within New Relic metric budgets
+- **OHI Dashboard Compatibility**: Transform metrics for existing dashboards
+- **Circuit Breaker**: Protect databases from metric collection overload
 
 ## 📁 Repository Structure
 
 ```
 database-intelligence-restructured/
 ├── configs/
-│   └── examples/          # Ready-to-use configurations
-│       ├── config-only-base.yaml      # PostgreSQL standard
-│       ├── config-only-mysql.yaml     # MySQL standard
-│       └── enhanced-mode-full.yaml    # Full advanced setup
-├── docs/
-│   ├── architecture/      # Technical design docs
-│   ├── deployment-guide.md
-│   ├── performance-tuning-guide.md
-│   └── new-relic-integration-guide.md
-└── internal/             # Custom components (enhanced mode)
-    ├── receivers/        # Enhanced SQL, ASH receivers
-    └── processors/       # 7 custom processors
+│   └── examples/
+│       ├── config-only-working.yaml      # PostgreSQL (works now)
+│       ├── config-only-mysql.yaml        # MySQL (works now)
+│       ├── enhanced-mode-corrected.yaml  # Enhanced (custom build)
+│       └── .env.template                 # Environment variables
+├── components/                           # Custom components source
+│   ├── receivers/
+│   │   ├── ashreceiver/                 # Active Session History
+│   │   ├── enhancedsqlreceiver/         # Smart SQL metrics
+│   │   └── kernelmetricsreceiver/       # OS kernel metrics
+│   ├── processors/
+│   │   ├── adaptivesampler/             # Intelligent sampling
+│   │   ├── circuitbreaker/              # Database protection
+│   │   ├── ohitransform/                # OHI compatibility
+│   │   └── [other processors]/
+│   └── exporters/
+│       └── nri/                         # New Relic Infrastructure format
+├── distributions/
+│   ├── minimal/                         # Lightweight build
+│   ├── production/                      # Standard build
+│   └── enterprise/                      # Full-featured build
+└── docs/
+    ├── 01-quick-start/
+    ├── 02-deployment/
+    └── 03-configuration/
+```
+
+## 🔧 Building Custom Collector
+
+To use enhanced mode features, you need to build a custom collector:
+
+```bash
+# Install builder
+go install go.opentelemetry.io/collector/cmd/builder@v0.105.0
+
+# Build collector with all components
+builder --config=otelcol-builder-config-complete.yaml
+
+# The binary will be in distributions/production/
+./distributions/production/database-intelligence-collector --config=configs/examples/enhanced-mode-corrected.yaml
 ```
 
 ## 📚 Documentation
 
 ### Getting Started
-1. **[Architecture Overview](docs/architecture/otel-integration-strategy.md)** - Understand the two modes
-2. **[Deployment Guide](docs/deployment-guide.md)** - Docker, Kubernetes, systemd options
-3. **[New Relic Integration](docs/new-relic-integration-guide.md)** - Setup and validation
+1. **[Quick Start Guide](docs/01-quick-start/README.md)** - Get running in 5 minutes
+2. **[Configuration Guide](docs/03-configuration/base-configuration.md)** - Customize your setup
+3. **[Deployment Guide](docs/02-deployment/deployment-options.md)** - Production deployment
 
 ### Configuration Examples
-- **PostgreSQL**: [config-only-base.yaml](configs/examples/config-only-base.yaml)
-- **MySQL**: [config-only-mysql.yaml](configs/examples/config-only-mysql.yaml)
-- **Enhanced**: [enhanced-mode-full.yaml](configs/examples/enhanced-mode-full.yaml)
+- **PostgreSQL Standard**: [config-only-working.yaml](configs/examples/config-only-working.yaml)
+- **MySQL Standard**: [config-only-mysql.yaml](configs/examples/config-only-mysql.yaml)  
+- **Enhanced Mode**: [enhanced-mode-corrected.yaml](configs/examples/enhanced-mode-corrected.yaml)
 
-### Advanced Topics
-- **[Performance Tuning](docs/performance-tuning-guide.md)** - Optimize for scale
-- **[Metrics Reference](docs/metrics-collection-strategy.md)** - All collected metrics
-- **[Custom Components](docs/architecture/custom-components-design.md)** - Enhanced mode details
+### Environment Variables
+See [.env.template](configs/examples/.env.template) for all configuration options.
 
-## 🔧 Key Features
+## 🚦 Current Status
 
-### Config-Only Mode
-- ✅ No custom code required
-- ✅ Standard OTel components
-- ✅ Works with any OTel distribution
-- ✅ Low resource overhead
-- ✅ Quick to deploy
+### ✅ Production Ready (Config-Only Mode)
+- PostgreSQL metrics collection
+- MySQL metrics collection
+- Custom SQL queries
+- Host metrics
+- New Relic OTLP export
+- Prometheus metrics export
 
-### Enhanced Mode
-- ✅ Query plan analysis
-- ✅ Active session monitoring
-- ✅ Intelligent sampling
-- ✅ Circuit breaker protection
-- ✅ Cost management
+### 🚧 In Development (Enhanced Mode)
+- ASH receiver (partial implementation)
+- Query plan extraction
+- Advanced processors
+- OHI dashboard compatibility
 
-## 🏗️ Architecture
+## 🐳 Docker Images
 
-```
-Your Database → OTel Collector → New Relic (via OTLP)
-                    ↓
-              Config-Only Mode:
-              - PostgreSQL receiver
-              - MySQL receiver
-              - Basic processors
-                    OR
-              Enhanced Mode:
-              - All standard receivers
-              - Enhanced SQL receiver
-              - ASH receiver
-              - 7 custom processors
+### Available Now
+```bash
+# Standard OpenTelemetry Collector (for config-only mode)
+otel/opentelemetry-collector-contrib:latest
+otel/opentelemetry-collector-contrib:0.105.0
 ```
 
-## 🚦 Prerequisites
+### Custom Images (Not Yet Published)
+```bash
+# These will be available after CI/CD setup:
+# database-intelligence:latest
+# database-intelligence:2.0.0
+# database-intelligence:enterprise
+```
 
-- Database: PostgreSQL 11+ or MySQL 5.7+
-- New Relic account with OTLP endpoint access
-- Docker or Kubernetes (for deployment)
-- Database read-only user with appropriate permissions
+## 🔍 Metrics Collected
 
-## 🔐 Security
+### PostgreSQL Metrics
+| Metric | Description | Mode |
+|--------|-------------|------|
+| postgresql.connections.active | Active connections | Config-Only |
+| postgresql.commits | Transaction commits | Config-Only |
+| postgresql.blocks.hit | Buffer cache hits | Config-Only |
+| postgresql.database.size | Database size in bytes | Config-Only |
+| postgresql.table.bloat.ratio | Table bloat estimation | Config-Only |
+| db.ash.active_sessions | Active session samples | Enhanced |
+| db.query.plan_cost | Query plan cost | Enhanced |
 
-- Use read-only database credentials
-- Store secrets in environment variables
-- Enable TLS for database connections
-- Follow [security best practices](docs/deployment-guide.md#security-considerations)
-
-## 📈 Performance Impact
-
-| Mode | CPU Overhead | Memory Usage | Network | Database Impact |
-|------|--------------|--------------|---------|------------------|
-| Config-Only | < 5% | < 512MB | Low | Minimal |
-| Enhanced | < 20% | < 2GB | Medium | Low-Medium |
+### MySQL Metrics
+| Metric | Description | Mode |
+|--------|-------------|------|
+| mysql.connections | Current connections | Config-Only |
+| mysql.commands | Command execution rates | Config-Only |
+| mysql.buffer_pool.pages | Buffer pool statistics | Config-Only |
+| mysql.innodb.row_lock.time | Row lock wait time | Config-Only |
 
 ## 🤝 Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests: `make test`
+5. Submit a pull request
 
 ## 📄 License
 
-This project is licensed under the Apache License 2.0 - see [LICENSE](LICENSE) file.
+This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
 
+## 🆘 Support
 
+- **Documentation**: See the [docs/](docs/) directory
+- **Issues**: [GitHub Issues](https://github.com/yourusername/database-intelligence-restructured/issues)
+- **New Relic Support**: [support.newrelic.com](https://support.newrelic.com)
 
-## 🔗 Quick Links
+## ⚠️ Important Notes
 
-- [Example Configs](configs/examples/)
-- [Troubleshooting](docs/new-relic-integration-guide.md#troubleshooting)
-- [Performance Tuning](docs/performance-tuning-guide.md)
-- [New Relic OTLP Docs](https://docs.newrelic.com/docs/more-integrations/open-source-telemetry-integrations/opentelemetry/opentelemetry-introduction/)
+1. **Enhanced Mode**: Requires building a custom collector. Not available as a pre-built image yet.
+2. **OHI Migration**: If migrating from New Relic OHI, you'll need the ohitransform processor (enhanced mode only).
+3. **Performance**: Config-only mode has <5% overhead. Enhanced mode may use up to 20% CPU.
+4. **Security**: Always use read-only database credentials.
 
----
+## 🚀 Roadmap
 
-**Need help?** Check the [docs](docs/) or open an issue.
-
+- [ ] Publish Docker images to registry
+- [ ] Complete ASH receiver implementation  
+- [ ] Add dashboard templates
+- [ ] Implement missing MySQL enhanced features
+- [ ] Add Grafana dashboard support
+- [ ] Support for more databases (MongoDB, Redis)

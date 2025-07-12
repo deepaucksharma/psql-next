@@ -3,6 +3,8 @@ package ash
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +25,8 @@ type ashReceiver struct {
 	wg           sync.WaitGroup
 	cancel       context.CancelFunc
 	ticker       *time.Ticker
+	sampler      *ASHSampler
+	storage      *ASHStorage
 }
 
 // Start implements the receiver.Metrics interface
@@ -36,9 +40,27 @@ func (r *ashReceiver) Start(ctx context.Context, host component.Host) error {
 	ctx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
 
-	// Note: Database connection would be established here
-	// For now, this is a placeholder
-	r.logger.Warn("ASH receiver is in development mode - database connection not yet implemented")
+	// Connect to database
+	db, err := sql.Open(r.config.Driver, r.config.Datasource)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	
+	// Test connection
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return fmt.Errorf("failed to ping database: %w", err)
+	}
+	
+	r.db = db
+	
+	// Initialize sampler
+	r.sampler = NewASHSampler(r.logger, r.config)
+	
+	// Initialize storage
+	r.storage = NewASHStorage(r.config.BufferSize, r.config.RetentionDuration)
+	
+	r.logger.Info("Successfully connected to database")
 
 	// Start collection ticker
 	r.ticker = time.NewTicker(r.config.CollectionInterval)
@@ -74,8 +96,6 @@ func (r *ashReceiver) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// Signal shutdown
-	close(r.shutdownChan)
 
 	// Wait for all goroutines to finish
 	done := make(chan struct{})
@@ -108,31 +128,150 @@ func (r *ashReceiver) collect(ctx context.Context) {
 
 // scrapeMetrics scrapes ASH metrics from the database
 func (r *ashReceiver) scrapeMetrics(ctx context.Context) error {
-	// Create new metrics
+	// Sample current activity
+	samples, err := r.sampler.Sample(ctx, r.db)
+	if err != nil {
+		return fmt.Errorf("failed to sample ASH data: %w", err)
+	}
+	
+	// Store samples for historical analysis
+	r.storage.AddSamples(samples)
+	
+	// Create metrics from samples
+	md := r.createMetrics(samples)
+	
+	// Send metrics to consumer
+	return r.consumer.ConsumeMetrics(ctx, md)
+}
+
+// createMetrics converts ASH samples to OpenTelemetry metrics
+func (r *ashReceiver) createMetrics(samples []ASHSample) pmetric.Metrics {
 	md := pmetric.NewMetrics()
 	
 	// Add resource metrics
 	rm := md.ResourceMetrics().AppendEmpty()
-	rm.Resource().Attributes().PutStr("service.name", "ash_receiver")
-	rm.Resource().Attributes().PutStr("database.driver", r.config.Driver)
+	rm.Resource().Attributes().PutStr("service.name", "database-intelligence")
+	rm.Resource().Attributes().PutStr("db.system", r.config.Driver)
+	if r.config.Database != "" {
+		rm.Resource().Attributes().PutStr("db.name", r.config.Database)
+	}
 	
 	// Create scope metrics
 	sm := rm.ScopeMetrics().AppendEmpty()
 	sm.Scope().SetName("ash_receiver")
 	sm.Scope().SetVersion("1.0.0")
 	
-	// Note: Actual ASH data collection would happen here
-	// For now, create a placeholder metric
+	// Generate metrics from samples
+	r.createActiveSessionMetrics(sm, samples)
+	r.createWaitEventMetrics(sm, samples)
+	r.createBlockingSessionMetrics(sm, samples)
+	r.createLongRunningQueryMetrics(sm, samples)
+	
+	return md
+}
+
+// createActiveSessionMetrics creates metrics for active sessions
+func (r *ashReceiver) createActiveSessionMetrics(sm pmetric.ScopeMetrics, samples []ASHSample) {
+	// Count sessions by state
+	stateCounts := make(map[string]int)
+	for _, sample := range samples {
+		stateCounts[sample.State]++
+	}
+	
 	metric := sm.Metrics().AppendEmpty()
-	metric.SetName("ash.sessions.active")
-	metric.SetDescription("Number of active database sessions")
-	metric.SetUnit("sessions")
+	metric.SetName("db.ash.active_sessions")
+	metric.SetDescription("Number of active database sessions by state")
+	metric.SetUnit("{session}")
+	
+	gauge := metric.SetEmptyGauge()
+	
+	for state, count := range stateCounts {
+		dp := gauge.DataPoints().AppendEmpty()
+		dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+		dp.SetIntValue(int64(count))
+		dp.Attributes().PutStr("state", state)
+	}
+}
+
+// createWaitEventMetrics creates metrics for wait events
+func (r *ashReceiver) createWaitEventMetrics(sm pmetric.ScopeMetrics, samples []ASHSample) {
+	// Count wait events
+	waitEventCounts := make(map[string]int)
+	for _, sample := range samples {
+		if sample.WaitEvent != "" {
+			key := sample.WaitEventType + ":" + sample.WaitEvent
+			waitEventCounts[key]++
+		}
+	}
+	
+	if len(waitEventCounts) == 0 {
+		return
+	}
+	
+	metric := sm.Metrics().AppendEmpty()
+	metric.SetName("db.ash.wait_events")
+	metric.SetDescription("Count of sessions waiting on specific events")
+	metric.SetUnit("{event}")
+	
+	gauge := metric.SetEmptyGauge()
+	
+	for eventKey, count := range waitEventCounts {
+		parts := strings.SplitN(eventKey, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		
+		dp := gauge.DataPoints().AppendEmpty()
+		dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+		dp.SetIntValue(int64(count))
+		dp.Attributes().PutStr("wait_event_type", parts[0])
+		dp.Attributes().PutStr("wait_event_name", parts[1])
+	}
+}
+
+// createBlockingSessionMetrics creates metrics for blocking sessions
+func (r *ashReceiver) createBlockingSessionMetrics(sm pmetric.ScopeMetrics, samples []ASHSample) {
+	blockingCount := 0
+	for _, sample := range samples {
+		if sample.BlockingPID > 0 {
+			blockingCount++
+		}
+	}
+	
+	if blockingCount == 0 {
+		return
+	}
+	
+	metric := sm.Metrics().AppendEmpty()
+	metric.SetName("db.ash.blocked_sessions")
+	metric.SetDescription("Number of sessions blocked by other sessions")
+	metric.SetUnit("{session}")
 	
 	gauge := metric.SetEmptyGauge()
 	dp := gauge.DataPoints().AppendEmpty()
 	dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
-	dp.SetIntValue(0) // Placeholder value
+	dp.SetIntValue(int64(blockingCount))
+}
+
+// createLongRunningQueryMetrics creates metrics for long-running queries
+func (r *ashReceiver) createLongRunningQueryMetrics(sm pmetric.ScopeMetrics, samples []ASHSample) {
+	longRunningCount := 0
+	longRunningThreshold := 5 * time.Minute // Configurable
 	
-	// Send metrics to consumer
-	return r.consumer.ConsumeMetrics(ctx, md)
+	for _, sample := range samples {
+		if sample.QueryDuration > longRunningThreshold {
+			longRunningCount++
+		}
+	}
+	
+	metric := sm.Metrics().AppendEmpty()
+	metric.SetName("db.ash.long_running_queries")
+	metric.SetDescription("Number of queries running longer than threshold")
+	metric.SetUnit("{query}")
+	
+	gauge := metric.SetEmptyGauge()
+	dp := gauge.DataPoints().AppendEmpty()
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+	dp.SetIntValue(int64(longRunningCount))
+	dp.Attributes().PutStr("threshold", longRunningThreshold.String())
 }

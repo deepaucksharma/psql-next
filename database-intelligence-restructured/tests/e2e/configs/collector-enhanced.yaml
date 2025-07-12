@@ -1,0 +1,198 @@
+# E2E Test Configuration - Enhanced Mode
+# Tests enhanced mode with custom components
+
+receivers:
+  # Standard PostgreSQL receiver
+  postgresql:
+    endpoint: ${TEST_DB_HOST:localhost}:${TEST_DB_PORT:5432}
+    username: ${TEST_DB_USER:postgres}
+    password: ${TEST_DB_PASS:postgres}
+    databases:
+      - ${TEST_DB_NAME:postgres}
+      - testdb
+    collection_interval: 5s
+    transport: tcp
+    tls:
+      insecure: true
+
+  # Enhanced SQL receiver for testing
+  enhancedsql:
+    endpoint: ${TEST_DB_HOST:localhost}:${TEST_DB_PORT:5432}
+    username: ${TEST_DB_USER:postgres}
+    password: ${TEST_DB_PASS:postgres}
+    database: ${TEST_DB_NAME:postgres}
+    collection_interval: 5s
+    query_timeout: 2s
+    max_concurrent_queries: 3
+    
+    feature_detection:
+      enabled: true
+      extensions_to_check:
+        - pg_stat_statements
+    
+    queries:
+      - name: "slow_queries"
+        category: "performance"
+        interval: 10s
+      - name: "active_sessions"
+        category: "sessions"
+        interval: 5s
+
+  # ASH receiver for testing
+  ash:
+    endpoint: ${TEST_DB_HOST:localhost}:${TEST_DB_PORT:5432}
+    username: ${TEST_DB_USER:postgres}
+    password: ${TEST_DB_PASS:postgres}
+    database: ${TEST_DB_NAME:postgres}
+    sampling:
+      interval: 1s
+      buffer_size: 1000
+      retention_duration: 5m
+    metrics_enabled:
+      - active_sessions
+      - wait_events
+      - blocked_sessions
+
+  # Host metrics
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+      memory:
+
+processors:
+  # Protection
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  # Resource attribution
+  resource:
+    attributes:
+      - key: service.name
+        value: "e2e-test-enhanced"
+        action: upsert
+      - key: environment
+        value: "test"
+        action: upsert
+      - key: db.system
+        value: postgresql
+        action: insert
+      - key: test_run_id
+        value: "${TEST_RUN_ID}"
+        action: insert
+
+  # Circuit breaker for testing
+  circuitbreaker:
+    enabled: true
+    failure_threshold: 3
+    success_threshold: 2
+    timeout: 10s
+    max_requests: 50
+
+  # Plan extraction (mock for testing)
+  planattributeextractor:
+    enabled: true
+    plan_cache_size: 100
+    extract_fields:
+      - plan_cost
+      - node_types
+
+  # OHI transform for testing
+  ohitransform:
+    enable_metric_to_event: true
+    preserve_original_metrics: true
+    transform_rules:
+      - source_metric: "db.ash.active_sessions"
+        target_event: "PostgresSlowQueries"
+        mappings:
+          db.name: "database_name"
+          session_id: "query_id"
+      - source_metric: "db.ash.wait_events"
+        target_event: "PostgresWaitEvents"
+        mappings:
+          wait_event_name: "wait_event_name"
+          db.name: "database_name"
+
+  # Verification for testing
+  verification:
+    enabled: true
+    quality_checks:
+      enabled: true
+      max_cardinality: 1000
+
+  # Adaptive sampling for testing
+  adaptive_sampler:
+    enabled: true
+    sampling_rules:
+      - name: "test_metrics"
+        pattern: ".*"
+        sampling_rate: 1.0
+    max_metrics_per_minute: 10000
+
+  # Batch
+  batch:
+    send_batch_size: 1000
+    timeout: 5s
+
+exporters:
+  # File exporter for test validation
+  file:
+    path: /tmp/e2e-test-metrics-enhanced.json
+    format: json
+
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 20
+
+  # Prometheus for metric validation
+  prometheus:
+    endpoint: "0.0.0.0:9092"
+    namespace: e2e_test_enhanced
+    const_labels:
+      test_type: enhanced
+
+  # NRI exporter for testing
+  nri:
+    enabled: true
+    output_path: /tmp/e2e-test-nri-output.json
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13134
+    path: "/health"
+
+  # PostgreSQL query extension for testing
+  postgresqlquery:
+    endpoint: ${TEST_DB_HOST:localhost}:${TEST_DB_PORT:5432}
+    username: ${TEST_DB_USER:postgres}
+    password: ${TEST_DB_PASS:postgres}
+    database: ${TEST_DB_NAME:postgres}
+
+service:
+  extensions: [health_check, postgresqlquery]
+  
+  pipelines:
+    metrics/enhanced:
+      receivers: [postgresql, enhancedsql, ash, hostmetrics]
+      processors: 
+        - memory_limiter
+        - resource
+        - circuitbreaker
+        - planattributeextractor
+        - ohitransform
+        - verification
+        - adaptive_sampler
+        - batch
+      exporters: [file, prometheus, nri, debug]
+
+  telemetry:
+    logs:
+      level: debug
+      output_paths: [/tmp/e2e-test-collector-enhanced.log]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8889

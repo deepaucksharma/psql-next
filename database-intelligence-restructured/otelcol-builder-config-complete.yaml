@@ -25,8 +25,8 @@ extensions:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/oauth2clientauthextension v0.105.0
   
   # Custom extensions
-  # - gomod: github.com/deepaksharma/db-otel/components/extensions/healthcheck v0.0.0
-  #   path: ./components/extensions/healthcheck
+  - gomod: github.com/deepaksharma/db-otel/components/extensions/postgresqlquery v0.0.0
+    path: ./components/extensions/postgresqlquery
 
 # Standard Receivers
 receivers:
@@ -47,12 +47,12 @@ receivers:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.105.0
   
   # Custom receivers
-  - gomod: github.com/deepaksharma/db-otel/components/receivers/ash v0.0.0
-    path: ./components/receivers/ash
-  - gomod: github.com/deepaksharma/db-otel/components/receivers/kernelmetrics v0.0.0
-    path: ./components/receivers/kernelmetrics
-  - gomod: github.com/deepaksharma/db-otel/components/receivers/enhancedsql v0.0.0
-    path: ./components/receivers/enhancedsql
+  - gomod: github.com/deepaksharma/db-otel/components/receivers/ashreceiver v0.0.0
+    path: ./components/receivers/ashreceiver
+  - gomod: github.com/deepaksharma/db-otel/components/receivers/kernelmetricsreceiver v0.0.0
+    path: ./components/receivers/kernelmetricsreceiver
+  - gomod: github.com/deepaksharma/db-otel/components/receivers/enhancedsqlreceiver v0.0.0
+    path: ./components/receivers/enhancedsqlreceiver
 
 # Standard Processors
 processors:
@@ -69,6 +69,7 @@ processors:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.105.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.105.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/metricstransformprocessor v0.105.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/cumulativetodeltaprocessor v0.105.0
   
   # Sampling processors
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/tailsamplingprocessor v0.105.0
@@ -93,6 +94,8 @@ processors:
     path: ./components/processors/querycorrelator
   - gomod: github.com/deepaksharma/db-otel/components/processors/verification v0.0.0
     path: ./components/processors/verification
+  - gomod: github.com/deepaksharma/db-otel/components/processors/ohitransform v0.0.0
+    path: ./components/processors/ohitransform
 
 # Standard Exporters
 exporters:
@@ -113,8 +116,8 @@ exporters:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter v0.105.0
   
   # Custom exporters
-  # - gomod: github.com/deepaksharma/db-otel/components/exporters/nri v0.0.0
-  #   path: ./components/exporters/nri
+  - gomod: github.com/deepaksharma/db-otel/components/exporters/nri v0.0.0
+    path: ./components/exporters/nri
 
 # Connectors for pipeline-to-pipeline data flow
 connectors:

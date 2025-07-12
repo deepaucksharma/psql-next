@@ -1,0 +1,160 @@
+# E2E Test Configuration - Standard Mode
+# Tests config-only mode with standard OpenTelemetry components
+
+receivers:
+  # PostgreSQL receiver for database metrics
+  postgresql:
+    endpoint: ${TEST_DB_HOST:localhost}:${TEST_DB_PORT:5432}
+    username: ${TEST_DB_USER:postgres}
+    password: ${TEST_DB_PASS:postgres}
+    databases:
+      - ${TEST_DB_NAME:postgres}
+      - testdb
+    collection_interval: 5s
+    transport: tcp
+    tls:
+      insecure: true
+    initial_delay: 1s
+
+  # Host metrics
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+
+  # SQL Query receiver for custom metrics
+  sqlquery:
+    driver: postgres
+    datasource: "host=${TEST_DB_HOST:localhost} port=${TEST_DB_PORT:5432} user=${TEST_DB_USER:postgres} password=${TEST_DB_PASS:postgres} dbname=${TEST_DB_NAME:postgres} sslmode=disable"
+    collection_interval: 10s
+    queries:
+      # Connection states
+      - sql: |
+          SELECT 
+            COALESCE(state, 'idle') as state,
+            COUNT(*) as connection_count
+          FROM pg_stat_activity
+          WHERE pid != pg_backend_pid()
+          GROUP BY state
+        metrics:
+          - metric_name: postgresql.connections.by_state
+            value_column: connection_count
+            value_type: int
+            attribute_columns:
+              - state
+
+      # Long running queries
+      - sql: |
+          SELECT 
+            COUNT(*) as count
+          FROM pg_stat_activity
+          WHERE state = 'active'
+            AND query_start < NOW() - INTERVAL '1 minute'
+            AND query NOT LIKE 'autovacuum:%'
+        metrics:
+          - metric_name: postgresql.queries.long_running.count
+            value_column: count
+            value_type: int
+
+processors:
+  # Memory protection
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Add standard attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: "e2e-test-standard"
+        action: upsert
+      - key: environment
+        value: "test"
+        action: upsert
+      - key: db.system
+        value: postgresql
+        action: insert
+      - key: test_run_id
+        value: "${TEST_RUN_ID}"
+        action: insert
+
+  # Transform for testing
+  transform:
+    metric_statements:
+      - context: metric
+        statements:
+          - set(unit, "By") where name == "postgresql.database.size"
+
+  # Attribute cleanup
+  attributes:
+    actions:
+      - key: password
+        action: delete
+      - key: db.statement
+        action: hash
+
+  # Convert counters to deltas
+  cumulativetodelta:
+    include:
+      match_type: regexp
+      metrics:
+        - postgresql\.commits
+        - postgresql\.rollbacks
+        - postgresql\.blocks\..*
+
+  # Batch for efficiency
+  batch:
+    send_batch_size: 1000
+    timeout: 5s
+
+exporters:
+  # File exporter for test validation
+  file:
+    path: /tmp/e2e-test-metrics-standard.json
+    format: json
+
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 20
+
+  # Prometheus for metric validation
+  prometheus:
+    endpoint: "0.0.0.0:9091"
+    namespace: e2e_test
+    const_labels:
+      test_type: standard
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: 5s
+
+service:
+  extensions: [health_check]
+  
+  pipelines:
+    metrics:
+      receivers: [postgresql, hostmetrics, sqlquery]
+      processors: [memory_limiter, resource, transform, attributes, cumulativetodelta, batch]
+      exporters: [file, prometheus, debug]
+
+  telemetry:
+    logs:
+      level: debug
+      output_paths: [/tmp/e2e-test-collector-standard.log]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

@@ -84,7 +84,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-// All components use same OpenTelemetry version - no conflicts!
+// All components use OpenTelemetry v0.105.0 for consistency
 
 replace (
 	github.com/deepaksharma/db-otel/common/featuredetector => ../common/featuredetector

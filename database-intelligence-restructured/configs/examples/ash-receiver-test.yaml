@@ -1,0 +1,51 @@
+receivers:
+  ash:
+    driver: postgres
+    datasource: "host=localhost port=5432 user=postgres password=postgres dbname=postgres sslmode=disable"
+    collection_interval: 1s
+    sampling:
+      base_rate: 1.0
+      min_rate: 0.1
+      max_rate: 1.0
+      low_session_threshold: 50
+      high_session_threshold: 500
+      always_sample_blocked: true
+      always_sample_long_running: true
+      always_sample_maintenance: true
+    buffer_size: 10000
+    retention_duration: 1h
+    aggregation_windows:
+      - 1m
+      - 5m
+      - 15m
+      - 1h
+    enable_feature_detection: true
+    enable_wait_analysis: true
+    enable_blocking_analysis: true
+    enable_anomaly_detection: false
+    slow_query_threshold_ms: 1000
+    blocked_session_threshold: 5
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+  
+service:
+  telemetry:
+    logs:
+      level: info
+      encoding: console
+      output_paths: ["stdout"]
+
+  pipelines:
+    metrics:
+      receivers: [ash]
+      processors: [batch]
+      exporters: [debug]

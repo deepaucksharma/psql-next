@@ -1,13 +1,23 @@
 # Database Intelligence MVP Makefile
 
 # Variables
-BINARY_NAME=otelcol-custom
+BINARY_NAME=database-intelligence-collector
 GOPATH=$(shell go env GOPATH)
 VERSION=$(shell git describe --tags --always --dirty)
 BUILD_TIME=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS=-ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}"
-DOCKER_IMAGE=database-intelligence-collector
-DOCKER_TAG=latest
+
+# Docker image naming
+DOCKER_REGISTRY ?= 
+DOCKER_ORG ?= newrelic
+DOCKER_IMAGE_BASE = database-intelligence
+DOCKER_IMAGE_STANDARD = $(DOCKER_IMAGE_BASE)
+DOCKER_IMAGE_ENTERPRISE = $(DOCKER_IMAGE_BASE)-enterprise
+DOCKER_TAG ?= latest
+
+# Full image names
+STANDARD_IMAGE = $(if $(DOCKER_REGISTRY),$(DOCKER_REGISTRY)/,)$(DOCKER_ORG)/$(DOCKER_IMAGE_STANDARD):$(DOCKER_TAG)
+ENTERPRISE_IMAGE = $(if $(DOCKER_REGISTRY),$(DOCKER_REGISTRY)/,)$(DOCKER_ORG)/$(DOCKER_IMAGE_ENTERPRISE):$(DOCKER_TAG)
 
 # Go commands
 GOCMD=go
@@ -83,11 +93,29 @@ validate-otlp-export: ## Validate OTLP export format
 	@cd $(E2E_DIR) && ./run_otlp_tests.sh validate
 
 # Build targets
+.PHONY: build-collector
+build-collector: ## Build the custom OpenTelemetry collector
+	@echo "Building custom OpenTelemetry collector..."
+	@command -v builder >/dev/null 2>&1 || { echo "Installing builder..."; go install go.opentelemetry.io/collector/cmd/builder@v0.105.0; }
+	builder --config=otelcol-builder-config-complete.yaml
+	@echo "Collector build complete: distributions/production/$(BINARY_NAME)"
+
+.PHONY: build-collector-minimal
+build-collector-minimal: ## Build minimal collector
+	@echo "Building minimal collector..."
+	builder --config=otelcol-builder-config-minimal.yaml
+	@echo "Minimal collector build complete"
+
+.PHONY: build-collector-all
+build-collector-all: ## Build all collector variants
+	@echo "Building all collector variants..."
+	$(MAKE) build-collector-minimal
+	$(MAKE) build-collector
+	@echo "All collectors built"
+
+# Legacy build target
 .PHONY: build
-build: ## Build the collector binary
-	@echo "Building collector..."
-	$(GOBUILD) $(LDFLAGS) -o bin/$(BINARY_NAME) .
-	@echo "Build complete: bin/$(BINARY_NAME)"
+build: build-collector ## Build the binary (alias for build-collector)
 
 .PHONY: build-debug
 build-debug: ## Build with debug symbols
@@ -224,17 +252,35 @@ benchmark-compare: ## Compare benchmarks with main branch
 	@echo "Benchmark comparison complete"
 
 # Docker targets
+.PHONY: docker-build-standard
+docker-build-standard: ## Build standard Docker image (config-only mode)
+	@echo "Building standard Docker image..."
+	docker build -t $(STANDARD_IMAGE) -f deployments/docker/Dockerfile.standard .
+	@echo "Docker image built: $(STANDARD_IMAGE)"
+
+.PHONY: docker-build-enterprise
+docker-build-enterprise: build-collector ## Build enterprise Docker image (with custom components)
+	@echo "Building enterprise Docker image..."
+	docker build -t $(ENTERPRISE_IMAGE) -f deployments/docker/Dockerfile.enterprise .
+	@echo "Docker image built: $(ENTERPRISE_IMAGE)"
+
 .PHONY: docker-build
-docker-build: ## Build Docker image
-	@echo "Building Docker image..."
-	docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) -f deployments/docker/Dockerfile .
-	@echo "Docker image built: $(DOCKER_IMAGE):$(DOCKER_TAG)"
+docker-build: docker-build-standard docker-build-enterprise ## Build all Docker images
+
+.PHONY: docker-push-standard
+docker-push-standard: docker-build-standard ## Push standard Docker image
+	@echo "Pushing standard Docker image..."
+	docker push $(STANDARD_IMAGE)
+	@echo "Standard image pushed"
+
+.PHONY: docker-push-enterprise
+docker-push-enterprise: docker-build-enterprise ## Push enterprise Docker image
+	@echo "Pushing enterprise Docker image..."
+	docker push $(ENTERPRISE_IMAGE)
+	@echo "Enterprise image pushed"
 
 .PHONY: docker-push
-docker-push: docker-build ## Push Docker image
-	@echo "Pushing Docker image..."
-	docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
-	@echo "Docker image pushed"
+docker-push: docker-push-standard docker-push-enterprise ## Push all Docker images
 
 .PHONY: docker-up
 docker-up: ## Start test environment with Docker Compose
