@@ -1,79 +1,102 @@
-# Database Intelligence with OpenTelemetry - Documentation
+# Documentation
 
-## 📖 Quick Navigation
+Welcome to the Database Intelligence documentation. This directory contains all project documentation organized by purpose.
 
-| Document | Purpose | Implementation Status |
-|----------|---------|---------------------|
-| [📋 Overview](OVERVIEW.md) | Project architecture and capabilities | ✅ Current |
-| [🚀 Quick Start](QUICK_START.md) | Get up and running in 5 minutes | ✅ Current |
-| [⚙️ Configuration](CONFIGURATION.md) | Complete configuration reference | ✅ Current |
-| [🏗️ Deployment](DEPLOYMENT.md) | Docker, K8s, and production setup | ✅ Current |
-| [🧪 Testing](TESTING.md) | E2E tests and validation | ✅ Current |
-| [🔧 Troubleshooting](TROUBLESHOOTING.md) | Common issues and solutions | ✅ Current |
-
-## 🏛️ Architecture
-
-This project implements **two distinct operational modes**:
-
-### Config-Only Mode (Production Ready)
-- Uses standard OpenTelemetry components
-- No custom code required
-- Resource usage: <5% CPU, <512MB memory
-- **Status**: ✅ Fully implemented and tested
-
-### Enhanced Mode (Development)
-- Includes custom receivers and processors
-- Advanced database intelligence features
-- Resource usage: <20% CPU, <2GB memory  
-- **Status**: ⚠️ Components implemented but not integrated into distributions
-
-## 🚦 Current Implementation State
-
-| Component | Status | Available In |
-|-----------|--------|--------------|
-| PostgreSQL Receiver | ✅ Production | All distributions |
-| MySQL Receiver | ✅ Production | All distributions |
-| SQL Query Receiver | ✅ Production | All distributions |
-| Host Metrics Receiver | ✅ Production | All distributions |
-| **ASH Receiver** | ⚠️ Source only | None |
-| **Enhanced SQL Receiver** | ⚠️ Source only | None |
-| **Plan Attribute Extractor** | ⚠️ Source only | None |
-| **Adaptive Sampler** | ⚠️ Source only | None |
-| **Circuit Breaker** | ⚠️ Source only | None |
-| **Cost Control** | ⚠️ Source only | None |
-| **Query Correlator** | ⚠️ Source only | None |
-| **Verification Processor** | ⚠️ Source only | None |
-
-## 📁 Documentation Structure
+## 📚 Documentation Structure
 
 ```
 docs/
-├── README.md                 # This file - navigation hub
-├── OVERVIEW.md              # Architecture and capabilities
-├── QUICK_START.md           # 5-minute setup guide
-├── CONFIGURATION.md         # Complete config reference
-├── DEPLOYMENT.md            # Production deployment
-├── TESTING.md               # E2E testing guide
-└── TROUBLESHOOTING.md       # Issue resolution
+├── guides/           # How-to guides and tutorials
+│   ├── QUICK_START.md      # 5-minute getting started
+│   ├── CONFIGURATION.md    # Configuration reference
+│   ├── DEPLOYMENT.md       # Production deployment
+│   └── TROUBLESHOOTING.md  # Problem solving
+│
+├── reference/        # Technical references
+│   ├── ARCHITECTURE.md     # System design
+│   ├── METRICS.md          # All metrics collected
+│   ├── API.md              # Component APIs
+│   └── POSTGRESQL_METRICS.md # PostgreSQL specifics
+│
+├── development/      # Developer documentation
+│   ├── SETUP.md            # Development setup
+│   ├── TESTING.md          # Testing guide
+│   ├── TEST_REPORT.md      # Latest test results
+│   ├── e2e-validation-queries.md # Validation queries
+│   └── CLAUDE.md           # AI assistant context
+│
+└── archive/          # Historical documentation
+    └── [100+ archived files for reference]
 ```
 
-## 🗂️ Archived Documentation
+## 🚀 Quick Navigation
 
-Historical documentation has been consolidated and archived:
-- `docs/archive/` - Previous iteration documentation
-- All numbered directories (01-quick-start, 02-e2e-testing, etc.) have been consolidated
-- Project status reports moved to `docs/archive/project-status/`
+### For New Users
+1. Start with [Quick Start Guide](guides/QUICK_START.md)
+2. Configure using [Configuration Guide](guides/CONFIGURATION.md)
+3. Deploy with [Deployment Guide](guides/DEPLOYMENT.md)
+4. Fix issues using [Troubleshooting Guide](guides/TROUBLESHOOTING.md)
 
-## 🎯 What to Read First
+### For Developers
+1. Set up with [Development Setup](development/SETUP.md)
+2. Run tests with [Testing Guide](development/TESTING.md)
+3. Check [API Reference](reference/API.md)
+4. Review [Architecture](reference/ARCHITECTURE.md)
 
-1. **New Users**: Start with [Quick Start](QUICK_START.md)
-2. **Operators**: Review [Configuration](CONFIGURATION.md) and [Deployment](DEPLOYMENT.md)
-3. **Developers**: See [Testing](TESTING.md) and component source code
-4. **Troubleshooters**: Jump to [Troubleshooting](TROUBLESHOOTING.md)
+### For Operations
+1. Understand [Metrics Reference](reference/METRICS.md)
+2. Follow [Deployment Guide](guides/DEPLOYMENT.md)
+3. Monitor with [PostgreSQL Metrics](reference/POSTGRESQL_METRICS.md)
+4. Troubleshoot with [Troubleshooting Guide](guides/TROUBLESHOOTING.md)
 
-## 🔗 External Resources
+## 📊 Current Implementation
 
-- [OpenTelemetry Collector Documentation](https://opentelemetry.io/docs/collector/)
-- [New Relic OTLP Integration](https://docs.newrelic.com/docs/more-integrations/open-source-telemetry-integrations/opentelemetry/)
-- [PostgreSQL Monitoring Guide](https://www.postgresql.org/docs/current/monitoring.html)
-- [MySQL Performance Schema](https://dev.mysql.com/doc/refman/8.0/en/performance-schema.html)
+- **Version**: 2.0 (PostgreSQL-Only)
+- **Modes**: Config-Only (Standard OTel) and Custom (Enhanced)
+- **Metrics**: 35+ PostgreSQL metrics in Config-Only, 50+ in Custom
+- **Status**: Production Ready
+
+## 🗂️ Archive
+
+The `archive/` directory contains 100+ historical documentation files that provide context on:
+- Project evolution
+- Architecture decisions
+- Implementation details
+- Testing strategies
+
+These files are preserved for reference but may not reflect the current implementation.
+
+## 📝 Documentation Standards
+
+- **Guides**: Task-oriented, how-to documentation
+- **Reference**: Technical specifications and APIs
+- **Development**: Code-focused documentation
+- **Archive**: Historical context
+
+## 🔍 Finding Information
+
+### By Topic
+- **Configuration**: See [CONFIGURATION.md](guides/CONFIGURATION.md)
+- **Metrics**: See [METRICS.md](reference/METRICS.md)
+- **Troubleshooting**: See [TROUBLESHOOTING.md](guides/TROUBLESHOOTING.md)
+- **Architecture**: See [ARCHITECTURE.md](reference/ARCHITECTURE.md)
+
+### By Task
+- **Get Started**: [QUICK_START.md](guides/QUICK_START.md)
+- **Deploy**: [DEPLOYMENT.md](guides/DEPLOYMENT.md)
+- **Develop**: [SETUP.md](development/SETUP.md)
+- **Test**: [TESTING.md](development/TESTING.md)
+
+## 🤝 Contributing to Documentation
+
+When adding documentation:
+1. Place guides in `guides/`
+2. Place technical specs in `reference/`
+3. Place dev docs in `development/`
+4. Archive old docs in `archive/`
+
+Keep documentation:
+- **Current**: Update when code changes
+- **Clear**: Use examples and diagrams
+- **Concise**: Get to the point
+- **Consistent**: Follow existing patterns
