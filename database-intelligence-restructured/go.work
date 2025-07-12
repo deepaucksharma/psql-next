@@ -1,22 +1,40 @@
 go 1.22
 
 use (
-	./common
-	./common/featuredetector
-	./common/queryselector
 	./components
 	./components/exporters
 	./components/extensions
 	./components/internal/boundedmap
 	./components/processors
 	./components/receivers
-	./core
 	./distributions/enterprise
 	./distributions/minimal
 	./distributions/production
-	./internal/database
+	./internal
 	./tests
 	./tests/e2e
 )
 
-replace github.com/deepaksharma/db-otel/components/exporters/nri => /home/deepak/db-otel/database-intelligence-restructured/components/exporters/nri
+replace github.com/deepaksharma/db-otel/components/exporters/nri => ./components/exporters/nri
+
+replace github.com/deepaksharma/db-otel/components/processors/adaptivesampler => ./components/processors/adaptivesampler
+
+replace github.com/deepaksharma/db-otel/components/processors/circuitbreaker => ./components/processors/circuitbreaker
+
+replace github.com/deepaksharma/db-otel/components/processors/planattributeextractor => ./components/processors/planattributeextractor
+
+replace github.com/deepaksharma/db-otel/components/processors/verification => ./components/processors/verification
+
+replace github.com/deepaksharma/db-otel/components/processors/nrerrormonitor => ./components/processors/nrerrormonitor
+
+replace github.com/deepaksharma/db-otel/components/processors/costcontrol => ./components/processors/costcontrol
+
+replace github.com/deepaksharma/db-otel/components/processors/querycorrelator => ./components/processors/querycorrelator
+
+replace github.com/deepaksharma/db-otel/components/extensions/healthcheck => ./components/extensions/healthcheck
+
+replace github.com/deepaksharma/db-otel/components/receivers/ash => ./components/receivers/ash
+
+replace github.com/deepaksharma/db-otel/components/receivers/enhancedsql => ./components/receivers/enhancedsql
+
+replace github.com/deepaksharma/db-otel/components/receivers/kernelmetrics => ./components/receivers/kernelmetrics

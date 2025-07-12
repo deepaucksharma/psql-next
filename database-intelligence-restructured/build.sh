@@ -1,1 +1,1 @@
-/home/deepak/db-otel/database-intelligence-restructured/scripts/build/build.sh
+.ci/scripts/build.sh

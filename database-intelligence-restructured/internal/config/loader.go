@@ -9,7 +9,7 @@ import (
 	"reflect"
 	"strings"
 	
-	"github.com/database-intelligence/core/internal/secrets"
+	"github.com/deepaksharma/db-otel/internal/secrets"
 	"go.opentelemetry.io/collector/config/configopaque"
 	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/confmap"

@@ -1,161 +1,339 @@
-# CLAUDE.md
+# AI Assistant Context for Database Intelligence
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides comprehensive guidance for AI assistants (Claude, GitHub Copilot, etc.) working with the Database Intelligence codebase.
 
-## Commands
+## 🚨 Critical Context
 
-### Build and Run
+### Current State (IMPORTANT - READ FIRST)
+- **PostgreSQL Only**: MySQL support has been completely removed. All references to MySQL should be ignored/removed.
+- **Two Modes**: Config-Only (standard OTel) and Custom (enhanced features)
+- **Production Ready**: Both modes are stable and tested
+- **Module Structure**: Consolidated from 15+ modules to single module (fixed circular dependencies)
+- **Metrics**: 35+ PostgreSQL metrics in Config-Only, 50+ in Custom mode
+
+### What Works vs What Doesn't
+✅ **Working**:
+- Config-Only mode with all PostgreSQL metrics
+- Custom mode with ASH, query intelligence, adaptive sampling
+- Parallel deployment for mode comparison
+- New Relic OTLP export
+- Docker/K8s deployments
+- Comprehensive test suite
+
+❌ **Not Working/Removed**:
+- MySQL support (completely removed)
+- Some custom processors may need updates
+- OHI migration (partially implemented)
+
+⚠️ **In Progress**:
+- Performance optimization for high-volume environments
+- Cost control refinements
+- Additional query intelligence features
+
+## 📁 Key Files Reference
+
+### Configuration
+- `configs/config-only-mode.yaml` - Standard OTel configuration
+- `configs/custom-mode.yaml` - Enhanced mode configuration
+- `deployments/docker/compose/docker-compose-parallel.yaml` - Parallel deployment
+
+### Core Components
+- `components/receivers/ash/` - Active Session History receiver
+- `components/processors/adaptivesampler/` - Dynamic sampling
+- `components/processors/circuitbreaker/` - Overload protection
+- `components/processors/planattributeextractor/` - Query plan extraction
+
+### Testing & Validation
+- `tools/postgres-test-generator/` - Comprehensive metric generator
+- `tools/load-generator/` - Load testing tool
+- `scripts/verify-metrics.sh` - Metric validation
+- `scripts/validate-metrics-e2e.sh` - E2E validation
+
+### Documentation
+- `README.md` - Main entry point
+- `docs/guides/QUICK_START.md` - Getting started
+- `docs/guides/TROUBLESHOOTING.md` - Problem solving
+- `docs/reference/METRICS.md` - All metrics reference
+
+## 🛠️ Common Tasks
+
+### 1. Adding a New PostgreSQL Metric
+
 ```bash
-# Build the collector binary
-make build
+# 1. Update receiver configuration
+# Edit: configs/config-only-mode.yaml
+postgresql:
+  metrics:
+    postgresql.new_metric:
+      enabled: true
 
-# Build for all platforms
-make build-all
+# 2. Update documentation
+# Edit: docs/reference/METRICS.md
 
-# Run with default config
-make run
+# 3. Test the metric
+./scripts/verify-metrics.sh
 
-# Run in debug mode with verbose logging
-make run-debug
-
-# Quick development cycle (build + run)
-make dev-run
+# 4. Validate in New Relic
+# Query: SELECT latest(postgresql.new_metric) FROM Metric
 ```
 
-### Testing
+### 2. Debugging Metric Collection Issues
+
 ```bash
-# Run unit tests
-make test
+# Check collector logs
+docker logs db-intel-collector-config-only
 
-# Run integration tests
-make test-integration
+# Enable debug mode
+# Add to config:
+exporters:
+  debug:
+    verbosity: detailed
 
-# Run end-to-end tests
-make test-e2e
+# Check PostgreSQL permissions
+docker exec db-intel-postgres psql -U postgres -c "\du"
 
-# Run all tests with coverage
-make test-coverage
+# Verify metric flow
+curl -s http://localhost:13133/metrics | grep otelcol_receiver
+```
 
-# Run OTLP compliance tests
-make test-otlp
+### 3. Running Tests
 
-# Quick test for development (unit tests only)
-make quick-test
+```bash
+# Quick validation
+make test            # Unit tests only
+make test-e2e        # End-to-end tests
 
 # Full test suite
-make full-test
+make test-coverage   # With coverage report
 
-# Run a single test
-go test -v -run TestName ./path/to/package
+# Test specific component
+go test -v ./components/receivers/ash/...
+
+# Generate test load
+cd tools/postgres-test-generator
+go run main.go -workers=10
 ```
 
-### Code Quality
+### 4. Building and Deploying
+
 ```bash
-# Format code
-make fmt
+# Local development
+make build          # Build binaries
+make docker-build   # Build Docker images
+make run-dev       # Run locally
 
-# Run linters
-make lint
-
-# Security checks
-make security
-
-# Run all development checks (fmt, lint, security)
-make dev
-
-# Pre-commit checks
-make pre-commit
+# Deployment
+./scripts/deploy-parallel-modes.sh  # Deploy both modes
+./scripts/migrate-dashboard.sh deploy dashboards/newrelic/postgresql-parallel-dashboard.json
 ```
 
-### Docker Operations
+## 🏗️ Architecture Patterns
+
+### Component Structure
+```go
+// All components follow this pattern
+type Component struct {
+    config *Config
+    logger *zap.Logger
+    // component-specific fields
+}
+
+func (c *Component) Start(ctx context.Context, host component.Host) error
+func (c *Component) Shutdown(ctx context.Context) error
+```
+
+### Error Handling
+```go
+// Always wrap errors with context
+if err != nil {
+    return fmt.Errorf("failed to connect to PostgreSQL: %w", err)
+}
+
+// Use structured logging
+logger.Error("Query failed", 
+    zap.Error(err),
+    zap.String("query", query),
+    zap.Duration("elapsed", elapsed))
+```
+
+### Configuration Validation
+```go
+func (cfg *Config) Validate() error {
+    if cfg.Datasource == "" {
+        return errors.New("datasource is required")
+    }
+    // Additional validation
+    return nil
+}
+```
+
+## 🐛 Common Issues & Solutions
+
+### Issue: No metrics appearing
+1. Check NEW_RELIC_LICENSE_KEY is set
+2. Verify PostgreSQL connectivity
+3. Check collector logs for errors
+4. Ensure metrics are enabled in config
+
+### Issue: High memory usage
+1. Reduce collection_interval
+2. Enable adaptive sampling
+3. Configure memory_limiter processor
+4. Check for memory leaks with pprof
+
+### Issue: Missing specific metrics
+1. Check if metric is enabled in config
+2. Verify PostgreSQL version compatibility
+3. Check required PostgreSQL extensions (pg_stat_statements)
+4. Review PostgreSQL user permissions
+
+## 📊 Performance Guidelines
+
+### Optimization Targets
+- Metric collection: <5ms per cycle
+- Memory usage: <512MB (Config-Only), <1GB (Custom)
+- CPU usage: <5% (Config-Only), <20% (Custom)
+- Network overhead: <1MB/s
+
+### Profiling
 ```bash
-# Build Docker image
-make docker-build
+# Enable pprof
+# Add to config:
+extensions:
+  pprof:
+    endpoint: 0.0.0.0:1777
 
-# Start test environment
-make docker-up
-
-# View logs
-make docker-logs
-
-# Stop environment
-make docker-down
-
-# Clean Docker resources
-make docker-clean
+# Access profiles
+go tool pprof http://localhost:1777/debug/pprof/heap
+go tool pprof http://localhost:1777/debug/pprof/profile
 ```
 
-## Architecture Overview
+## 🔒 Security Considerations
 
-### Project Structure
-This is an OpenTelemetry Collector distribution specialized for database monitoring (PostgreSQL and MySQL) with New Relic integration.
+### Credentials
+- Never hardcode credentials
+- Use environment variables
+- Implement least-privilege PostgreSQL user
+- Enable TLS for database connections
 
-### Two Operating Modes
-1. **Config-Only Mode**: Uses standard OpenTelemetry components configured via YAML
-   - Minimal resource usage (<5% CPU, <512MB memory)
-   - No custom code required
-   - Production-ready configurations in `configs/examples/`
+### Required PostgreSQL Permissions
+```sql
+-- Minimum permissions needed
+GRANT CONNECT ON DATABASE postgres TO monitor_user;
+GRANT USAGE ON SCHEMA pg_catalog TO monitor_user;
+GRANT SELECT ON ALL TABLES IN SCHEMA pg_catalog TO monitor_user;
+```
 
-2. **Enhanced Mode**: Includes 7 custom processors for advanced features
-   - Located in `components/processors/`
-   - Provides query intelligence, adaptive sampling, circuit breaking, cost control
-   - Higher resource usage (<20% CPU, <2GB memory)
+## 🚀 Development Workflow
 
-### Key Components Architecture
+### Making Changes
+1. Create feature branch
+2. Make changes following patterns
+3. Add/update tests
+4. Update documentation
+5. Run `make pre-commit`
+6. Submit PR with conventional commit message
 
-#### Custom Processors (`components/processors/`)
-- **adaptivesampler**: Dynamic sampling based on system load
-- **circuitbreaker**: 3-state FSM to protect databases from overload
-- **planattributeextractor**: Extracts query plans using pg_querylens
-- **verificationprocessor**: PII detection and data quality checks
-- **costcontrol**: Enforces New Relic budget limits
-- **nrerrormonitor**: Proactive error detection and alerting
-- **querycorrelator**: Links queries to sessions and transactions
+### Testing Changes
+```bash
+# 1. Unit test your changes
+go test -v ./path/to/changed/package
 
-#### Custom Receivers (`components/receivers/`)
-- **ashreceiver**: Active Session History monitoring
-- **enhancedsqlreceiver**: Extended SQL metrics collection
-- **kernelmetricsreceiver**: OS-level kernel metrics
+# 2. Run integration tests
+make test-integration
 
-#### Distributions (`distributions/`)
-- **minimal**: Lightweight for resource-constrained environments
-- **enterprise**: Full-featured with all custom components
-- **production**: Optimized for production deployments
+# 3. Test with real PostgreSQL
+docker-compose up -d postgres
+make run-dev
 
-### Configuration Flow
-1. Base configurations in `configs/examples/`
-2. Environment overlays in `configs/overlays/` (dev, staging, prod)
-3. Runtime configuration via environment variables
-4. Validation using `make validate-config`
+# 4. Verify metrics in New Relic
+# Check dashboard or run NRQL queries
+```
 
-### Testing Architecture
-- **Unit tests**: Component-level testing with mocks
-- **Integration tests**: Cross-component interaction testing
-- **E2E tests**: Full pipeline testing with real databases (`tests/e2e/`)
-- **Performance tests**: Load and optimization testing
-- Test framework located in `tests/e2e/framework/`
+## 📝 Code Style Guidelines
 
-### Key Design Decisions
-1. **Zero-Persistence**: All state maintained in memory
-2. **Defense in Depth**: Multiple protection layers (memory limiter, circuit breaker, sampling)
-3. **Graceful Degradation**: Features fail gracefully without affecting core functionality
-4. **OpenTelemetry-First**: Leverages standard components wherever possible
+### Go Conventions
+- Use standard Go formatting (`gofmt`)
+- Follow effective Go guidelines
+- Keep functions small and focused
+- Add comments for exported functions
+- Use meaningful variable names
 
-### Integration Points
-- **Databases**: PostgreSQL 11+ and MySQL 5.7+ via SQL receivers
-- **New Relic**: OTLP export with API key authentication
-- **Monitoring**: Prometheus metrics on :8888, health checks on :13133
-- **Deployment**: Docker, Kubernetes (Helm), or binary deployment
+### Error Messages
+- Be specific about what failed
+- Include relevant context
+- Suggest solutions when possible
+- Use consistent format
 
-### Performance Considerations
-- Processing latency target: <5ms per metric
-- Memory usage scales with number of unique queries
-- Circuit breaker activates at 80% error rate
-- Adaptive sampler adjusts based on CPU/memory usage
+### Logging
+- Use structured logging (zap)
+- Include relevant fields
+- Use appropriate log levels
+- Avoid logging sensitive data
 
-### Security Model
-- Read-only database credentials required
-- Environment variables for all secrets
-- TLS for database connections
-- PII detection and redaction in verification processor
-- No persistent storage of sensitive data
+## 🎯 Priority Areas for Improvement
+
+1. **Performance Optimization**
+   - Reduce memory allocations
+   - Optimize query execution
+   - Improve batching efficiency
+
+2. **Feature Enhancements**
+   - Additional query intelligence
+   - Better anomaly detection
+   - Enhanced cost control
+
+3. **Testing**
+   - Increase test coverage
+   - Add more E2E scenarios
+   - Performance benchmarks
+
+4. **Documentation**
+   - More troubleshooting guides
+   - Performance tuning guide
+   - Production best practices
+
+## 🤖 AI Assistant Tips
+
+### When Asked to Fix Issues
+1. First understand the current state (PostgreSQL-only)
+2. Check logs and error messages
+3. Verify configuration
+4. Test the fix locally
+5. Update relevant documentation
+
+### When Adding Features
+1. Follow existing patterns
+2. Add comprehensive tests
+3. Update configuration examples
+4. Document new metrics/options
+5. Consider performance impact
+
+### When Reviewing Code
+1. Check for PostgreSQL-only focus
+2. Verify error handling
+3. Look for performance issues
+4. Ensure tests are included
+5. Check documentation updates
+
+## 📚 Additional Resources
+
+### Internal Docs
+- Architecture: `docs/reference/ARCHITECTURE.md`
+- Metrics: `docs/reference/METRICS.md`
+- API: `docs/reference/API.md`
+
+### External Resources
+- [OpenTelemetry Collector Docs](https://opentelemetry.io/docs/collector/)
+- [PostgreSQL Statistics](https://www.postgresql.org/docs/current/monitoring-stats.html)
+- [New Relic OTLP](https://docs.newrelic.com/docs/apis/otlp/)
+
+## 🔄 Version History
+
+- **v2.0**: PostgreSQL-only implementation
+- **v1.5**: Module consolidation, memory fixes
+- **v1.0**: Initial dual-database support
+
+---
+
+**Remember**: This is a PostgreSQL-only project. Any MySQL references in older code should be removed or ignored.

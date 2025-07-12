@@ -1,106 +1,96 @@
-# Test Configuration Guide
+# Testing Infrastructure
 
-## Overview
+This directory contains all testing tools, frameworks, and test suites for the Database Intelligence project.
 
-All test configurations are now centralized and managed through environment variables to improve security and flexibility.
+## Directory Structure
 
-## Setup
-
-1. Copy the example configuration:
-   ```bash
-   cp test.env.example test.env
-   ```
-
-2. Edit `test.env` with your actual values:
-   ```bash
-   # Database credentials
-   TEST_MYSQL_PASSWORD=your-mysql-password
-   TEST_POSTGRES_PASSWORD=your-postgres-password
-   
-   # New Relic credentials
-   TEST_NEWRELIC_API_KEY=your-api-key
-   ```
-
-3. Run tests:
-   ```bash
-   go test ./...
-   ```
-
-## Configuration Options
-
-### Database Settings
-- `TEST_MYSQL_HOST` - MySQL host (default: localhost)
-- `TEST_MYSQL_PORT` - MySQL port (default: 3306)
-- `TEST_MYSQL_USER` - MySQL username (default: root)
-- `TEST_MYSQL_PASSWORD` - MySQL password (default: mysql)
-- `TEST_MYSQL_DATABASE` - MySQL database name (default: test)
-
-- `TEST_POSTGRES_HOST` - PostgreSQL host (default: localhost)
-- `TEST_POSTGRES_PORT` - PostgreSQL port (default: 5432)
-- `TEST_POSTGRES_USER` - PostgreSQL username (default: postgres)
-- `TEST_POSTGRES_PASSWORD` - PostgreSQL password (default: postgres)
-- `TEST_POSTGRES_DATABASE` - PostgreSQL database name (default: test)
-
-### New Relic Settings
-- `TEST_NEWRELIC_API_KEY` - New Relic API key (required for E2E tests)
-- `TEST_NEWRELIC_ENDPOINT` - New Relic OTLP endpoint (default: https://otlp.nr-data.net)
-
-### Test Control
-- `TEST_SKIP_INTEGRATION` - Skip integration tests (default: false)
-- `TEST_SKIP_E2E` - Skip end-to-end tests (default: false)
-- `TEST_SKIP_PERFORMANCE` - Skip performance tests (default: false)
-- `TEST_VERBOSE` - Enable verbose test output (default: false)
-
-### Docker Settings
-- `TEST_DOCKER_NETWORK` - Docker network name (default: test-network)
-- `TEST_DOCKER_MYSQL_IMAGE` - MySQL Docker image (default: mysql:8.0)
-- `TEST_DOCKER_POSTGRES_IMAGE` - PostgreSQL Docker image (default: postgres:14)
-
-## Usage in Tests
-
-```go
-import "github.com/database-intelligence/tests/testconfig"
-
-func TestMyFeature(t *testing.T) {
-    cfg := testconfig.Get()
-    
-    // Skip if E2E tests are disabled
-    if cfg.SkipE2E {
-        t.Skip("E2E tests are disabled")
-    }
-    
-    // Use configuration
-    db, err := sql.Open("mysql", cfg.MySQLDSN())
-    // ...
-}
+```
+tests/
+├── tools/              # Testing utilities and tools
+│   ├── load-generator/     # Database load generation tool
+│   ├── postgres-test-generator/  # PostgreSQL test data generator
+│   ├── validation/         # OHI compatibility validator
+│   └── minimal-db-check/   # Minimal database connectivity checker
+├── e2e/               # End-to-end testing framework
+│   ├── framework/         # Test framework utilities
+│   ├── configs/          # Test-specific configurations
+│   └── cmd/              # Test execution commands
+├── fixtures/          # Test data and fixtures
+├── dashboard-validation/  # Dashboard validation tools
+└── archive/           # Historical test configurations
 ```
 
-## Security Notes
+## Testing Tools
 
-- Never commit `test.env` to version control
-- Use CI/CD secret management for production environments
-- Rotate test credentials regularly
-- Use separate credentials for testing vs production
+### Load Generator (`tools/load-generator/`)
+Generates realistic database load for testing:
+```bash
+cd tests/tools/load-generator
+go run main.go --database=postgres --connections=10 --duration=5m
+```
 
-## Migration from Hardcoded Values
+### PostgreSQL Test Generator (`tools/postgres-test-generator/`)
+Creates test data for PostgreSQL databases:
+```bash
+cd tests/tools/postgres-test-generator  
+go run main.go --host=localhost --database=testdb
+```
 
-Tests are being migrated from hardcoded credentials to use the centralized configuration. During the transition:
-1. New tests should use `testconfig`
-2. Existing tests will be updated incrementally
-3. Both approaches will work temporarily
+### Validation Tools (`tools/validation/`)
+Validates OHI compatibility and metrics accuracy:
+```bash
+cd tests/tools/validation
+go run ohi-compatibility-validator.go
+```
 
-## Troubleshooting
+### Minimal DB Check (`tools/minimal-db-check/`)
+Basic database connectivity verification:
+```bash
+cd tests/tools/minimal-db-check
+go run minimal_db_check.go --host=localhost --port=5432
+```
 
-1. **Tests skip with "credentials not set"**
-   - Ensure `test.env` exists and contains required values
-   - Check environment variable names match exactly
+## E2E Testing Framework
 
-2. **Connection failures**
-   - Verify database services are running
-   - Check network connectivity
-   - Ensure credentials are correct
+The `e2e/` directory contains comprehensive end-to-end testing:
+- **Framework**: Reusable testing utilities and helpers
+- **Configs**: Test-specific collector configurations
+- **Commands**: Test execution and validation tools
 
-3. **Docker tests fail**
-   - Verify Docker is running
-   - Check Docker network exists
-   - Ensure no port conflicts
+## Usage Patterns
+
+### Development Testing
+```bash
+# Run unit tests
+make test
+
+# Run with test database
+make test-integration
+
+# Run E2E tests
+make test-e2e
+```
+
+### Load Testing
+```bash
+# Generate database load
+cd tests/tools/load-generator
+go run main.go --config=../../configs/load-test.yaml
+```
+
+### Validation Testing
+```bash
+# Validate metrics accuracy
+cd tests/tools/validation
+go run . --config=../../e2e/configs/validation-test.yaml
+```
+
+## Test Data Management
+
+- **Fixtures**: Static test data in `fixtures/`
+- **Generators**: Dynamic test data creation tools
+- **Cleanup**: Automated cleanup after test runs
+
+This consolidation provides a unified testing infrastructure with clear organization and easy discovery of testing tools.
+EOF < /dev/null
+This consolidation provides a unified testing infrastructure with clear organization and easy discovery of testing tools.

@@ -239,7 +239,7 @@ require (
 	go.opentelemetry.io/collector/config/confighttp v0.105.0 // indirect
 	go.opentelemetry.io/collector/config/confignet v0.105.0 // indirect
 	go.opentelemetry.io/collector/config/configopaque v1.12.0 // indirect
-	go.opentelemetry.io/collector/config/configretry v1.12.0 // indirect
+	go.opentelemetry.io/collector/config/configretry v0.105.0 // indirect
 	go.opentelemetry.io/collector/config/configtelemetry v0.105.0 // indirect
 	go.opentelemetry.io/collector/config/configtls v1.12.0 // indirect
 	go.opentelemetry.io/collector/config/internal v0.105.0 // indirect

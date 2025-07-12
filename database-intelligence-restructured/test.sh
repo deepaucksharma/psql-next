@@ -1,1 +1,1 @@
-/home/deepak/db-otel/database-intelligence-restructured/scripts/test/test.sh
+scripts/test/test.sh
