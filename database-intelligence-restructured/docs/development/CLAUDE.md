@@ -1,339 +1,466 @@
-# AI Assistant Context for Database Intelligence
+# CLAUDE.md - Database Intelligence Project Context
 
-This file provides comprehensive guidance for AI assistants (Claude, GitHub Copilot, etc.) working with the Database Intelligence codebase.
+This file provides comprehensive guidance for Claude Code and other AI assistants working with the Database Intelligence codebase. Based on extensive consolidation and restructuring work, this document contains deep insights into the project's architecture, patterns, and best practices.
 
-## 🚨 Critical Context
+## 🚨 Critical Project State (READ FIRST)
 
-### Current State (IMPORTANT - READ FIRST)
-- **PostgreSQL Only**: MySQL support has been completely removed. All references to MySQL should be ignored/removed.
-- **Two Modes**: Config-Only (standard OTel) and Custom (enhanced features)
-- **Production Ready**: Both modes are stable and tested
-- **Module Structure**: Consolidated from 15+ modules to single module (fixed circular dependencies)
-- **Metrics**: 35+ PostgreSQL metrics in Config-Only, 50+ in Custom mode
+### Consolidated Architecture (2025)
+- **Directory Structure**: Recently consolidated from 14 to 11 top-level directories
+- **Shared Utilities**: All utilities consolidated into single `internal/` directory  
+- **Build System**: Unified under `.ci/` following industry standards
+- **Two Operating Modes**: Config-Only (standard OTel) vs Enhanced (custom components)
+- **Go Workspace**: Single workspace managing all modules with proper dependency resolution
 
-### What Works vs What Doesn't
-✅ **Working**:
-- Config-Only mode with all PostgreSQL metrics
-- Custom mode with ASH, query intelligence, adaptive sampling
-- Parallel deployment for mode comparison
-- New Relic OTLP export
-- Docker/K8s deployments
-- Comprehensive test suite
+### What's Production Ready ✅
+- **Config-Only Mode**: Uses only standard OpenTelemetry components (PostgreSQL + MySQL)
+- **Enhanced Mode**: Includes 7 custom processors for advanced database intelligence
+- **Build System**: Unified build scripts and OpenTelemetry Builder configurations
+- **Testing Framework**: Comprehensive E2E testing with real databases
+- **Deployment**: Docker, Kubernetes, and binary deployment options
 
-❌ **Not Working/Removed**:
-- MySQL support (completely removed)
-- Some custom processors may need updates
-- OHI migration (partially implemented)
+### Known Issues ⚠️
+- **Module Dependencies**: Some OpenTelemetry version conflicts (use fix scripts in `development/scripts/`)
+- **Custom Components**: Exist in source but require proper registration in distributions
+- **Go Versions**: Standardized to 1.22 (script available to fix inconsistencies)
 
-⚠️ **In Progress**:
-- Performance optimization for high-volume environments
-- Cost control refinements
-- Additional query intelligence features
+## 📁 Project Structure (Post-Consolidation)
 
-## 📁 Key Files Reference
-
-### Configuration
-- `configs/config-only-mode.yaml` - Standard OTel configuration
-- `configs/custom-mode.yaml` - Enhanced mode configuration
-- `deployments/docker/compose/docker-compose-parallel.yaml` - Parallel deployment
-
-### Core Components
-- `components/receivers/ash/` - Active Session History receiver
-- `components/processors/adaptivesampler/` - Dynamic sampling
-- `components/processors/circuitbreaker/` - Overload protection
-- `components/processors/planattributeextractor/` - Query plan extraction
-
-### Testing & Validation
-- `tools/postgres-test-generator/` - Comprehensive metric generator
-- `tools/load-generator/` - Load testing tool
-- `scripts/verify-metrics.sh` - Metric validation
-- `scripts/validate-metrics-e2e.sh` - E2E validation
-
-### Documentation
-- `README.md` - Main entry point
-- `docs/guides/QUICK_START.md` - Getting started
-- `docs/guides/TROUBLESHOOTING.md` - Problem solving
-- `docs/reference/METRICS.md` - All metrics reference
-
-## 🛠️ Common Tasks
-
-### 1. Adding a New PostgreSQL Metric
-
-```bash
-# 1. Update receiver configuration
-# Edit: configs/config-only-mode.yaml
-postgresql:
-  metrics:
-    postgresql.new_metric:
-      enabled: true
-
-# 2. Update documentation
-# Edit: docs/reference/METRICS.md
-
-# 3. Test the metric
-./scripts/verify-metrics.sh
-
-# 4. Validate in New Relic
-# Query: SELECT latest(postgresql.new_metric) FROM Metric
+### Core Directories
+```
+Database Intelligence/
+├── .ci/                    # Build & CI/CD automation (NEW)
+│   ├── build/             # OpenTelemetry Builder configurations
+│   ├── workflows/         # CI/CD workflow definitions  
+│   └── scripts/           # Build and deployment scripts
+├── components/            # Custom OpenTelemetry components
+│   ├── receivers/         # ASH, Enhanced SQL, Kernel Metrics
+│   ├── processors/        # Adaptive sampling, circuit breaker, etc.
+│   ├── exporters/         # New Relic integration
+│   └── extensions/        # Health checks and utilities
+├── configs/               # Runtime configurations (CLEANED)
+│   ├── base/             # Modular component definitions
+│   ├── modes/            # config-only.yaml vs enhanced.yaml
+│   ├── environments/     # dev, staging, production overlays
+│   └── examples/         # Working configuration examples
+├── deployments/          # Deployment configurations
+│   ├── docker/           # Docker and compose files
+│   ├── kubernetes/       # K8s manifests and Helm charts
+│   └── helm/             # Helm chart definitions
+├── development/          # Development tools (NEW)
+│   └── scripts/          # Utility scripts for maintenance
+├── distributions/        # Binary distributions
+│   ├── minimal/          # Standard components only
+│   ├── production/       # Full-featured build
+│   └── enterprise/       # All components + enterprise features
+├── docs/                 # Documentation (CONSOLIDATED)
+│   ├── guides/           # User guides and tutorials
+│   ├── reference/        # Technical reference
+│   └── development/      # Developer documentation
+├── internal/             # Shared utilities (CONSOLIDATED)
+│   ├── featuredetector/  # Database feature detection
+│   ├── queryselector/    # Query selection utilities
+│   ├── database/         # Database connection management
+│   ├── health/           # Health checking utilities
+│   ├── performance/      # Performance optimization
+│   ├── secrets/          # Secret management
+│   └── config/           # Configuration loading with secrets
+├── scripts/              # Operational scripts (STREAMLINED)
+│   └── test/             # Testing scripts
+└── tests/                # Testing infrastructure (CONSOLIDATED)
+    ├── tools/            # Testing utilities and generators
+    ├── e2e/              # End-to-end testing framework
+    └── fixtures/         # Test data and configurations
 ```
 
-### 2. Debugging Metric Collection Issues
+### Key Architectural Insights
 
-```bash
-# Check collector logs
-docker logs db-intel-collector-config-only
+#### 1. **Two-Mode Architecture**
+The project supports two distinct operational modes:
 
-# Enable debug mode
-# Add to config:
-exporters:
-  debug:
-    verbosity: detailed
+**Config-Only Mode** (`configs/modes/config-only.yaml`):
+- Uses only standard OpenTelemetry Collector components
+- Works with official OTel Collector Contrib without custom builds
+- Minimal resource usage: <5% CPU, <512MB memory
+- Production-ready for standard database monitoring
 
-# Check PostgreSQL permissions
-docker exec db-intel-postgres psql -U postgres -c "\du"
+**Enhanced Mode** (`configs/modes/enhanced.yaml`):
+- Includes 7 custom processors for advanced database intelligence
+- Requires custom build with component registration
+- Higher resource usage: <20% CPU, <2GB memory  
+- Provides query intelligence, adaptive sampling, cost control
 
-# Verify metric flow
-curl -s http://localhost:13133/metrics | grep otelcol_receiver
+#### 2. **Modular Configuration System**
+```yaml
+# Base components (configs/base/)
+receivers.yaml    # All receiver definitions
+processors.yaml   # All processor definitions
+exporters.yaml    # All exporter definitions
+extensions.yaml   # All extension definitions
+
+# Mode selection (configs/modes/)
+config-only.yaml  # Standard mode configuration
+enhanced.yaml     # Enhanced mode configuration
+
+# Environment overlays (configs/environments/)
+development.yaml  # Development overrides
+staging.yaml      # Staging configuration
+production.yaml   # Production optimizations
 ```
 
-### 3. Running Tests
+#### 3. **Consolidated Utility Libraries**
+All shared code consolidated into `internal/` directory:
+- **featuredetector/**: Database capability detection (PostgreSQL, MySQL)
+- **queryselector/**: Query selection and filtering logic
+- **database/**: Connection pooling and management
+- **health/**: Health checking and monitoring utilities
+- **performance/**: Performance optimization utilities
+- **secrets/**: Secret management and resolution
+- **config/**: Advanced configuration loading with secret resolution
 
-```bash
-# Quick validation
-make test            # Unit tests only
-make test-e2e        # End-to-end tests
+## 🛠️ Development Patterns & Best Practices
 
-# Full test suite
-make test-coverage   # With coverage report
-
-# Test specific component
-go test -v ./components/receivers/ash/...
-
-# Generate test load
-cd tools/postgres-test-generator
-go run main.go -workers=10
-```
-
-### 4. Building and Deploying
-
-```bash
-# Local development
-make build          # Build binaries
-make docker-build   # Build Docker images
-make run-dev       # Run locally
-
-# Deployment
-./scripts/deploy-parallel-modes.sh  # Deploy both modes
-./scripts/migrate-dashboard.sh deploy dashboards/newrelic/postgresql-parallel-dashboard.json
-```
-
-## 🏗️ Architecture Patterns
-
-### Component Structure
+### Component Development Pattern
 ```go
-// All components follow this pattern
+// Standard component structure used throughout the project
 type Component struct {
-    config *Config
-    logger *zap.Logger
+    config *Config           // Component-specific configuration
+    logger *zap.Logger      // Structured logging
+    telemetry component.TelemetrySettings  // OTel telemetry
     // component-specific fields
 }
 
-func (c *Component) Start(ctx context.Context, host component.Host) error
-func (c *Component) Shutdown(ctx context.Context) error
-```
-
-### Error Handling
-```go
-// Always wrap errors with context
-if err != nil {
-    return fmt.Errorf("failed to connect to PostgreSQL: %w", err)
+// Required lifecycle methods
+func (c *Component) Start(ctx context.Context, host component.Host) error {
+    // Initialize component
+    return nil
 }
 
-// Use structured logging
-logger.Error("Query failed", 
-    zap.Error(err),
-    zap.String("query", query),
-    zap.Duration("elapsed", elapsed))
-```
+func (c *Component) Shutdown(ctx context.Context) error {
+    // Clean shutdown logic
+    return nil
+}
 
-### Configuration Validation
-```go
+// Configuration validation pattern
 func (cfg *Config) Validate() error {
-    if cfg.Datasource == "" {
-        return errors.New("datasource is required")
+    if cfg.RequiredField == "" {
+        return fmt.Errorf("required_field is mandatory")
     }
-    // Additional validation
     return nil
 }
 ```
 
-## 🐛 Common Issues & Solutions
+### Error Handling Conventions
+```go
+// Always wrap errors with meaningful context
+if err := database.Connect(); err != nil {
+    return fmt.Errorf("failed to connect to PostgreSQL database %s: %w", 
+        cfg.Database, err)
+}
 
-### Issue: No metrics appearing
-1. Check NEW_RELIC_LICENSE_KEY is set
-2. Verify PostgreSQL connectivity
-3. Check collector logs for errors
-4. Ensure metrics are enabled in config
+// Use structured logging for errors
+logger.Error("Query execution failed",
+    zap.Error(err),
+    zap.String("query", query),
+    zap.String("database", dbName),
+    zap.Duration("elapsed", elapsed))
+```
 
-### Issue: High memory usage
-1. Reduce collection_interval
-2. Enable adaptive sampling
-3. Configure memory_limiter processor
-4. Check for memory leaks with pprof
+### Configuration Loading Pattern
+```go
+// Use the consolidated config loader with secret resolution
+loader := config.NewSecureConfigLoader(logger)
+conf, err := loader.LoadConfig(ctx, configPath)
+if err != nil {
+    return fmt.Errorf("failed to load configuration: %w", err)
+}
+```
 
-### Issue: Missing specific metrics
-1. Check if metric is enabled in config
-2. Verify PostgreSQL version compatibility
-3. Check required PostgreSQL extensions (pg_stat_statements)
-4. Review PostgreSQL user permissions
+## 🔧 Common Development Tasks
 
-## 📊 Performance Guidelines
+### 1. Adding a New Custom Component
 
-### Optimization Targets
-- Metric collection: <5ms per cycle
-- Memory usage: <512MB (Config-Only), <1GB (Custom)
-- CPU usage: <5% (Config-Only), <20% (Custom)
-- Network overhead: <1MB/s
-
-### Profiling
 ```bash
-# Enable pprof
-# Add to config:
-extensions:
-  pprof:
-    endpoint: 0.0.0.0:1777
+# 1. Create component directory
+mkdir -p components/processors/mynewprocessor
 
-# Access profiles
-go tool pprof http://localhost:1777/debug/pprof/heap
-go tool pprof http://localhost:1777/debug/pprof/profile
+# 2. Implement component following patterns
+# See existing components for reference
+
+# 3. Add to distribution registration
+# Edit: distributions/production/components_enhanced.go
+
+# 4. Update builder configuration
+# Edit: .ci/build/enhanced.yaml
+
+# 5. Add tests
+mkdir -p components/processors/mynewprocessor/tests
+
+# 6. Test the build
+.ci/scripts/build.sh production
 ```
 
-## 🔒 Security Considerations
+### 2. Fixing Module Dependencies
 
-### Credentials
-- Never hardcode credentials
-- Use environment variables
-- Implement least-privilege PostgreSQL user
-- Enable TLS for database connections
+```bash
+# Use the consolidated fix scripts
+development/scripts/fix-otel-dependencies.sh  # Fix OpenTelemetry versions
+development/scripts/fix-go-versions.sh        # Standardize Go versions
 
-### Required PostgreSQL Permissions
+# Manual go.work management
+go work sync
+go work edit -replace github.com/example/module=./local/path
+```
+
+### 3. Building and Testing
+
+```bash
+# Use unified build system
+.ci/scripts/build.sh minimal     # Build minimal distribution
+.ci/scripts/build.sh production  # Build production distribution
+
+# Use make targets (defined in Makefile)
+make build                # Build production distribution
+make build-minimal        # Build minimal distribution
+make test                 # Run unit tests
+make test-e2e            # Run end-to-end tests
+make dev                 # Run development checks (fmt, lint, security)
+```
+
+### 4. Working with Configurations
+
+```bash
+# Test config-only mode
+./database-intelligence-collector \
+  --config=configs/modes/config-only.yaml \
+  --config=configs/environments/development.yaml
+
+# Test enhanced mode
+./database-intelligence-collector \
+  --config=configs/modes/enhanced.yaml \
+  --config=configs/environments/development.yaml
+
+# Validate configuration
+make validate-config
+```
+
+## 🏗️ Architecture Principles
+
+### 1. **Defense in Depth**
+Multiple protection layers prevent system overload:
+- Memory limiter processor (first line of defense)
+- Circuit breaker processor (prevents cascade failures) 
+- Adaptive sampler (reduces load under pressure)
+- Cost control processor (enforces budget limits)
+
+### 2. **Zero Persistence Design**
+- All state maintained in memory for performance
+- No local storage dependencies
+- Graceful degradation when components fail
+- Clean restart capabilities
+
+### 3. **OpenTelemetry-First Approach**
+- Leverages standard OpenTelemetry components wherever possible
+- Custom components only for database-specific intelligence
+- Standard OTel configuration patterns and conventions
+- Compatible with OTel ecosystem tools
+
+### 4. **Environment-Specific Configuration**
+- Base configuration defines all available components
+- Mode selection (config-only vs enhanced) determines component set
+- Environment overlays provide deployment-specific overrides
+- Secret resolution integrated into configuration loading
+
+## 📊 Performance Characteristics
+
+### Resource Usage Targets
+```yaml
+Config-Only Mode:
+  cpu: "<5%"
+  memory: "<512MB" 
+  processing_latency: "<5ms per metric"
+  
+Enhanced Mode:  
+  cpu: "<20%"
+  memory: "<2GB"
+  processing_latency: "<10ms per metric"
+  additional_features: "query intelligence, adaptive sampling, cost control"
+```
+
+### Scalability Patterns
+- Memory usage scales with number of unique queries
+- Circuit breaker activates at 80% error rate
+- Adaptive sampler adjusts based on CPU/memory utilization
+- Batch processor optimizes network efficiency
+
+## 🐛 Common Issues & Resolution
+
+### Module Dependency Conflicts
+```bash
+# Symptoms: "unknown revision" errors, version conflicts
+# Resolution: Use fix scripts
+development/scripts/fix-otel-dependencies.sh
+development/scripts/fix-go-versions.sh
+
+# Manual resolution for specific conflicts
+go work edit -replace problem-module=./local/path
+```
+
+### Custom Component Registration Issues
+```bash
+# Symptoms: Component not found at runtime
+# Resolution: Check component registration
+# 1. Verify component exists in components/ directory
+# 2. Check registration in distributions/*/components*.go
+# 3. Verify builder configuration in .ci/build/*.yaml
+# 4. Rebuild with: .ci/scripts/build.sh production
+```
+
+### Configuration Loading Problems
+```bash
+# Symptoms: Config validation errors, secret resolution failures
+# Resolution: Use debugging tools
+# 1. Enable debug logging in exporter
+# 2. Check environment variables for secrets
+# 3. Validate YAML syntax
+# 4. Test with: make validate-config
+```
+
+## 🔒 Security Best Practices
+
+### Secret Management
+```yaml
+# Use environment variable placeholders in configs
+exporters:
+  otlp/newrelic:
+    headers:
+      api-key: "${env:NEW_RELIC_LICENSE_KEY}"
+```
+
+```bash
+# Store secrets in environment or external systems
+export NEW_RELIC_LICENSE_KEY="your-actual-key"
+export DB_PASSWORD="secure-password"
+```
+
+### Database Permissions
 ```sql
--- Minimum permissions needed
-GRANT CONNECT ON DATABASE postgres TO monitor_user;
-GRANT USAGE ON SCHEMA pg_catalog TO monitor_user;
-GRANT SELECT ON ALL TABLES IN SCHEMA pg_catalog TO monitor_user;
+-- Minimal PostgreSQL permissions for monitoring
+CREATE USER db_monitor WITH PASSWORD 'secure_password';
+GRANT CONNECT ON DATABASE postgres TO db_monitor;
+GRANT USAGE ON SCHEMA public TO db_monitor;
+GRANT SELECT ON ALL TABLES IN SCHEMA pg_catalog TO db_monitor;
+GRANT SELECT ON ALL TABLES IN SCHEMA information_schema TO db_monitor;
 ```
 
-## 🚀 Development Workflow
+## 🚀 Deployment Patterns
+
+### Local Development
+```bash
+# Quick start for development
+make dev-run    # Build and run with development config
+make docker-up  # Start with Docker Compose
+```
+
+### Production Deployment
+```bash
+# Use config-only mode for stability
+./database-intelligence-collector \
+  --config=configs/modes/config-only.yaml \
+  --config=configs/environments/production.yaml
+
+# Or use Docker
+docker run -d \
+  -v $(pwd)/configs:/etc/otelcol \
+  -e NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY} \
+  database-intelligence:latest \
+  --config=/etc/otelcol/modes/config-only.yaml
+```
+
+### Kubernetes Deployment
+```bash
+# Use Helm chart
+helm install database-intelligence deployments/helm/database-intelligence/ \
+  --set mode=config-only \
+  --set environment=production \
+  --set newrelic.licenseKey=${NEW_RELIC_LICENSE_KEY}
+```
+
+## 📚 Development Workflow
 
 ### Making Changes
-1. Create feature branch
-2. Make changes following patterns
-3. Add/update tests
-4. Update documentation
-5. Run `make pre-commit`
-6. Submit PR with conventional commit message
+1. **Understand the architecture**: Review this document and relevant code
+2. **Follow patterns**: Use existing components as templates
+3. **Test thoroughly**: Unit tests + integration tests + E2E tests
+4. **Update documentation**: Keep docs in sync with changes
+5. **Use quality tools**: `make dev` runs formatting, linting, security checks
 
-### Testing Changes
+### Testing Strategy
 ```bash
-# 1. Unit test your changes
-go test -v ./path/to/changed/package
+# 1. Unit tests for individual components
+go test -v ./components/processors/mynewprocessor/...
 
-# 2. Run integration tests
+# 2. Integration tests with real databases  
 make test-integration
 
-# 3. Test with real PostgreSQL
-docker-compose up -d postgres
-make run-dev
+# 3. End-to-end tests with full pipeline
+make test-e2e
 
-# 4. Verify metrics in New Relic
-# Check dashboard or run NRQL queries
+# 4. Performance/load testing
+cd tests/tools/load-generator
+go run main.go --database=postgres --duration=5m
 ```
 
-## 📝 Code Style Guidelines
+### Code Quality Standards
+- **Formatting**: Use `gofmt` and `goimports`
+- **Linting**: Pass `golangci-lint` checks
+- **Testing**: Maintain >80% test coverage
+- **Documentation**: Comment exported functions and types
+- **Error Handling**: Always wrap errors with context
+- **Logging**: Use structured logging with appropriate levels
 
-### Go Conventions
-- Use standard Go formatting (`gofmt`)
-- Follow effective Go guidelines
-- Keep functions small and focused
-- Add comments for exported functions
-- Use meaningful variable names
+## 🎯 Current Development Priorities
 
-### Error Messages
-- Be specific about what failed
-- Include relevant context
-- Suggest solutions when possible
-- Use consistent format
+### High Priority
+1. **Complete Custom Component Registration**: Ensure all custom components are properly registered
+2. **Resolve Module Dependencies**: Fix remaining OpenTelemetry version conflicts
+3. **Performance Optimization**: Reduce memory allocations and improve efficiency
 
-### Logging
-- Use structured logging (zap)
-- Include relevant fields
-- Use appropriate log levels
-- Avoid logging sensitive data
+### Medium Priority  
+1. **Enhanced Monitoring**: Add more comprehensive health checks and metrics
+2. **Configuration Validation**: Improve configuration validation and error messages
+3. **Documentation**: Expand troubleshooting guides and best practices
 
-## 🎯 Priority Areas for Improvement
+### Low Priority
+1. **Additional Integrations**: Support for more monitoring backends
+2. **Query Intelligence**: Enhanced query analysis and recommendations
+3. **Cost Optimization**: More sophisticated cost control mechanisms
 
-1. **Performance Optimization**
-   - Reduce memory allocations
-   - Optimize query execution
-   - Improve batching efficiency
+## 🤖 AI Assistant Guidelines
 
-2. **Feature Enhancements**
-   - Additional query intelligence
-   - Better anomaly detection
-   - Enhanced cost control
-
-3. **Testing**
-   - Increase test coverage
-   - Add more E2E scenarios
-   - Performance benchmarks
-
-4. **Documentation**
-   - More troubleshooting guides
-   - Performance tuning guide
-   - Production best practices
-
-## 🤖 AI Assistant Tips
-
-### When Asked to Fix Issues
-1. First understand the current state (PostgreSQL-only)
-2. Check logs and error messages
-3. Verify configuration
-4. Test the fix locally
-5. Update relevant documentation
+### When Fixing Issues
+1. **Check consolidation status**: Use new directory structure (internal/, .ci/, etc.)
+2. **Use fix scripts**: Apply `development/scripts/fix-*.sh` for common problems
+3. **Follow patterns**: Maintain consistency with existing code
+4. **Test changes**: Always verify fixes work in both config-only and enhanced modes
+5. **Update documentation**: Keep guides and references current
 
 ### When Adding Features
-1. Follow existing patterns
-2. Add comprehensive tests
-3. Update configuration examples
-4. Document new metrics/options
-5. Consider performance impact
+1. **Understand two-mode architecture**: Ensure feature works appropriately in both modes
+2. **Use shared utilities**: Leverage consolidated `internal/` libraries
+3. **Follow component patterns**: Use established interfaces and lifecycle methods
+4. **Add comprehensive tests**: Unit, integration, and E2E tests
+5. **Document thoroughly**: Update relevant guides and references
 
 ### When Reviewing Code
-1. Check for PostgreSQL-only focus
-2. Verify error handling
-3. Look for performance issues
-4. Ensure tests are included
-5. Check documentation updates
-
-## 📚 Additional Resources
-
-### Internal Docs
-- Architecture: `docs/reference/ARCHITECTURE.md`
-- Metrics: `docs/reference/METRICS.md`
-- API: `docs/reference/API.md`
-
-### External Resources
-- [OpenTelemetry Collector Docs](https://opentelemetry.io/docs/collector/)
-- [PostgreSQL Statistics](https://www.postgresql.org/docs/current/monitoring-stats.html)
-- [New Relic OTLP](https://docs.newrelic.com/docs/apis/otlp/)
-
-## 🔄 Version History
-
-- **v2.0**: PostgreSQL-only implementation
-- **v1.5**: Module consolidation, memory fixes
-- **v1.0**: Initial dual-database support
+1. **Verify consolidation compliance**: Ensure code uses new structure
+2. **Check dependency management**: Look for version conflicts
+3. **Validate error handling**: Ensure proper error wrapping and logging
+4. **Review test coverage**: Confirm adequate testing
+5. **Check documentation**: Ensure docs are updated
 
 ---
 
-**Remember**: This is a PostgreSQL-only project. Any MySQL references in older code should be removed or ignored.
+**Last Updated**: Based on comprehensive consolidation completed 2025-01-12
+**Key Changes**: Directory consolidation, unified build system, streamlined configurations, enhanced documentation
+
+This document reflects the current state after major architectural improvements and should be the authoritative source for understanding the Database Intelligence project structure and patterns.
