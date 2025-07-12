@@ -1,621 +1,400 @@
 # Troubleshooting Guide
 
-## Overview
+Common issues and solutions for Database Intelligence with OpenTelemetry.
 
-Comprehensive troubleshooting guide for the Database Intelligence OpenTelemetry Collector covering common issues, diagnostic procedures, and resolution steps.
-
-## Quick Diagnostics
+## 🚨 Quick Diagnosis
 
 ### Health Check
+
 ```bash
-# Basic health check
+# Check collector health
 curl http://localhost:13133/health
-# Expected: HTTP 200 with "OK" or health status
 
-# Detailed health status
-curl http://localhost:13133/status
+# Expected response: {"status":"OK"}
 ```
 
-### Metrics Verification
+### Common Issues Checklist
+
+1. ✅ **Database connectivity**: Can you connect to the database?
+2. ✅ **New Relic credentials**: Is your license key valid?
+3. ✅ **Configuration syntax**: Is your YAML valid?
+4. ✅ **Permissions**: Does the database user have required permissions?
+5. ✅ **Network**: Can the collector reach New Relic?
+
+## 🔌 Database Connection Issues
+
+### PostgreSQL Connection Problems
+
+**Symptoms**: `connection refused`, `authentication failed`
+
 ```bash
-# Check if metrics are being collected
-curl http://localhost:8888/metrics | grep postgresql
-curl http://localhost:8888/metrics | grep mysql
+# Test database connection
+psql "${DB_ENDPOINT}" -c "SELECT 1"
 
-# Count metric types
-curl -s http://localhost:8888/metrics | grep -E "^postgresql_|^mysql_" | wc -l
-
-# Check for errors
-curl -s http://localhost:8888/metrics | grep -i error
+# Check connection string format
+echo "${DB_ENDPOINT}"
+# Should be: postgresql://user:pass@host:port/db
 ```
 
-### Log Analysis
-```bash
-# View recent logs
-tail -f collector.log
+**Solutions**:
 
-# Search for errors
-grep -i error collector.log | tail -20
-grep -i "connection refused" collector.log
-grep -i "authentication failed" collector.log
+1. **Check credentials**:
+   ```sql
+   -- Verify user exists and has permissions
+   SELECT usename, usesuper FROM pg_user WHERE usename = 'otel_monitor';
+   
+   -- Grant required permissions
+   GRANT CONNECT ON DATABASE mydb TO otel_monitor;
+   GRANT USAGE ON SCHEMA public TO otel_monitor;
+   GRANT SELECT ON ALL TABLES IN SCHEMA public TO otel_monitor;
+   ```
+
+2. **Check network connectivity**:
+   ```bash
+   # Test port connectivity
+   telnet postgres-host 5432
+   
+   # Check firewall rules
+   sudo ufw status
+   ```
+
+3. **Verify SSL settings**:
+   ```yaml
+   receivers:
+     postgresql:
+       endpoint: "${DB_ENDPOINT}"
+       tls:
+         insecure_skip_verify: false  # Set to true for testing
+   ```
+
+### MySQL Connection Problems
+
+**Symptoms**: `Access denied`, `Can't connect to MySQL server`
+
+```bash
+# Test MySQL connection
+mysql -h "${MYSQL_HOST}" -u "${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1"
 ```
 
-## Common Issues
+**Solutions**:
 
-### 1. No Metrics in New Relic
+1. **Check user permissions**:
+   ```sql
+   -- Create monitoring user
+   CREATE USER 'otel_monitor'@'%' IDENTIFIED BY 'secure_password';
+   GRANT SELECT ON performance_schema.* TO 'otel_monitor'@'%';
+   GRANT SELECT ON information_schema.* TO 'otel_monitor'@'%';
+   GRANT PROCESS ON *.* TO 'otel_monitor'@'%';
+   FLUSH PRIVILEGES;
+   ```
 
-#### Symptoms
-- Health check passes
-- Local metrics visible
-- No data in New Relic dashboards
+2. **Check bind address**:
+   ```bash
+   # Ensure MySQL binds to correct interface
+   grep bind-address /etc/mysql/mysql.conf.d/mysqld.cnf
+   # Should be: bind-address = 0.0.0.0
+   ```
 
-#### Diagnosis
+## 📊 No Metrics in New Relic
+
+### Verify New Relic Integration
+
 ```bash
-# Check New Relic connectivity
-curl -H "Api-Key: $NEW_RELIC_LICENSE_KEY" \
+# Test New Relic API connectivity
+curl -H "Api-Key: ${NEW_RELIC_LICENSE_KEY}" \
   https://api.newrelic.com/v2/applications.json
 
-# Verify license key format
-echo $NEW_RELIC_LICENSE_KEY | wc -c
-# Should be 40 characters + newline
-
-# Check OTLP export logs
-grep -i "otlp" collector.log | tail -10
-grep -i "403\|401\|400" collector.log
+# Test OTLP endpoint
+curl -v -X POST "${NEW_RELIC_OTLP_ENDPOINT}/v1/metrics" \
+  -H "Api-Key: ${NEW_RELIC_LICENSE_KEY}" \
+  -H "Content-Type: application/x-protobuf"
 ```
 
-#### Resolution
-```bash
-# 1. Verify license key
-export NEW_RELIC_LICENSE_KEY="your_correct_license_key"
+### Common New Relic Issues
 
-# 2. Check account ID
-export NEW_RELIC_ACCOUNT_ID="your_account_id"
+1. **Invalid license key**:
+   ```bash
+   # Check license key format (should be 40 characters)
+   echo "${NEW_RELIC_LICENSE_KEY}" | wc -c
+   
+   # Verify license key in New Relic UI
+   # Go to: one.newrelic.com → API Keys
+   ```
 
-# 3. Test with debug exporter
-# Add to config:
+2. **Wrong OTLP endpoint**:
+   ```bash
+   # US endpoint
+   export NEW_RELIC_OTLP_ENDPOINT="https://otlp.nr-data.net:4318"
+   
+   # EU endpoint  
+   export NEW_RELIC_OTLP_ENDPOINT="https://otlp.eu01.nr-data.net:4318"
+   ```
+
+3. **Data not appearing**:
+   ```bash
+   # Check for data in New Relic (may take 1-2 minutes)
+   # Query: FROM Metric SELECT * WHERE service.name = 'your-service'
+   ```
+
+### Enable Debug Logging
+
+```yaml
 exporters:
   debug:
     verbosity: detailed
-  otlp:
-    endpoint: otlp.nr-data.net:4317
-    headers:
-      api-key: ${NEW_RELIC_LICENSE_KEY}
+    sampling_initial: 5
+    sampling_thereafter: 100
 
 service:
   pipelines:
     metrics:
-      exporters: [debug, otlp]  # Add debug first
+      exporters: [debug, otlp]  # Add debug exporter
 ```
 
-### 2. Database Connection Failed
+## 🧠 High Memory Usage
 
-#### Symptoms
-```
-connection refused
-authentication failed  
-timeout connecting to database
-```
+### Memory Monitoring
 
-#### Diagnosis
 ```bash
-# Test database connectivity
-psql -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT 1"
-mysql -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASSWORD -e "SELECT 1"
+# Check collector memory usage
+ps aux | grep otelcol
 
-# Check network connectivity
-telnet $POSTGRES_HOST $POSTGRES_PORT
-nc -zv $MYSQL_HOST $MYSQL_PORT
+# Docker memory usage
+docker stats otel-collector
 
-# Verify credentials
-echo "Host: $POSTGRES_HOST, Port: $POSTGRES_PORT, User: $POSTGRES_USER"
-echo "Password length: $(echo $POSTGRES_PASSWORD | wc -c)"
+# Kubernetes memory usage
+kubectl top pods -l app=otel-collector
 ```
 
-#### Resolution
-```yaml
-# 1. Fix authentication
-receivers:
-  postgresql:
-    endpoint: ${POSTGRES_HOST}:${POSTGRES_PORT}
-    username: ${POSTGRES_USER}
-    password: ${POSTGRES_PASSWORD}  # Ensure correct password
-    ssl_mode: disable  # Or 'require' if SSL needed
+### Memory Optimization
 
-# 2. Add connection timeout
-receivers:
-  postgresql:
-    endpoint: ${POSTGRES_HOST}:${POSTGRES_PORT}
-    username: ${POSTGRES_USER}
-    password: ${POSTGRES_PASSWORD}
-    collection_interval: 10s
-    timeout: 30s  # Add timeout
+1. **Add memory limiter**:
+   ```yaml
+   processors:
+     memory_limiter:
+       limit_mib: 512        # 512MB limit
+       spike_limit_mib: 128  # 128MB spike protection
+       check_interval: 1s
+   
+   service:
+     pipelines:
+       metrics:
+         processors: [memory_limiter, ...]  # First processor
+   ```
 
-# 3. For Docker environments
-# Use service names instead of localhost
-postgresql:
-  endpoint: postgres:5432  # Service name in Docker Compose
-```
+2. **Reduce collection frequency**:
+   ```yaml
+   receivers:
+     postgresql:
+       collection_interval: 60s  # From 30s
+     sqlquery:
+       collection_interval: 300s # From 60s
+   ```
 
-### 3. High Memory Usage
+3. **Limit metric cardinality**:
+   ```yaml
+   processors:
+     filter:
+       metrics:
+         datapoint:
+           - 'attributes["table_name"] == "pg_temp_*"'  # Drop temp tables
+   ```
 
-#### Symptoms
-- Memory usage > 1GB
-- Out of memory errors
-- Container restarts
+## ⚡ High CPU Usage
 
-#### Diagnosis
-```bash
-# Check memory usage
-ps aux | grep database-intelligence-collector
-top -p $(pgrep database-intelligence-collector)
+### CPU Monitoring
 
-# Memory metrics
-curl -s http://localhost:8888/metrics | grep memory
-curl -s http://localhost:8888/metrics | grep process_resident_memory_bytes
-```
-
-#### Resolution
-```yaml
-# 1. Add memory limiter
-processors:
-  memory_limiter:
-    limit_mib: 512        # Set appropriate limit
-    spike_limit_mib: 128  # 25% of limit
-    check_interval: 1s
-
-# 2. Optimize batch processing
-processors:
-  batch:
-    timeout: 5s           # Faster batching
-    send_batch_size: 1024 # Smaller batches
-    send_batch_max_size: 2048
-
-# 3. Reduce collection frequency
-receivers:
-  postgresql:
-    collection_interval: 30s  # Increase interval
-  sqlquery/slow_queries:
-    collection_interval: 60s  # Less frequent for expensive queries
-```
-
-### 4. Slow Query Collection Not Working
-
-#### Symptoms
-- No `postgres.slow_queries.*` metrics
-- Empty query results in logs
-
-#### Diagnosis
-```bash
-# Check if pg_stat_statements is installed
-psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT * FROM pg_extension WHERE extname = 'pg_stat_statements'"
-
-# Check if there are slow queries
-psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT count(*) FROM pg_stat_statements WHERE mean_exec_time > 100"
-
-# Test the SQL query manually
-psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -c "
-SELECT 
-  queryid::text as query_id,
-  query as query_text,
-  datname as database_name,
-  calls as execution_count,
-  mean_exec_time as avg_elapsed_time_ms
-FROM pg_stat_statements pss
-JOIN pg_database pd ON pd.oid = pss.dbid
-WHERE mean_exec_time > 100
-LIMIT 5"
-```
-
-#### Resolution
-```sql
--- 1. Install pg_stat_statements extension
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-
--- 2. Add to postgresql.conf
-shared_preload_libraries = 'pg_stat_statements'
-pg_stat_statements.track = all
-
--- 3. Restart PostgreSQL and verify
-SELECT * FROM pg_stat_statements LIMIT 1;
-```
-
-```yaml
-# 4. Lower threshold for testing
-sqlquery/slow_queries:
-  queries:
-    - sql: |
-        SELECT ...
-        WHERE mean_exec_time > 1  -- Lower threshold
-```
-
-### 5. Wait Events Not Captured
-
-#### Symptoms
-- No `postgres.wait_events` metrics
-- Empty wait event data
-
-#### Diagnosis
-```bash
-# Check for active sessions with wait events
-psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -c "
-SELECT 
-  wait_event, 
-  wait_event_type, 
-  count(*) 
-FROM pg_stat_activity 
-WHERE state = 'active' 
-GROUP BY wait_event, wait_event_type"
-```
-
-#### Resolution
-```sql
--- Generate wait events for testing
-SELECT pg_sleep(2), count(*) FROM pg_stat_activity;
-```
-
-```yaml
-# Adjust collection interval
-sqlquery/wait_events:
-  collection_interval: 5s  # More frequent collection
-  queries:
-    - sql: |
-        SELECT 
-          COALESCE(wait_event, 'CPU') as wait_event_name,
-          COALESCE(wait_event_type, 'CPU') as wait_category,
-          COUNT(*) as count,
-          datname as database_name
-        FROM pg_stat_activity 
-        WHERE state IN ('active', 'idle in transaction')  -- Include more states
-        GROUP BY wait_event, wait_event_type, datname
-```
-
-### 6. Configuration Validation Issues
-
-#### Symptoms
-```
-invalid configuration
-unknown receiver
-processor not found
-```
-
-#### Diagnosis
-```bash
-# Validate configuration syntax
-./database-intelligence-collector --config=config.yaml --dry-run
-
-# Check for typos in component names
-grep -n "postgresql" config.yaml
-grep -n "receivers:" config.yaml
-grep -n "processors:" config.yaml
-```
-
-#### Resolution
-```yaml
-# 1. Verify component names match exactly
-receivers:
-  postgresql:  # Not 'postgres'
-    endpoint: localhost:5432
-
-# 2. Check pipeline references
-service:
-  pipelines:
-    metrics:
-      receivers: [postgresql]     # Must match receiver name
-      processors: [batch]        # Must match processor name
-      exporters: [otlp]          # Must match exporter name
-
-# 3. Validate YAML syntax
-# Use a YAML validator or:
-python -c "import yaml; yaml.safe_load(open('config.yaml'))"
-```
-
-## Performance Issues
-
-### 7. High CPU Usage
-
-#### Symptoms
-- CPU usage > 80%
-- Slow response times
-- Processing delays
-
-#### Diagnosis
 ```bash
 # Check CPU usage
-top -p $(pgrep database-intelligence-collector)
+top -p $(pidof otelcol)
 
-# Check processing metrics
-curl -s http://localhost:8888/metrics | grep otelcol_processor
-curl -s http://localhost:8888/metrics | grep duration
+# Profile CPU usage
+curl http://localhost:1777/debug/pprof/profile?seconds=30 > cpu.prof
+go tool pprof cpu.prof
 ```
 
-#### Resolution
-```yaml
-# 1. Reduce collection frequency
-receivers:
-  postgresql:
-    collection_interval: 20s  # Increase interval
-  sqlquery/slow_queries:
-    collection_interval: 60s
+### CPU Optimization
 
-# 2. Optimize processors
-processors:
-  batch:
-    timeout: 1s           # Faster batching
-    send_batch_size: 2048 # Larger batches
+1. **Optimize batch processing**:
+   ```yaml
+   processors:
+     batch:
+       timeout: 10s
+       send_batch_size: 2048   # Larger batches
+       send_batch_max_size: 4096
+   ```
 
-# 3. Add sampling
-processors:
-  probabilistic_sampler:
-    sampling_percentage: 50  # Sample 50% of metrics
-```
+2. **Reduce processor complexity**:
+   ```yaml
+   processors:
+     - resource     # Keep lightweight processors
+     - batch
+   ```
 
-### 8. Network Connectivity Issues
+3. **Limit concurrent queries**:
+   ```yaml
+   receivers:
+     sqlquery:
+       max_concurrent_queries: 2  # Reduce from default
+   ```
 
-#### Symptoms
-```
-connection timeout
-network unreachable
-DNS resolution failed
-```
+## 🌐 Network Issues
 
-#### Diagnosis
+### Connectivity Testing
+
 ```bash
-# Test network connectivity
-ping $POSTGRES_HOST
-telnet $POSTGRES_HOST $POSTGRES_PORT
-
-# Check DNS resolution
-nslookup $POSTGRES_HOST
-dig $POSTGRES_HOST
+# Test database connectivity
+nc -zv postgres-host 5432
+nc -zv mysql-host 3306
 
 # Test New Relic connectivity
-curl -v https://otlp.nr-data.net:4317
+nc -zv otlp.nr-data.net 4318
+
+# Check DNS resolution
+nslookup postgres-host
+nslookup otlp.nr-data.net
 ```
 
-#### Resolution
+### Firewall Configuration
+
+```bash
+# Allow outbound HTTPS (443) for New Relic
+sudo ufw allow out 443
+
+# Allow database ports (if collector is external)
+sudo ufw allow out 5432  # PostgreSQL
+sudo ufw allow out 3306  # MySQL
+
+# Allow health check port
+sudo ufw allow 13133
+```
+
+## 📝 Configuration Issues
+
+### YAML Validation
+
+```bash
+# Validate YAML syntax
+python -c "import yaml; yaml.safe_load(open('config.yaml'))"
+
+# OpenTelemetry config validation
+otelcol --config=config.yaml --dry-run
+```
+
+### Common Configuration Errors
+
+1. **Missing required fields**:
+   ```yaml
+   # ❌ Missing endpoint
+   receivers:
+     postgresql: {}
+   
+   # ✅ Correct
+   receivers:
+     postgresql:
+       endpoint: "${DB_ENDPOINT}"
+   ```
+
+2. **Invalid processor order**:
+   ```yaml
+   # ❌ Wrong order (memory_limiter should be first)
+   processors: [batch, memory_limiter, resource]
+   
+   # ✅ Correct order
+   processors: [memory_limiter, resource, batch]
+   ```
+
+3. **Undefined environment variables**:
+   ```bash
+   # Check environment variables
+   env | grep -E "(DB_|NEW_RELIC_)"
+   
+   # Set missing variables
+   export DB_ENDPOINT="postgresql://user:pass@host:5432/db"
+   ```
+
+## 🔍 Log Analysis
+
+### Enable Debug Logging
+
 ```yaml
-# 1. Add timeouts and retries
+service:
+  telemetry:
+    logs:
+      level: debug
+      output_paths:
+        - stdout
+        - /var/log/otelcol/collector.log
+```
+
+### Log Patterns to Look For
+
+1. **Connection errors**:
+   ```bash
+   grep -i "connection\|connect" collector.log
+   grep -i "refused\|timeout" collector.log
+   ```
+
+2. **Authentication errors**:
+   ```bash
+   grep -i "auth\|permission\|denied" collector.log
+   ```
+
+3. **Export errors**:
+   ```bash
+   grep -i "export\|send\|failed" collector.log
+   ```
+
+4. **Memory issues**:
+   ```bash
+   grep -i "memory\|oom\|limit" collector.log
+   ```
+
+## 🚨 Emergency Procedures
+
+### Collector Crash Recovery
+
+```bash
+# Check if collector is running
+ps aux | grep otelcol
+
+# Restart collector
+sudo systemctl restart otelcol
+
+# Check status
+sudo systemctl status otelcol
+
+# View recent logs
+journalctl -u otelcol --since "5 minutes ago"
+```
+
+### Database Overload Protection
+
+```yaml
+# Emergency configuration with minimal collection
 receivers:
   postgresql:
-    endpoint: ${POSTGRES_HOST}:${POSTGRES_PORT}
-    timeout: 30s
-
-exporters:
-  otlp:
-    endpoint: otlp.nr-data.net:4317
-    timeout: 30s
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 300s
-
-# 2. For container environments
-# Use fully qualified domain names
-postgresql:
-  endpoint: postgres.database.svc.cluster.local:5432
+    collection_interval: 300s  # 5 minutes
+    
+processors:
+  memory_limiter:
+    limit_mib: 256
+  
+  # Remove all non-essential processors
+  batch: {}
 ```
 
-## Docker-Specific Issues
+### Quick Disable
 
-### 9. Container Startup Issues
-
-#### Symptoms
-- Container exits immediately
-- Health check fails
-- Port binding errors
-
-#### Diagnosis
 ```bash
-# Check container logs
-docker logs database-intelligence-collector
+# Stop collector
+sudo systemctl stop otelcol
 
-# Check container status
-docker ps -a | grep database-intelligence
+# Disable collector
+sudo systemctl disable otelcol
 
-# Verify port availability
-netstat -tulpn | grep :13133
+# Kill running processes
+pkill -f otelcol
 ```
 
-#### Resolution
-```bash
-# 1. Check port conflicts
-docker run -p 13134:13133 database-intelligence:latest  # Use different port
-
-# 2. Verify environment variables
-docker run --env-file .env database-intelligence:latest
-
-# 3. Debug mode
-docker run -it --entrypoint /bin/sh database-intelligence:latest
-```
-
-### 10. Docker Compose Issues
-
-#### Symptoms
-```
-service 'postgres' failed to build
-network not found
-volume mount failed
-```
-
-#### Diagnosis
-```bash
-# Check Docker Compose logs
-docker-compose logs database-intelligence
-docker-compose logs postgres
-
-# Verify network connectivity
-docker-compose exec database-intelligence ping postgres
-```
-
-#### Resolution
-```yaml
-# 1. Fix service dependencies
-services:
-  database-intelligence:
-    depends_on:
-      postgres:
-        condition: service_healthy
-      mysql:
-        condition: service_healthy
-
-# 2. Use correct service names
-environment:
-  POSTGRES_HOST: postgres  # Service name, not localhost
-  MYSQL_HOST: mysql
-
-# 3. Add health checks
-postgres:
-  healthcheck:
-    test: ["CMD-SHELL", "pg_isready -U postgres"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
-```
-
-## Kubernetes-Specific Issues
-
-### 11. Pod CrashLoopBackOff
-
-#### Symptoms
-- Pod continuously restarting
-- CrashLoopBackOff status
-- Failed readiness/liveness probes
-
-#### Diagnosis
-```bash
-# Check pod status
-kubectl get pods -l app=database-intelligence
-
-# Check events
-kubectl describe pod -l app=database-intelligence
-
-# Check logs
-kubectl logs -l app=database-intelligence --previous
-```
-
-#### Resolution
-```yaml
-# 1. Increase probe timeouts
-livenessProbe:
-  httpGet:
-    path: /health
-    port: 13133
-  initialDelaySeconds: 60  # Increase delay
-  periodSeconds: 30
-  timeoutSeconds: 10
-  failureThreshold: 5      # Increase threshold
-
-# 2. Check resource limits
-resources:
-  requests:
-    memory: 512Mi
-    cpu: 500m
-  limits:
-    memory: 2Gi           # Increase limits
-    cpu: 1000m
-
-# 3. Debug with sleep
-containers:
-- name: collector
-  command: ["sleep", "3600"]  # Debug mode
-```
-
-### 12. Secret/ConfigMap Issues
-
-#### Symptoms
-```
-secret not found
-permission denied
-configuration error
-```
-
-#### Diagnosis
-```bash
-# Check secrets
-kubectl get secrets -n database-intelligence
-kubectl describe secret db-intelligence-secrets
-
-# Check configmap
-kubectl get configmap db-intelligence-config -o yaml
-
-# Verify RBAC
-kubectl auth can-i get secrets --as=system:serviceaccount:database-intelligence:database-intelligence
-```
-
-#### Resolution
-```bash
-# 1. Create missing secrets
-kubectl create secret generic db-intelligence-secrets \
-  --from-literal=new-relic-license-key="your_key" \
-  --from-literal=postgres-password="your_password"
-
-# 2. Verify secret mounting
-kubectl exec -it deployment/database-intelligence -- env | grep NEW_RELIC
-
-# 3. Check RBAC permissions
-kubectl apply -f rbac.yaml
-```
-
-## Debug Tools and Commands
-
-### Comprehensive Debug Script
-```bash
-#!/bin/bash
-# debug-collector.sh
-
-echo "=== Database Intelligence Collector Debug ==="
-
-echo "1. Health Check"
-curl -s http://localhost:13133/health || echo "Health check failed"
-
-echo -e "\n2. Metrics Summary"
-METRICS=$(curl -s http://localhost:8888/metrics)
-echo "Total metrics: $(echo "$METRICS" | wc -l)"
-echo "PostgreSQL metrics: $(echo "$METRICS" | grep -c postgresql)"
-echo "MySQL metrics: $(echo "$METRICS" | grep -c mysql)"
-
-echo -e "\n3. Database Connectivity"
-pg_isready -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER || echo "PostgreSQL not ready"
-mysqladmin ping -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASSWORD || echo "MySQL not ready"
-
-echo -e "\n4. New Relic Connectivity"
-curl -s -o /dev/null -w "%{http_code}" -H "Api-Key: $NEW_RELIC_LICENSE_KEY" \
-  https://api.newrelic.com/v2/applications.json || echo "New Relic API failed"
-
-echo -e "\n5. Recent Logs"
-tail -20 collector.log
-
-echo -e "\n6. Resource Usage"
-ps aux | grep database-intelligence-collector | grep -v grep
-
-echo "=== Debug Complete ==="
-```
-
-### Log Analysis Script
-```bash
-#!/bin/bash
-# analyze-logs.sh
-
-LOG_FILE=${1:-collector.log}
-
-echo "=== Log Analysis for $LOG_FILE ==="
-
-echo "Error Summary:"
-grep -i error "$LOG_FILE" | tail -10
-
-echo -e "\nConnection Issues:"
-grep -i "connection\|timeout\|refused" "$LOG_FILE" | tail -5
-
-echo -e "\nAuthentication Issues:"
-grep -i "auth\|permission\|denied" "$LOG_FILE" | tail -5
-
-echo -e "\nNew Relic Export Issues:"
-grep -i "otlp\|export\|403\|401" "$LOG_FILE" | tail -5
-
-echo -e "\nPerformance Issues:"
-grep -i "memory\|cpu\|timeout" "$LOG_FILE" | tail -5
-```
-
-This troubleshooting guide provides comprehensive diagnostic and resolution procedures for all common issues encountered with the Database Intelligence OpenTelemetry Collector.
+This troubleshooting guide covers the most common issues and provides systematic approaches to diagnosis and resolution.

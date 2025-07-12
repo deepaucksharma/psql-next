@@ -1,0 +1,169 @@
+# Enhanced Mode - Full Feature Set
+# Requires custom build with all components
+
+receivers:
+  # Standard receivers
+  postgresql:
+    endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+    username: ${env:DB_POSTGRES_USER}
+    password: ${env:DB_POSTGRES_PASSWORD}
+    databases:
+      - ${env:DB_POSTGRES_DATABASE}
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+  mysql:
+    endpoint: ${env:DB_MYSQL_HOST}:${env:DB_MYSQL_PORT}
+    username: ${env:DB_MYSQL_USER}
+    password: ${env:DB_MYSQL_PASSWORD}
+    database: ${env:DB_MYSQL_DATABASE}
+    collection_interval: 30s
+
+  # Custom receivers (require build)
+  ash:
+    endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+    username: ${env:DB_POSTGRES_USER}
+    password: ${env:DB_POSTGRES_PASSWORD}
+    database: ${env:DB_POSTGRES_DATABASE}
+    collection_interval: 10s
+    sampling_interval: 1s
+
+  enhancedsql:
+    driver: postgres
+    connection_string: "postgresql://${env:DB_POSTGRES_USER}:${env:DB_POSTGRES_PASSWORD}@${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}/${env:DB_POSTGRES_DATABASE}"
+    queries:
+      - name: active_queries
+        sql: |
+          SELECT 
+            query,
+            state,
+            wait_event_type,
+            wait_event,
+            EXTRACT(EPOCH FROM (now() - query_start)) as duration_seconds
+          FROM pg_stat_activity
+          WHERE state != 'idle'
+            AND query NOT LIKE '%pg_stat_activity%'
+        interval: 5s
+
+processors:
+  # Memory protection (first)
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  # Resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:SERVICE_NAME}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+
+  # Custom processors
+  adaptivesampler:
+    sampling_rules:
+      - min_sampling_rate: 0.1
+        max_sampling_rate: 1.0
+        target_rate: 0.5
+    evaluation_interval: 30s
+
+  circuitbreaker:
+    failure_threshold: 0.5
+    min_requests: 100
+    timeout: 30s
+    cooldown: 60s
+
+  planattributeextractor:
+    enabled: true
+    extract_fields:
+      - cost
+      - rows
+      - width
+
+  querycorrelator:
+    correlation_window: 5m
+    max_queries_tracked: 10000
+
+  verification:
+    pii_detection:
+      enabled: true
+      patterns:
+        - email
+        - ssn
+        - credit_card
+    data_quality:
+      check_nulls: true
+      check_types: true
+
+  costcontrol:
+    max_data_points_per_minute: 100000
+    max_cardinality: 50000
+    enforcement_mode: drop
+
+  # Batch for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 2048
+
+exporters:
+  # New Relic OTLP
+  otlphttp:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+
+  # Custom error monitoring
+  nrerrormonitor:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    api_key: ${env:NEW_RELIC_LICENSE_KEY}
+    alert_thresholds:
+      error_rate: 0.05
+      latency_p99: 1000
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+  # Custom extensions
+  postgresqlquery:
+    endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+    username: ${env:DB_POSTGRES_USER}
+    password: ${env:DB_POSTGRES_PASSWORD}
+    database: ${env:DB_POSTGRES_DATABASE}
+
+service:
+  extensions: [health_check, pprof, zpages, postgresqlquery]
+  
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql, ash, enhancedsql]
+      processors: 
+        - memory_limiter
+        - resource
+        - adaptivesampler
+        - circuitbreaker
+        - planattributeextractor
+        - querycorrelator
+        - verification
+        - costcontrol
+        - batch
+      exporters: [otlphttp, nrerrormonitor]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}
+    metrics:
+      address: 0.0.0.0:8888

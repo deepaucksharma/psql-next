@@ -1,53 +1,79 @@
-# Database Intelligence Documentation
+# Database Intelligence with OpenTelemetry - Documentation
 
-Welcome to the comprehensive documentation for the Database Intelligence OpenTelemetry Collector project.
+## 📖 Quick Navigation
 
-## Documentation Structure
+| Document | Purpose | Implementation Status |
+|----------|---------|---------------------|
+| [📋 Overview](OVERVIEW.md) | Project architecture and capabilities | ✅ Current |
+| [🚀 Quick Start](QUICK_START.md) | Get up and running in 5 minutes | ✅ Current |
+| [⚙️ Configuration](CONFIGURATION.md) | Complete configuration reference | ✅ Current |
+| [🏗️ Deployment](DEPLOYMENT.md) | Docker, K8s, and production setup | ✅ Current |
+| [🧪 Testing](TESTING.md) | E2E tests and validation | ✅ Current |
+| [🔧 Troubleshooting](TROUBLESHOOTING.md) | Common issues and solutions | ✅ Current |
 
-### [Quick Start Guide](./01-quick-start/)
+## 🏛️ Architecture
 
-Get started quickly with installation, configuration, and basic usage.
+This project implements **two distinct operational modes**:
 
-### [End-to-End Testing Documentation](./02-e2e-testing/)
+### Config-Only Mode (Production Ready)
+- Uses standard OpenTelemetry components
+- No custom code required
+- Resource usage: <5% CPU, <512MB memory
+- **Status**: ✅ Fully implemented and tested
 
-Comprehensive end-to-end testing documentation, strategies, and reports.
+### Enhanced Mode (Development)
+- Includes custom receivers and processors
+- Advanced database intelligence features
+- Resource usage: <20% CPU, <2GB memory  
+- **Status**: ⚠️ Components implemented but not integrated into distributions
 
-### [OHI to OpenTelemetry Migration](./03-ohi-migration/)
+## 🚦 Current Implementation State
 
-Complete guide for migrating from New Relic OHI to OpenTelemetry.
+| Component | Status | Available In |
+|-----------|--------|--------------|
+| PostgreSQL Receiver | ✅ Production | All distributions |
+| MySQL Receiver | ✅ Production | All distributions |
+| SQL Query Receiver | ✅ Production | All distributions |
+| Host Metrics Receiver | ✅ Production | All distributions |
+| **ASH Receiver** | ⚠️ Source only | None |
+| **Enhanced SQL Receiver** | ⚠️ Source only | None |
+| **Plan Attribute Extractor** | ⚠️ Source only | None |
+| **Adaptive Sampler** | ⚠️ Source only | None |
+| **Circuit Breaker** | ⚠️ Source only | None |
+| **Cost Control** | ⚠️ Source only | None |
+| **Query Correlator** | ⚠️ Source only | None |
+| **Verification Processor** | ⚠️ Source only | None |
 
-### [Implementation Analysis](./04-implementation/)
+## 📁 Documentation Structure
 
-Technical analysis of the implementation, including OOTB vs custom components.
+```
+docs/
+├── README.md                 # This file - navigation hub
+├── OVERVIEW.md              # Architecture and capabilities
+├── QUICK_START.md           # 5-minute setup guide
+├── CONFIGURATION.md         # Complete config reference
+├── DEPLOYMENT.md            # Production deployment
+├── TESTING.md               # E2E testing guide
+└── TROUBLESHOOTING.md       # Issue resolution
+```
 
-## Quick Links
+## 🗂️ Archived Documentation
 
-- [Quick Start Guide](./01-quick-start/quick-start.md)
-- [E2E Test Strategy](./02-e2e-testing/02-test-strategy.md)
-- [OHI to OTEL Mapping](./03-ohi-migration/01-complete-mapping.md)
-- [Implementation Analysis](./04-implementation/01-metric-source-analysis.md)
+Historical documentation has been consolidated and archived:
+- `docs/archive/` - Previous iteration documentation
+- All numbered directories (01-quick-start, 02-e2e-testing, etc.) have been consolidated
+- Project status reports moved to `docs/archive/project-status/`
 
-## Project Overview
+## 🎯 What to Read First
 
-This project implements a comprehensive database monitoring solution using OpenTelemetry collectors, 
-with full feature parity for New Relic's On-Host Integration (OHI) for databases.
+1. **New Users**: Start with [Quick Start](QUICK_START.md)
+2. **Operators**: Review [Configuration](CONFIGURATION.md) and [Deployment](DEPLOYMENT.md)
+3. **Developers**: See [Testing](TESTING.md) and component source code
+4. **Troubleshooters**: Jump to [Troubleshooting](TROUBLESHOOTING.md)
 
-### Key Features
+## 🔗 External Resources
 
-- ✅ PostgreSQL and MySQL monitoring
-- ✅ Custom processors for advanced metrics
-- ✅ Full OHI feature parity
-- ✅ OpenTelemetry semantic conventions
-- ✅ New Relic integration via OTLP
-- ✅ Comprehensive E2E testing
-- ✅ Production-ready configurations
-
-### Architecture
-
-The solution combines:
-- **OOTB Components**: Standard OpenTelemetry receivers for basic metrics
-- **Custom Components**: SQLQuery receivers for advanced metrics
-- **Processors**: Transform, enrichment, and semantic mapping
-- **Exporters**: OTLP export to New Relic
-
-For detailed architecture information, see the [Implementation Analysis](./04-implementation/02-implementation-summary.md).
+- [OpenTelemetry Collector Documentation](https://opentelemetry.io/docs/collector/)
+- [New Relic OTLP Integration](https://docs.newrelic.com/docs/more-integrations/open-source-telemetry-integrations/opentelemetry/)
+- [PostgreSQL Monitoring Guide](https://www.postgresql.org/docs/current/monitoring.html)
+- [MySQL Performance Schema](https://dev.mysql.com/doc/refman/8.0/en/performance-schema.html)

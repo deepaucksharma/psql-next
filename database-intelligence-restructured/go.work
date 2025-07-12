@@ -1,8 +1,22 @@
-go 1.23.0
+go 1.22
 
 use (
+	./common
+	./common/featuredetector
+	./common/queryselector
 	./components
-	./distributions/production
+	./components/exporters
+	./components/extensions
+	./components/internal/boundedmap
+	./components/processors
+	./components/receivers
+	./core
 	./distributions/enterprise
+	./distributions/minimal
+	./distributions/production
 	./internal/database
+	./tests
+	./tests/e2e
 )
+
+replace github.com/deepaksharma/db-otel/components/exporters/nri => /home/deepak/db-otel/database-intelligence-restructured/components/exporters/nri

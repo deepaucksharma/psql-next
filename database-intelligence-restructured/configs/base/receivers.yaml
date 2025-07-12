@@ -1,0 +1,209 @@
+# Receiver Configurations
+# All available receivers for Database Intelligence
+
+receivers:
+  # =============================================================================
+  # STANDARD RECEIVERS (Production Ready)
+  # =============================================================================
+  
+  # PostgreSQL native receiver
+  postgresql:
+    endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+    username: ${env:DB_POSTGRES_USER}
+    password: ${env:DB_POSTGRES_PASSWORD}
+    databases:
+      - ${env:DB_POSTGRES_DATABASE}
+    collection_interval: ${env:POSTGRES_COLLECTION_INTERVAL}
+    tls:
+      insecure: ${env:POSTGRES_TLS_INSECURE}
+      insecure_skip_verify: ${env:POSTGRES_TLS_SKIP_VERIFY}
+      ca_file: ${env:POSTGRES_CA_FILE}
+      cert_file: ${env:POSTGRES_CERT_FILE}
+      key_file: ${env:POSTGRES_KEY_FILE}
+
+  # MySQL native receiver
+  mysql:
+    endpoint: ${env:DB_MYSQL_HOST}:${env:DB_MYSQL_PORT}
+    username: ${env:DB_MYSQL_USER}
+    password: ${env:DB_MYSQL_PASSWORD}
+    database: ${env:DB_MYSQL_DATABASE}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL}
+    tls:
+      insecure: ${env:MYSQL_TLS_INSECURE}
+      insecure_skip_verify: ${env:MYSQL_TLS_SKIP_VERIFY}
+      ca_file: ${env:MYSQL_CA_FILE}
+      cert_file: ${env:MYSQL_CERT_FILE}
+      key_file: ${env:MYSQL_KEY_FILE}
+
+  # SQL Query receiver for custom PostgreSQL queries
+  sqlquery/postgresql:
+    driver: postgres
+    datasource: "host=${env:DB_POSTGRES_HOST} port=${env:DB_POSTGRES_PORT} user=${env:DB_POSTGRES_USER} password=${env:DB_POSTGRES_PASSWORD} dbname=${env:DB_POSTGRES_DATABASE} sslmode=${env:POSTGRES_SSLMODE}"
+    collection_interval: ${env:POSTGRES_QUERY_INTERVAL}
+    queries:
+      # User activity monitoring
+      - sql: |
+          SELECT 
+            usename as username,
+            application_name,
+            client_addr,
+            state,
+            COUNT(*) as connection_count,
+            MAX(EXTRACT(EPOCH FROM (now() - state_change))) as max_connection_age_seconds,
+            COUNT(*) FILTER (WHERE state = 'active') as active_connections,
+            COUNT(*) FILTER (WHERE wait_event IS NOT NULL) as waiting_connections
+          FROM pg_stat_activity
+          WHERE pid != pg_backend_pid()
+          GROUP BY usename, application_name, client_addr, state
+        metrics:
+          - metric_name: db.postgresql.user.connections
+            value_column: connection_count
+            attribute_columns: [username, application_name, client_addr, state]
+            value_type: int
+          - metric_name: db.postgresql.user.connection.age.max
+            value_column: max_connection_age_seconds
+            attribute_columns: [username, application_name, client_addr, state]
+            value_type: double
+          - metric_name: db.postgresql.user.connections.active
+            value_column: active_connections
+            attribute_columns: [username, application_name, client_addr]
+            value_type: int
+          - metric_name: db.postgresql.user.connections.waiting
+            value_column: waiting_connections
+            attribute_columns: [username, application_name, client_addr]
+            value_type: int
+
+      # Query performance statistics
+      - sql: |
+          SELECT 
+            queryid,
+            LEFT(query, 50) as query_text,
+            calls,
+            total_exec_time,
+            mean_exec_time,
+            stddev_exec_time,
+            rows,
+            100.0 * shared_blks_hit / NULLIF(shared_blks_hit + shared_blks_read, 0) AS cache_hit_ratio
+          FROM pg_stat_statements
+          WHERE query NOT LIKE '%pg_stat_statements%'
+          ORDER BY total_exec_time DESC
+          LIMIT 20
+        metrics:
+          - metric_name: db.postgresql.query.calls
+            value_column: calls
+            attribute_columns: [queryid, query_text]
+            value_type: int
+          - metric_name: db.postgresql.query.total_time
+            value_column: total_exec_time
+            attribute_columns: [queryid, query_text]
+            value_type: double
+          - metric_name: db.postgresql.query.mean_time
+            value_column: mean_exec_time
+            attribute_columns: [queryid, query_text]
+            value_type: double
+          - metric_name: db.postgresql.query.rows
+            value_column: rows
+            attribute_columns: [queryid, query_text]
+            value_type: int
+          - metric_name: db.postgresql.query.cache_hit_ratio
+            value_column: cache_hit_ratio
+            attribute_columns: [queryid, query_text]
+            value_type: double
+
+  # SQL Query receiver for custom MySQL queries
+  sqlquery/mysql:
+    driver: mysql
+    datasource: "${env:DB_MYSQL_USER}:${env:DB_MYSQL_PASSWORD}@tcp(${env:DB_MYSQL_HOST}:${env:DB_MYSQL_PORT})/${env:DB_MYSQL_DATABASE}"
+    collection_interval: ${env:MYSQL_QUERY_INTERVAL}
+    queries:
+      # User activity monitoring
+      - sql: |
+          SELECT 
+            user,
+            host,
+            db,
+            command,
+            state,
+            COUNT(*) as connection_count,
+            SUM(time) as total_time
+          FROM information_schema.processlist
+          WHERE id != CONNECTION_ID()
+          GROUP BY user, host, db, command, state
+        metrics:
+          - metric_name: db.mysql.user.connections
+            value_column: connection_count
+            attribute_columns: [user, host, db, command, state]
+            value_type: int
+          - metric_name: db.mysql.user.total_time
+            value_column: total_time
+            attribute_columns: [user, host, db, command, state]
+            value_type: double
+
+  # OTLP receiver for external metrics
+  otlp:
+    protocols:
+      grpc:
+        endpoint: ${env:OTLP_GRPC_ENDPOINT}
+      http:
+        endpoint: ${env:OTLP_HTTP_ENDPOINT}
+
+  # Prometheus receiver for scraping
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: ${env:PROMETHEUS_SCRAPE_INTERVAL}
+          static_configs:
+            - targets: ['localhost:8888']
+
+  # =============================================================================
+  # CUSTOM RECEIVERS (Require Enhanced Build)
+  # =============================================================================
+  
+  # Active Session History receiver
+  ash:
+    endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+    username: ${env:DB_POSTGRES_USER}
+    password: ${env:DB_POSTGRES_PASSWORD}
+    database: ${env:DB_POSTGRES_DATABASE}
+    collection_interval: ${env:ASH_COLLECTION_INTERVAL}
+    sampling_interval: ${env:ASH_SAMPLING_INTERVAL}
+    retention_period: ${env:ASH_RETENTION_PERIOD}
+    max_samples: ${env:ASH_MAX_SAMPLES}
+
+  # Enhanced SQL receiver with advanced features
+  enhancedsql:
+    driver: postgres
+    connection_string: "postgresql://${env:DB_POSTGRES_USER}:${env:DB_POSTGRES_PASSWORD}@${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}/${env:DB_POSTGRES_DATABASE}"
+    enable_query_plans: ${env:ENABLE_QUERY_PLANS}
+    enable_wait_events: ${env:ENABLE_WAIT_EVENTS}
+    enable_lock_monitoring: ${env:ENABLE_LOCK_MONITORING}
+    queries:
+      - name: active_queries
+        sql: |
+          SELECT 
+            pid,
+            query,
+            state,
+            wait_event_type,
+            wait_event,
+            EXTRACT(EPOCH FROM (now() - query_start)) as duration_seconds
+          FROM pg_stat_activity
+          WHERE state != 'idle'
+            AND pid != pg_backend_pid()
+        interval: ${env:ACTIVE_QUERY_INTERVAL}
+
+  # Kernel metrics receiver
+  kernelmetrics:
+    collection_interval: ${env:KERNEL_COLLECTION_INTERVAL}
+    scrapers:
+      cpu:
+        enabled: true
+      memory:
+        enabled: true
+      disk:
+        enabled: true
+      network:
+        enabled: true
+      filesystem:
+        enabled: true

@@ -1,0 +1,316 @@
+{
+  "name": "Database Intelligence - Config-Only Mode",
+  "description": "Comprehensive monitoring using standard OpenTelemetry receivers without custom components",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Overview",
+      "description": "High-level database health and performance metrics",
+      "widgets": [
+        {
+          "title": "Database Health Score",
+          "layout": {"column": 1, "row": 1, "width": 3, "height": 2},
+          "visualization": {"id": "viz.billboard"},
+          "configuration": {
+            "queries": [{
+              "name": "Health Score",
+              "query": "SELECT (100 - (count(*) * 10)) as 'Health Score' FROM Metric WHERE deployment.mode = 'config-only' AND (metricName = 'postgresql.deadlocks' OR metricName = 'mysql.connection.errors') AND value > 0 SINCE 5 minutes ago"
+            }],
+            "thresholds": [
+              {"value": 90, "severity": "success"},
+              {"value": 70, "severity": "warning"},
+              {"value": 0, "severity": "critical"}
+            ]
+          }
+        },
+        {
+          "title": "Active Connections",
+          "layout": {"column": 4, "row": 1, "width": 3, "height": 2},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "PostgreSQL",
+                "query": "SELECT latest(postgresql.backends) FROM Metric WHERE deployment.mode = 'config-only' FACET db.name TIMESERIES AUTO"
+              },
+              {
+                "name": "MySQL",
+                "query": "SELECT latest(mysql.threads) FROM Metric WHERE deployment.mode = 'config-only' AND status = 'connected' FACET db.name TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Performance",
+          "layout": {"column": 7, "row": 1, "width": 3, "height": 2},
+          "visualization": {"id": "viz.billboard"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Slow Queries",
+                "query": "SELECT sum(mysql.query.slow.count) + sum(pg.wait_events) as 'Slow Queries' FROM Metric WHERE deployment.mode = 'config-only' SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Database Size",
+          "layout": {"column": 10, "row": 1, "width": 3, "height": 2},
+          "visualization": {"id": "viz.bar"},
+          "configuration": {
+            "queries": [{
+              "name": "Size by Database",
+              "query": "SELECT latest(postgresql.database.size) / 1048576 as 'Size (MB)' FROM Metric WHERE deployment.mode = 'config-only' FACET db.name"
+            }]
+          }
+        },
+        {
+          "title": "Transaction Rate",
+          "layout": {"column": 1, "row": 3, "width": 6, "height": 3},
+          "visualization": {"id": "viz.area"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Commits",
+                "query": "SELECT rate(sum(postgresql.commits), 1 minute) as 'Commits/min' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              },
+              {
+                "name": "Rollbacks",
+                "query": "SELECT rate(sum(postgresql.rollbacks), 1 minute) as 'Rollbacks/min' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Buffer Cache Hit Ratio",
+          "layout": {"column": 7, "row": 3, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [{
+              "name": "Cache Hit Ratio",
+              "query": "SELECT (sum(postgresql.blocks_hit) / (sum(postgresql.blocks_hit) + sum(postgresql.blocks_read))) * 100 as 'Hit Ratio %' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+            }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "PostgreSQL Metrics",
+      "description": "Detailed PostgreSQL performance metrics",
+      "widgets": [
+        {
+          "title": "Connection States",
+          "layout": {"column": 1, "row": 1, "width": 4, "height": 3},
+          "visualization": {"id": "viz.pie"},
+          "configuration": {
+            "queries": [{
+              "name": "Connection States",
+              "query": "SELECT latest(pg.connection_count) FROM Metric WHERE deployment.mode = 'config-only' FACET state SINCE 5 minutes ago"
+            }]
+          }
+        },
+        {
+          "title": "Database Operations",
+          "layout": {"column": 5, "row": 1, "width": 8, "height": 3},
+          "visualization": {"id": "viz.stacked-bar"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Tuples Returned",
+                "query": "SELECT rate(sum(pg.database.operations), 1 minute) FROM Metric WHERE deployment.mode = 'config-only' AND datname IS NOT NULL FACET datname TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Checkpoint Activity",
+          "layout": {"column": 1, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Checkpoints",
+                "query": "SELECT rate(sum(postgresql.bgwriter.checkpoint.count), 5 minutes) as 'Checkpoints/5min' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              },
+              {
+                "name": "Buffers Written",
+                "query": "SELECT rate(sum(postgresql.bgwriter.buffers.writes), 5 minutes) as 'Buffers/5min' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Table Statistics",
+          "layout": {"column": 7, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.table"},
+          "configuration": {
+            "queries": [{
+              "name": "Table Stats",
+              "query": "SELECT latest(postgresql.live_rows) as 'Live Rows', latest(postgresql.dead_rows) as 'Dead Rows', latest(postgresql.sequential_scans) as 'Seq Scans', latest(postgresql.index.scans) as 'Index Scans' FROM Metric WHERE deployment.mode = 'config-only' FACET table_name LIMIT 20"
+            }]
+          }
+        },
+        {
+          "title": "Replication Lag",
+          "layout": {"column": 1, "row": 7, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [{
+              "name": "Replication Lag",
+              "query": "SELECT max(postgresql.wal.lag) as 'WAL Lag (bytes)' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+            }]
+          }
+        },
+        {
+          "title": "Vacuum Progress",
+          "layout": {"column": 7, "row": 7, "width": 6, "height": 3},
+          "visualization": {"id": "viz.table"},
+          "configuration": {
+            "queries": [{
+              "name": "Vacuum Stats",
+              "query": "SELECT latest(postgresql.table.vacuum.count) as 'Vacuum Count', latest(table_name) as 'Table' FROM Metric WHERE deployment.mode = 'config-only' AND postgresql.table.vacuum.count > 0 FACET table_name"
+            }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "MySQL Metrics",
+      "description": "Detailed MySQL performance metrics",
+      "widgets": [
+        {
+          "title": "Global Status Overview",
+          "layout": {"column": 1, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.billboard"},
+          "configuration": {
+            "queries": [{
+              "name": "Key Metrics",
+              "query": "SELECT latest(mysql.global_status) FROM Metric WHERE deployment.mode = 'config-only' FACET VARIABLE_NAME SINCE 5 minutes ago"
+            }]
+          }
+        },
+        {
+          "title": "Buffer Pool Efficiency",
+          "layout": {"column": 7, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Buffer Pool Hit Rate",
+                "query": "SELECT (sum(mysql.buffer_pool.pages) filter (WHERE type = 'data') / sum(mysql.buffer_pool.pages)) * 100 as 'Hit Rate %' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Performance",
+          "layout": {"column": 1, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Query Rate",
+                "query": "SELECT rate(sum(mysql.query.count), 1 minute) as 'Queries/min' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              },
+              {
+                "name": "Slow Query Rate",
+                "query": "SELECT rate(sum(mysql.query.slow.count), 1 minute) as 'Slow Queries/min' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Table Lock Waits",
+          "layout": {"column": 7, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.stacked-bar"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Read Lock Waits",
+                "query": "SELECT sum(mysql.table.lock_wait.read.time) as 'Read Wait Time' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              },
+              {
+                "name": "Write Lock Waits",
+                "query": "SELECT sum(mysql.table.lock_wait.write.time) as 'Write Wait Time' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Handler Statistics",
+          "layout": {"column": 1, "row": 7, "width": 12, "height": 3},
+          "visualization": {"id": "viz.table"},
+          "configuration": {
+            "queries": [{
+              "name": "Handler Stats",
+              "query": "SELECT rate(sum(mysql.handlers), 1 minute) as 'Operations/min' FROM Metric WHERE deployment.mode = 'config-only' FACET handler TIMESERIES 5 minutes LIMIT 10"
+            }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "System Resources",
+      "description": "Host system resource utilization",
+      "widgets": [
+        {
+          "title": "CPU Utilization",
+          "layout": {"column": 1, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [{
+              "name": "CPU Usage",
+              "query": "SELECT average(system.cpu.utilization) * 100 as 'CPU %' FROM Metric WHERE deployment.mode = 'config-only' FACET state TIMESERIES AUTO"
+            }]
+          }
+        },
+        {
+          "title": "Memory Utilization",
+          "layout": {"column": 7, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.area"},
+          "configuration": {
+            "queries": [{
+              "name": "Memory Usage",
+              "query": "SELECT average(system.memory.utilization) * 100 as 'Memory %' FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+            }]
+          }
+        },
+        {
+          "title": "Disk I/O",
+          "layout": {"column": 1, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Disk Read",
+                "query": "SELECT rate(sum(system.disk.io), 1 second) as 'Bytes/sec' FROM Metric WHERE deployment.mode = 'config-only' AND direction = 'read' TIMESERIES AUTO"
+              },
+              {
+                "name": "Disk Write",
+                "query": "SELECT rate(sum(system.disk.io), 1 second) as 'Bytes/sec' FROM Metric WHERE deployment.mode = 'config-only' AND direction = 'write' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Network I/O",
+          "layout": {"column": 7, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Network Receive",
+                "query": "SELECT rate(sum(system.network.io), 1 second) as 'Bytes/sec' FROM Metric WHERE deployment.mode = 'config-only' AND direction = 'receive' TIMESERIES AUTO"
+              },
+              {
+                "name": "Network Transmit",
+                "query": "SELECT rate(sum(system.network.io), 1 second) as 'Bytes/sec' FROM Metric WHERE deployment.mode = 'config-only' AND direction = 'transmit' TIMESERIES AUTO"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variables": []
+}

@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (shared by both collectors)
+  postgres:
+    image: postgres:15
+    container_name: db-intel-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../init-scripts/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  # Config-Only Mode Collector (using standard OTel image)
+  collector-config-only:
+    image: otel/opentelemetry-collector-contrib:0.105.0
+    container_name: db-intel-collector-config-only
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./configs/config-only-mode.yaml:/etc/otel-collector-config.yaml
+    environment:
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - NEW_RELIC_OTLP_ENDPOINT=${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=testdb
+      - OTEL_SERVICE_NAME=db-intel-config-only
+      - DEPLOYMENT_MODE=config-only
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Custom/Enhanced Mode Collector (using custom build)
+  collector-custom:
+    image: ${DOCKER_REGISTRY:-}newrelic/database-intelligence-enterprise:${VERSION:-latest}
+    container_name: db-intel-collector-custom
+    build:
+      context: ../../../
+      dockerfile: deployments/docker/Dockerfile.enterprise
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./configs/custom-mode.yaml:/etc/otel-collector-config.yaml
+    environment:
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - NEW_RELIC_OTLP_ENDPOINT=${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=testdb
+      - OTEL_SERVICE_NAME=db-intel-custom
+      - DEPLOYMENT_MODE=custom
+    ports:
+      - "5317:4317"   # OTLP gRPC
+      - "5318:4318"   # OTLP HTTP
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Load Generator for testing
+  load-generator:
+    image: ${DOCKER_REGISTRY:-}newrelic/database-intelligence-loadgen:${VERSION:-latest}
+    container_name: db-intel-loadgen
+    build:
+      context: ../../../
+      dockerfile: deployments/docker/Dockerfile.loadgen
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=testdb
+      - LOAD_PATTERN=mixed
+      - QUERIES_PER_SECOND=10
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: db-intel-network

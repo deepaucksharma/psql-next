@@ -1,0 +1,83 @@
+# Development Environment Configuration
+# Overrides for local development and testing
+
+# Set development-specific values
+receivers:
+  postgresql:
+    collection_interval: 10s  # Faster collection for development
+    tls:
+      insecure: true
+      insecure_skip_verify: true
+
+  mysql:
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+  sqlquery/postgresql:
+    collection_interval: 30s  # More frequent custom queries
+
+  sqlquery/mysql:
+    collection_interval: 30s
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024  # Higher limit for development
+    spike_limit_mib: 256
+
+  batch:
+    timeout: 5s  # Faster batching for development
+    send_batch_size: 512
+
+exporters:
+  # Enable debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # Enable file export for local inspection
+  file:
+    path: /tmp/otel-metrics.json
+    rotation:
+      enabled: true
+      max_megabytes: 100
+      max_days: 3
+      max_backups: 3
+
+  # Disable retry for faster feedback
+  otlphttp:
+    retry_on_failure:
+      enabled: false
+    timeout: 5s
+
+extensions:
+  # Enable all debugging extensions
+  pprof:
+    endpoint: 0.0.0.0:1777
+    save_to_file: /tmp/pprof/
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /health
+
+service:
+  telemetry:
+    logs:
+      level: debug
+      development: true
+      encoding: console
+      output_paths: ["stdout", "/tmp/otel-collector.log"]
+      error_output_paths: ["stderr", "/tmp/otel-collector-error.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  # Use all exporters in development
+  pipelines:
+    metrics:
+      exporters: [debug, logging, file, otlphttp]

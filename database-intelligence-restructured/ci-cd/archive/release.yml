@@ -1,0 +1,292 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
+
+env:
+  GO_VERSION: '1.21'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          release_name: Release ${{ steps.get_version.outputs.version }}
+          draft: true
+          prerelease: false
+
+  build-binaries:
+    name: Build Binaries
+    needs: create-release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          OUTPUT_NAME=database-intelligence-collector-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+          fi
+          
+          go build -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
+            -o ${OUTPUT_NAME} .
+          
+          # Create checksum
+          sha256sum ${OUTPUT_NAME} > ${OUTPUT_NAME}.sha256
+
+      - name: Upload Release Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./database-intelligence-collector-${{ needs.create-release.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
+          asset_name: database-intelligence-collector-${{ needs.create-release.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload Checksum
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./database-intelligence-collector-${{ needs.create-release.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}.sha256
+          asset_name: database-intelligence-collector-${{ needs.create-release.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}.sha256
+          asset_content_type: text/plain
+
+  docker-release:
+    name: Docker Release
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            ${{ secrets.DOCKER_USERNAME }}/database-intelligence-collector
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.create-release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.create-release.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.create-release.outputs.version }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deployments/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.create-release.outputs.version }}
+            BUILD_TIME=${{ steps.meta.outputs.created }}
+
+  helm-release:
+    name: Helm Chart Release
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.13.0
+
+      - name: Package Helm chart
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          # Update Chart.yaml version
+          sed -i "s/version: .*/version: ${VERSION#v}/" deployments/helm/database-intelligence/Chart.yaml
+          sed -i "s/appVersion: .*/appVersion: \"${VERSION#v}\"/" deployments/helm/database-intelligence/Chart.yaml
+          
+          # Package chart
+          helm package deployments/helm/database-intelligence
+          
+          # Create checksum
+          sha256sum database-intelligence-*.tgz > database-intelligence-${VERSION#v}.tgz.sha256
+
+      - name: Upload Helm Chart
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./database-intelligence-${{ needs.create-release.outputs.version | regex_replace('^v', '') }}.tgz
+          asset_name: database-intelligence-${{ needs.create-release.outputs.version | regex_replace('^v', '') }}.tgz
+          asset_content_type: application/gzip
+
+      - name: Upload Helm Chart Checksum
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./database-intelligence-${{ needs.create-release.outputs.version | regex_replace('^v', '') }}.tgz.sha256
+          asset_name: database-intelligence-${{ needs.create-release.outputs.version | regex_replace('^v', '') }}.tgz.sha256
+          asset_content_type: text/plain
+
+  publish-release:
+    name: Publish Release
+    needs: [create-release, build-binaries, docker-release, helm-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          
+          cat > release-notes.md << EOF
+          ## Database Intelligence Collector ${VERSION}
+          
+          ### Installation
+          
+          #### Binary Installation
+          \`\`\`bash
+          # Linux AMD64
+          curl -Lo database-intelligence-collector https://github.com/${{ github.repository }}/releases/download/${VERSION}/database-intelligence-collector-${VERSION}-linux-amd64
+          chmod +x database-intelligence-collector
+          
+          # MacOS AMD64
+          curl -Lo database-intelligence-collector https://github.com/${{ github.repository }}/releases/download/${VERSION}/database-intelligence-collector-${VERSION}-darwin-amd64
+          chmod +x database-intelligence-collector
+          
+          # MacOS ARM64
+          curl -Lo database-intelligence-collector https://github.com/${{ github.repository }}/releases/download/${VERSION}/database-intelligence-collector-${VERSION}-darwin-arm64
+          chmod +x database-intelligence-collector
+          \`\`\`
+          
+          #### Docker Installation
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository }}:${VERSION}
+          # or
+          docker pull ${{ secrets.DOCKER_USERNAME }}/database-intelligence-collector:${VERSION}
+          \`\`\`
+          
+          #### Helm Installation
+          \`\`\`bash
+          helm install database-intelligence https://github.com/${{ github.repository }}/releases/download/${VERSION}/database-intelligence-${VERSION#v}.tgz \\
+            --set config.newrelic.licenseKey=YOUR_LICENSE_KEY
+          \`\`\`
+          
+          ### What's Changed
+          See the full changelog at: https://github.com/${{ github.repository }}/compare/previous-tag...${VERSION}
+          
+          ### Checksums
+          All release artifacts include SHA256 checksums for verification.
+          EOF
+
+      - name: Update Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const releaseNotes = fs.readFileSync('release-notes.md', 'utf8');
+            
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: '${{ needs.create-release.outputs.version }}'
+            });
+            
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.id,
+              body: releaseNotes,
+              draft: false,
+              prerelease: false
+            });

@@ -1,0 +1,29 @@
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+# Install dependencies
+RUN apk add --no-cache git
+
+# Copy source
+COPY tools/load-generator/ .
+
+# Initialize module if go.mod doesn't exist
+RUN if [ ! -f go.mod ]; then go mod init loadgen; fi
+
+# Add dependencies
+RUN go get github.com/lib/pq@latest && \
+    go get github.com/go-sql-driver/mysql@latest
+
+# Build
+RUN go build -o loadgen main.go
+
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /app
+
+COPY --from=builder /app/loadgen .
+
+CMD ["./loadgen"]

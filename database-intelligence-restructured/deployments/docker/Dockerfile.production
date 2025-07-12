@@ -1,0 +1,85 @@
+# Production Database Intelligence Collector
+# Multi-stage build optimized for production use
+# Supports both config-only and enhanced modes
+
+# ==============================================================================
+# Build stage
+# ==============================================================================
+FROM golang:1.22-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git make ca-certificates
+
+WORKDIR /build
+
+# Copy go workspace files
+COPY go.work go.work.sum* ./
+
+# Copy all module files for dependency resolution
+COPY . .
+
+# Install builder if building enhanced mode
+ARG BUILD_MODE=standard
+RUN if [ "$BUILD_MODE" = "enhanced" ]; then \
+        go install go.opentelemetry.io/collector/cmd/builder@v0.105.0; \
+    fi
+
+# Build the appropriate distribution
+RUN if [ "$BUILD_MODE" = "enhanced" ]; then \
+        builder --config=otelcol-builder-config-enhanced.yaml; \
+    else \
+        cd distributions/production && go build -o database-intelligence-collector .; \
+    fi
+
+# ==============================================================================
+# Runtime stage
+# ==============================================================================
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata curl
+
+# Create non-root user
+RUN addgroup -g 10001 otel && \
+    adduser -u 10001 -G otel -D otel
+
+# Create required directories
+RUN mkdir -p /etc/otelcol /var/lib/otelcol /var/log/otelcol && \
+    chown -R otel:otel /etc/otelcol /var/lib/otelcol /var/log/otelcol
+
+WORKDIR /
+
+# Copy the collector binary
+COPY --from=builder /build/distributions/production/database-intelligence-collector /otelcol
+
+# Copy configurations
+COPY configs/modes/config-only.yaml /etc/otelcol/config-only.yaml
+COPY configs/modes/enhanced.yaml /etc/otelcol/enhanced.yaml
+COPY configs/environments/ /etc/otelcol/environments/
+
+# Set ownership
+RUN chown otel:otel /otelcol
+
+# Switch to non-root user
+USER otel
+
+# Environment variables
+ENV OTEL_RESOURCE_ATTRIBUTES="service.name=database-intelligence"
+ENV GOGC=80
+ENV GOMEMLIMIT=450MiB
+
+# Expose ports
+EXPOSE 4317  4318  8888  8889  13133  55679  1777  9090
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:13133/health || exit 1
+
+# Volume for persistent storage
+VOLUME ["/var/lib/otelcol"]
+
+# Default to config-only mode
+ENV CONFIG_MODE=config-only
+
+# Entrypoint script to select configuration
+ENTRYPOINT ["/bin/sh", "-c", "/otelcol --config=/etc/otelcol/${CONFIG_MODE}.yaml ${OTEL_ARGS}"]

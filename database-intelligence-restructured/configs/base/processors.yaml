@@ -1,0 +1,214 @@
+# Processor Configurations
+# All available processors for Database Intelligence
+
+processors:
+  # =============================================================================
+  # STANDARD PROCESSORS (Production Ready)
+  # =============================================================================
+  
+  # Memory limiter - MUST be first processor in pipeline
+  memory_limiter:
+    check_interval: ${env:MEMORY_CHECK_INTERVAL}
+    limit_mib: ${env:MEMORY_LIMIT_MIB}
+    spike_limit_mib: ${env:MEMORY_SPIKE_LIMIT_MIB}
+    limit_percentage: ${env:MEMORY_LIMIT_PERCENTAGE}
+    spike_limit_percentage: ${env:MEMORY_SPIKE_PERCENTAGE}
+
+  # Resource processor - Add service metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:SERVICE_NAME}
+        action: upsert
+      - key: service.version
+        value: ${env:SERVICE_VERSION}
+        action: upsert
+      - key: service.namespace
+        value: ${env:SERVICE_NAMESPACE}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+      - key: cloud.provider
+        value: ${env:CLOUD_PROVIDER}
+        action: upsert
+      - key: cloud.region
+        value: ${env:CLOUD_REGION}
+        action: upsert
+      - key: cloud.availability_zone
+        value: ${env:CLOUD_AZ}
+        action: upsert
+      - key: host.name
+        from_attribute: host.name
+        action: upsert
+      - key: host.id
+        from_attribute: host.id
+        action: upsert
+
+  # Attributes processor - Manipulate attributes
+  attributes:
+    actions:
+      # Add database type
+      - key: db.system
+        from_attribute: db.connection_string
+        action: extract
+        pattern: ^(?P<db_type>postgresql|mysql)://
+      # Normalize database names
+      - key: db.name
+        action: update
+        from_attribute: database
+      # Add monitoring metadata
+      - key: telemetry.sdk.name
+        value: "database-intelligence"
+        action: insert
+      - key: telemetry.sdk.version
+        value: ${env:SERVICE_VERSION}
+        action: insert
+
+  # Filter processor - Drop unwanted metrics
+  filter:
+    metrics:
+      # Drop internal metrics
+      exclude:
+        match_type: regexp
+        metric_names:
+          - .*\.internal\..*
+          - .*test.*
+      # Drop metrics from test databases
+      datapoint:
+        - 'attributes["db.name"] == "test"'
+        - 'attributes["db.name"] == "temp"'
+
+  # Transform processor - Metric transformations
+  transform:
+    metric_statements:
+      # Convert units
+      - context: metric
+        statements:
+          - set(unit, "ms") where name == "db.query.duration" and unit == "s"
+          - set(description, "Query execution time in milliseconds") where name == "db.query.duration"
+      # Add computed metrics
+      - context: datapoint
+        statements:
+          - set(attributes["db.operation.latency_bucket"], "high") where metric.name == "db.query.duration" and value > 1000
+          - set(attributes["db.operation.latency_bucket"], "medium") where metric.name == "db.query.duration" and value > 100 and value <= 1000
+          - set(attributes["db.operation.latency_bucket"], "low") where metric.name == "db.query.duration" and value <= 100
+
+  # Batch processor - Optimize network usage
+  batch:
+    timeout: ${env:BATCH_TIMEOUT}
+    send_batch_size: ${env:BATCH_SIZE}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE}
+
+  # =============================================================================
+  # CUSTOM PROCESSORS (Require Enhanced Build)
+  # =============================================================================
+  
+  # Adaptive sampler - Dynamic sampling based on load
+  adaptivesampler:
+    sampling_rules:
+      - min_sampling_rate: ${env:MIN_SAMPLING_RATE}
+        max_sampling_rate: ${env:MAX_SAMPLING_RATE}
+        target_rate: ${env:TARGET_SAMPLING_RATE}
+    evaluation_interval: ${env:SAMPLING_EVAL_INTERVAL}
+    metrics_to_track:
+      - db.query.duration
+      - db.connection.count
+      - db.transaction.duration
+
+  # Circuit breaker - Protect databases from overload
+  circuitbreaker:
+    failure_threshold: ${env:CIRCUIT_FAILURE_THRESHOLD}
+    min_requests: ${env:CIRCUIT_MIN_REQUESTS}
+    timeout: ${env:CIRCUIT_TIMEOUT}
+    cooldown: ${env:CIRCUIT_COOLDOWN}
+    metrics:
+      - name: db.query.errors
+        threshold: ${env:QUERY_ERROR_THRESHOLD}
+      - name: db.connection.failures
+        threshold: ${env:CONNECTION_FAILURE_THRESHOLD}
+
+  # Plan attribute extractor - Extract query execution plans
+  planattributeextractor:
+    enabled: ${env:ENABLE_PLAN_EXTRACTION}
+    extract_fields:
+      - cost
+      - rows
+      - width
+      - actual_time
+      - actual_rows
+      - loops
+    databases:
+      - postgres
+    max_plan_size: ${env:MAX_PLAN_SIZE}
+    cache_plans: ${env:CACHE_QUERY_PLANS}
+    cache_ttl: ${env:PLAN_CACHE_TTL}
+
+  # Query correlator - Link queries to sessions/transactions
+  querycorrelator:
+    correlation_window: ${env:CORRELATION_WINDOW}
+    max_queries_tracked: ${env:MAX_QUERIES_TRACKED}
+    correlation_attributes:
+      - session_id
+      - transaction_id
+      - user_id
+      - application_name
+
+  # Verification processor - Data quality and PII detection
+  verification:
+    pii_detection:
+      enabled: ${env:ENABLE_PII_DETECTION}
+      patterns:
+        - email
+        - ssn
+        - credit_card
+        - phone
+      redaction_string: "[REDACTED]"
+    data_quality:
+      check_nulls: true
+      check_types: true
+      enforce_schemas: ${env:ENFORCE_SCHEMAS}
+    validation_rules:
+      - metric: db.query.duration
+        min: 0
+        max: 3600000  # 1 hour in ms
+
+  # Cost control processor - Enforce budget limits
+  costcontrol:
+    max_data_points_per_minute: ${env:MAX_DPM}
+    max_cardinality: ${env:MAX_CARDINALITY}
+    enforcement_mode: ${env:COST_ENFORCEMENT_MODE}
+    budgets:
+      - service: ${env:SERVICE_NAME}
+        limit: ${env:SERVICE_BUDGET}
+        period: ${env:BUDGET_PERIOD}
+    alert_thresholds:
+      - percentage: 80
+        action: warn
+      - percentage: 90
+        action: throttle
+      - percentage: 100
+        action: drop
+
+  # New Relic error monitor - Proactive error detection
+  nrerrormonitor:
+    enabled: ${env:ENABLE_ERROR_MONITOR}
+    error_rate_threshold: ${env:ERROR_RATE_THRESHOLD}
+    latency_threshold: ${env:LATENCY_THRESHOLD}
+    alert_channels:
+      - email
+      - slack
+    check_interval: ${env:ERROR_CHECK_INTERVAL}
+
+  # OHI transform processor - Legacy compatibility
+  ohitransform:
+    enabled: ${env:ENABLE_OHI_TRANSFORM}
+    target_format: "newrelic"
+    preserve_original: true
+    mappings:
+      postgresql:
+        source: "postgresql"
+        target: "PostgresqlSample"
+      mysql:
+        source: "mysql"
+        target: "MysqlSample"

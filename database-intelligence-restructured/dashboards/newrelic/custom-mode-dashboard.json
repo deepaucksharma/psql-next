@@ -1,0 +1,435 @@
+{
+  "name": "Database Intelligence - Custom/Enhanced Mode",
+  "description": "Advanced monitoring with custom components including ASH, query plans, and intelligent processing",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Enhanced Overview",
+      "description": "Advanced database intelligence metrics",
+      "widgets": [
+        {
+          "title": "Intelligence Score",
+          "layout": {"column": 1, "row": 1, "width": 3, "height": 2},
+          "visualization": {"id": "viz.billboard"},
+          "configuration": {
+            "queries": [{
+              "name": "Intelligence Score",
+              "query": "SELECT 100 - (sum(db.ash.blocked_sessions) * 5 + sum(db.ash.long_running_queries) * 2) as 'Score' FROM Metric WHERE deployment.mode = 'custom' SINCE 5 minutes ago"
+            }],
+            "thresholds": [
+              {"value": 90, "severity": "success"},
+              {"value": 70, "severity": "warning"},
+              {"value": 0, "severity": "critical"}
+            ]
+          }
+        },
+        {
+          "title": "Active Session History",
+          "layout": {"column": 4, "row": 1, "width": 3, "height": 2},
+          "visualization": {"id": "viz.billboard"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Active",
+                "query": "SELECT latest(db.ash.active_sessions) FROM Metric WHERE deployment.mode = 'custom' AND attributes.state = 'active'"
+              },
+              {
+                "name": "Blocked",
+                "query": "SELECT latest(db.ash.blocked_sessions) FROM Metric WHERE deployment.mode = 'custom'"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Plan Complexity",
+          "layout": {"column": 7, "row": 1, "width": 3, "height": 2},
+          "visualization": {"id": "viz.bar"},
+          "configuration": {
+            "queries": [{
+              "name": "Plan Complexity",
+              "query": "SELECT count(*) FROM Metric WHERE deployment.mode = 'custom' AND attributes.query_plan_type IS NOT NULL FACET attributes.query_plan_type SINCE 1 hour ago"
+            }]
+          }
+        },
+        {
+          "title": "Cost Control Status",
+          "layout": {"column": 10, "row": 1, "width": 3, "height": 2},
+          "visualization": {"id": "viz.billboard"},
+          "configuration": {
+            "queries": [{
+              "name": "Datapoints/min",
+              "query": "SELECT rate(count(*), 1 minute) as 'Rate' FROM Metric WHERE deployment.mode = 'custom' SINCE 5 minutes ago"
+            }]
+          }
+        },
+        {
+          "title": "ASH Wait Event Heatmap",
+          "layout": {"column": 1, "row": 3, "width": 8, "height": 4},
+          "visualization": {"id": "viz.heatmap"},
+          "configuration": {
+            "queries": [{
+              "name": "Wait Events",
+              "query": "SELECT sum(db.ash.wait_events) FROM Metric WHERE deployment.mode = 'custom' FACET attributes.wait_event_type, attributes.wait_event_name TIMESERIES 1 minute SINCE 1 hour ago"
+            }]
+          }
+        },
+        {
+          "title": "Adaptive Sampling Rate",
+          "layout": {"column": 9, "row": 3, "width": 4, "height": 4},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [{
+              "name": "Sampling Rate",
+              "query": "SELECT average(adaptive_sampling_rate) * 100 as 'Rate %' FROM Metric WHERE deployment.mode = 'custom' TIMESERIES AUTO"
+            }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Active Session History",
+      "description": "Real-time session monitoring and analysis",
+      "widgets": [
+        {
+          "title": "Session State Distribution",
+          "layout": {"column": 1, "row": 1, "width": 4, "height": 3},
+          "visualization": {"id": "viz.pie"},
+          "configuration": {
+            "queries": [{
+              "name": "Session States",
+              "query": "SELECT sum(db.ash.active_sessions) FROM Metric WHERE deployment.mode = 'custom' FACET attributes.state SINCE 5 minutes ago"
+            }]
+          }
+        },
+        {
+          "title": "Session Timeline",
+          "layout": {"column": 5, "row": 1, "width": 8, "height": 3},
+          "visualization": {"id": "viz.area"},
+          "configuration": {
+            "queries": [{
+              "name": "Sessions by State",
+              "query": "SELECT sum(db.ash.active_sessions) FROM Metric WHERE deployment.mode = 'custom' FACET attributes.state TIMESERIES 30 seconds SINCE 30 minutes ago"
+            }]
+          }
+        },
+        {
+          "title": "Top Wait Events",
+          "layout": {"column": 1, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.bar"},
+          "configuration": {
+            "queries": [{
+              "name": "Wait Event Count",
+              "query": "SELECT sum(db.ash.wait_events) FROM Metric WHERE deployment.mode = 'custom' FACET attributes.wait_event_name WHERE attributes.wait_event_name IS NOT NULL SINCE 1 hour ago LIMIT 20"
+            }]
+          }
+        },
+        {
+          "title": "Blocking Chain Analysis",
+          "layout": {"column": 7, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [{
+              "name": "Blocking Sessions",
+              "query": "SELECT sum(db.ash.blocked_sessions) FROM Metric WHERE deployment.mode = 'custom' TIMESERIES 1 minute SINCE 1 hour ago"
+            }]
+          }
+        },
+        {
+          "title": "Long Running Queries",
+          "layout": {"column": 1, "row": 7, "width": 12, "height": 4},
+          "visualization": {"id": "viz.table"},
+          "configuration": {
+            "queries": [{
+              "name": "Long Runners",
+              "query": "SELECT latest(attributes.db.statement) as 'Query', latest(attributes.query_duration_ms) as 'Duration (ms)', latest(attributes.wait_event_name) as 'Wait Event', latest(attributes.blocking_pid) as 'Blocking PID' FROM Metric WHERE deployment.mode = 'custom' AND metricName = 'db.ash.long_running_queries' FACET attributes.session_id LIMIT 50"
+            }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query Intelligence",
+      "description": "Advanced query analysis with plans and correlations",
+      "widgets": [
+        {
+          "title": "Query Performance by Plan Type",
+          "layout": {"column": 1, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.bar"},
+          "configuration": {
+            "queries": [{
+              "name": "Execution Time by Plan",
+              "query": "SELECT average(postgres.slow_queries.elapsed_time) FROM Metric WHERE deployment.mode = 'custom' AND attributes.query_plan_type IS NOT NULL FACET attributes.query_plan_type"
+            }]
+          }
+        },
+        {
+          "title": "Query Correlation Matrix",
+          "layout": {"column": 7, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.heatmap"},
+          "configuration": {
+            "queries": [{
+              "name": "Correlated Queries",
+              "query": "SELECT count(*) FROM Metric WHERE deployment.mode = 'custom' AND attributes.correlated_query_id IS NOT NULL FACET attributes.db.postgresql.query_id, attributes.correlated_query_id TIMESERIES 5 minutes SINCE 1 hour ago"
+            }]
+          }
+        },
+        {
+          "title": "Query Plan Optimizer Stats",
+          "layout": {"column": 1, "row": 4, "width": 12, "height": 3},
+          "visualization": {"id": "viz.table"},
+          "configuration": {
+            "queries": [{
+              "name": "Plan Statistics",
+              "query": "SELECT latest(attributes.db.statement) as 'Query', latest(attributes.query_plan_type) as 'Plan Type', latest(attributes.estimated_cost) as 'Est. Cost', latest(attributes.actual_cost) as 'Actual Cost', latest(attributes.row_estimation_error) as 'Row Est. Error %' FROM Metric WHERE deployment.mode = 'custom' AND attributes.query_plan_type IS NOT NULL FACET attributes.db.postgresql.query_id LIMIT 30"
+            }]
+          }
+        },
+        {
+          "title": "Parameter Extraction Success",
+          "layout": {"column": 1, "row": 7, "width": 4, "height": 3},
+          "visualization": {"id": "viz.billboard"},
+          "configuration": {
+            "queries": [{
+              "name": "Extraction Rate",
+              "query": "SELECT (count(*) filter (WHERE attributes.extracted_parameters IS NOT NULL) / count(*)) * 100 as 'Success %' FROM Metric WHERE deployment.mode = 'custom' AND metricName LIKE 'postgres.slow_queries%' SINCE 1 hour ago"
+            }]
+          }
+        },
+        {
+          "title": "Query Complexity Trends",
+          "layout": {"column": 5, "row": 7, "width": 8, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Simple Queries",
+                "query": "SELECT count(*) FROM Metric WHERE deployment.mode = 'custom' AND attributes.query_complexity = 'simple' TIMESERIES AUTO"
+              },
+              {
+                "name": "Complex Queries",
+                "query": "SELECT count(*) FROM Metric WHERE deployment.mode = 'custom' AND attributes.query_complexity = 'complex' TIMESERIES AUTO"
+              },
+              {
+                "name": "Very Complex Queries",
+                "query": "SELECT count(*) FROM Metric WHERE deployment.mode = 'custom' AND attributes.query_complexity = 'very_complex' TIMESERIES AUTO"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Enhanced SQL Metrics",
+      "description": "Detailed query and table statistics from enhanced SQL receiver",
+      "widgets": [
+        {
+          "title": "Top Queries by Total Time",
+          "layout": {"column": 1, "row": 1, "width": 12, "height": 4},
+          "visualization": {"id": "viz.table"},
+          "configuration": {
+            "queries": [{
+              "name": "Query Stats",
+              "query": "SELECT latest(query_text) as 'Query', sum(calls) as 'Calls', average(mean_exec_time) as 'Avg Time (ms)', sum(total_exec_time) as 'Total Time (ms)', sum(shared_blks_hit + shared_blks_read) as 'Buffer Access' FROM Event WHERE eventType = 'EnhancedSQLQueryStats' AND deployment.mode = 'custom' FACET query_id SINCE 1 hour ago LIMIT 25"
+            }]
+          }
+        },
+        {
+          "title": "Table Activity Heatmap",
+          "layout": {"column": 1, "row": 5, "width": 8, "height": 4},
+          "visualization": {"id": "viz.heatmap"},
+          "configuration": {
+            "queries": [{
+              "name": "Table Operations",
+              "query": "SELECT sum(n_tup_ins + n_tup_upd + n_tup_del) FROM Event WHERE eventType = 'EnhancedSQLTableStats' AND deployment.mode = 'custom' FACET schemaname, tablename TIMESERIES 5 minutes SINCE 2 hours ago"
+            }]
+          }
+        },
+        {
+          "title": "Index Usage Efficiency",
+          "layout": {"column": 9, "row": 5, "width": 4, "height": 4},
+          "visualization": {"id": "viz.pie"},
+          "configuration": {
+            "queries": [{
+              "name": "Index vs Sequential Scans",
+              "query": "SELECT sum(idx_scan) as 'Index Scans', sum(seq_scan) as 'Sequential Scans' FROM Event WHERE eventType = 'EnhancedSQLIndexStats' AND deployment.mode = 'custom' SINCE 1 hour ago"
+            }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Intelligent Processing",
+      "description": "Metrics from custom processors",
+      "widgets": [
+        {
+          "title": "Circuit Breaker Status",
+          "layout": {"column": 1, "row": 1, "width": 4, "height": 3},
+          "visualization": {"id": "viz.billboard"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Status",
+                "query": "SELECT latest(circuit_breaker_state) as 'State' FROM Metric WHERE deployment.mode = 'custom'"
+              },
+              {
+                "name": "Trips",
+                "query": "SELECT sum(circuit_breaker_trips) as 'Total Trips' FROM Metric WHERE deployment.mode = 'custom' SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Cost Control Metrics",
+          "layout": {"column": 5, "row": 1, "width": 8, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Datapoints Processed",
+                "query": "SELECT rate(sum(cost_control_datapoints_processed), 1 minute) as 'Processed/min' FROM Metric WHERE deployment.mode = 'custom' TIMESERIES AUTO"
+              },
+              {
+                "name": "Datapoints Dropped",
+                "query": "SELECT rate(sum(cost_control_datapoints_dropped), 1 minute) as 'Dropped/min' FROM Metric WHERE deployment.mode = 'custom' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Error Monitoring",
+          "layout": {"column": 1, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [{
+              "name": "Error Rate",
+              "query": "SELECT (sum(error_count) / sum(total_count)) * 100 as 'Error %' FROM Metric WHERE deployment.mode = 'custom' AND metricName = 'nrerror_monitor_rate' TIMESERIES AUTO"
+            }]
+          }
+        },
+        {
+          "title": "OHI Transform Performance",
+          "layout": {"column": 7, "row": 4, "width": 6, "height": 3},
+          "visualization": {"id": "viz.bar"},
+          "configuration": {
+            "queries": [{
+              "name": "Events Created",
+              "query": "SELECT count(*) FROM PostgresSlowQueries, PostgresWaitEvents WHERE deployment_mode = 'custom' FACET eventType TIMESERIES 10 minutes SINCE 1 hour ago"
+            }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Kernel & System Metrics",
+      "description": "Advanced system metrics from kernel receiver",
+      "widgets": [
+        {
+          "title": "Kernel CPU Statistics",
+          "layout": {"column": 1, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [{
+              "name": "CPU by Type",
+              "query": "SELECT average(kernel.cpu.usage) FROM Metric WHERE deployment.mode = 'custom' FACET cpu_type TIMESERIES AUTO"
+            }]
+          }
+        },
+        {
+          "title": "Memory Pressure",
+          "layout": {"column": 7, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.area"},
+          "configuration": {
+            "queries": [{
+              "name": "Memory Stats",
+              "query": "SELECT average(kernel.memory.pressure) as 'Pressure Score' FROM Metric WHERE deployment.mode = 'custom' TIMESERIES AUTO"
+            }]
+          }
+        },
+        {
+          "title": "Process Metrics",
+          "layout": {"column": 1, "row": 4, "width": 12, "height": 3},
+          "visualization": {"id": "viz.table"},
+          "configuration": {
+            "queries": [{
+              "name": "Top Processes",
+              "query": "SELECT latest(process_name) as 'Process', average(cpu_percent) as 'CPU %', average(memory_percent) as 'Memory %', sum(io_read_bytes) as 'IO Read', sum(io_write_bytes) as 'IO Write' FROM Metric WHERE deployment.mode = 'custom' AND metricName LIKE 'kernel.process%' FACET process_id LIMIT 20"
+            }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Comparison View",
+      "description": "Side-by-side comparison with config-only mode",
+      "widgets": [
+        {
+          "title": "Mode Comparison - Active Connections",
+          "layout": {"column": 1, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Config-Only",
+                "query": "SELECT sum(postgresql.backends) FROM Metric WHERE deployment.mode = 'config-only' TIMESERIES AUTO"
+              },
+              {
+                "name": "Custom Mode",
+                "query": "SELECT sum(postgresql.backends) FROM Metric WHERE deployment.mode = 'custom' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Mode Comparison - Query Performance",
+          "layout": {"column": 7, "row": 1, "width": 6, "height": 3},
+          "visualization": {"id": "viz.line"},
+          "configuration": {
+            "queries": [
+              {
+                "name": "Config-Only Slow Queries",
+                "query": "SELECT count(*) FROM Metric WHERE deployment.mode = 'config-only' AND (metricName = 'mysql.query.slow.count' OR metricName LIKE 'pg.wait%') TIMESERIES AUTO"
+              },
+              {
+                "name": "Custom Mode Intelligence",
+                "query": "SELECT count(*) FROM Metric WHERE deployment.mode = 'custom' AND metricName = 'db.ash.long_running_queries' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Metrics Volume Comparison",
+          "layout": {"column": 1, "row": 4, "width": 12, "height": 3},
+          "visualization": {"id": "viz.bar"},
+          "configuration": {
+            "queries": [{
+              "name": "Metrics per Mode",
+              "query": "SELECT uniqueCount(metricName) as 'Unique Metrics', count(*) as 'Total Datapoints' FROM Metric FACET deployment.mode SINCE 1 hour ago"
+            }]
+          }
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "name": "database",
+      "title": "Database",
+      "type": "NRQL",
+      "query": "SELECT uniques(db.name) FROM Metric WHERE deployment.mode = 'custom' SINCE 1 day ago",
+      "defaultValue": "all"
+    },
+    {
+      "name": "timeRange",
+      "title": "Time Range",
+      "type": "ENUM",
+      "values": [
+        {"title": "Last 5 minutes", "value": "5 MINUTES"},
+        {"title": "Last 30 minutes", "value": "30 MINUTES"},
+        {"title": "Last 1 hour", "value": "1 HOUR"},
+        {"title": "Last 6 hours", "value": "6 HOURS"},
+        {"title": "Last 24 hours", "value": "24 HOURS"}
+      ],
+      "defaultValue": "1 HOUR"
+    }
+  ]
+}

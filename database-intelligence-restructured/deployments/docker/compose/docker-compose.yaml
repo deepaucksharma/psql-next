@@ -20,8 +20,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./tools/scripts/test/sql/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./tools/scripts/test/sql/postgres-test-data.sql:/docker-entrypoint-initdb.d/02-test-data.sql
+      - ../init-scripts/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql
     command: >
       postgres
         -c shared_preload_libraries=pg_stat_statements,auto_explain
@@ -49,8 +48,7 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./tools/scripts/test/sql/mysql-init.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./tools/scripts/test/sql/mysql-test-data.sql:/docker-entrypoint-initdb.d/02-test-data.sql
+      - ../init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/01-init.sql
     command: >
       --performance-schema=ON
       --performance_schema_consumer_events_statements_current=ON
@@ -230,7 +228,9 @@ services:
       dockerfile: deployments/docker/dockerfiles/Dockerfile.test
     container_name: database-intelligence-e2e
     depends_on:
-      collector:
+      postgres:
+        condition: service_healthy
+      mysql:
         condition: service_healthy
     environment:
       - COLLECTOR_ENDPOINT=http://collector:4318
