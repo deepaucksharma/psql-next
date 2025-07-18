@@ -30,9 +30,7 @@ processors:
               and IsMatch(attributes["wait_type"], ".*table.*lock.*")
               and attributes["NO_INDEX_USED"] == 1
           
-          - set(attributes["advisor.recommendation"], 
-                "Table lock escalation due to missing index. Add index to enable row-level locking.")
-            where attributes["advisor.composite"] == "lock_escalation_missing_index"
+          - set(attributes["advisor.recommendation"], "Table lock escalation due to missing index. Add index to enable row-level locking.") where attributes["advisor.composite"] == "lock_escalation_missing_index"
           
           - set(attributes["advisor.priority"], "P1")
             where attributes["advisor.composite"] == "lock_escalation_missing_index"
@@ -47,18 +45,14 @@ processors:
           - set(attributes["advisor.priority"], "P0")
             where attributes["advisor.composite"] == "critical_missing_index"
           
-          - set(attributes["advisor.recommendation"], 
-                "CRITICAL: Query has 80%+ I/O wait with high execution count. Missing index severely impacting performance.")
-            where attributes["advisor.composite"] == "critical_missing_index"
+          - set(attributes["advisor.recommendation"], "CRITICAL: Query has 80%+ I/O wait with high execution count. Missing index severely impacting performance.") where attributes["advisor.composite"] == "critical_missing_index"
           
           # Composite advisory: I/O + temp tables
           - set(attributes["advisor.composite"], "io_saturation_temp_tables")
             where attributes["wait.category"] == "io"
               and attributes["tmp_disk_tables"] > 0
           
-          - set(attributes["advisor.recommendation"], 
-                "I/O saturation worsened by on-disk temp tables. Optimize query or increase memory buffers.")
-            where attributes["advisor.composite"] == "io_saturation_temp_tables"
+          - set(attributes["advisor.recommendation"], "I/O saturation worsened by on-disk temp tables. Optimize query or increase memory buffers.") where attributes["advisor.composite"] == "io_saturation_temp_tables"
           
           # Wait trend analysis
           - set(attributes["wait.trend"], "regression")
@@ -69,9 +63,7 @@ processors:
             where attributes["wait_percentage"] < 20
           
           # Add impact score
-          - set(attributes["impact.score"], 
-                attributes["wait_percentage"] * attributes["exec_count"] / 100)
-            where attributes["exec_count"] != nil
+          - set(attributes["impact.score"], attributes["wait_percentage"] * attributes["exec_count"] / 100) where attributes["exec_count"] != nil
 
   # Baseline enrichment
   transform/baseline_enrichment:

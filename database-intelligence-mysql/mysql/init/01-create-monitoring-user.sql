@@ -2,9 +2,8 @@
 CREATE USER IF NOT EXISTS 'otel_monitor'@'%' IDENTIFIED BY 'otelmonitorpass';
 
 -- Grant necessary privileges for monitoring
-GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'otel_monitor'@'%';
+GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'otel_monitor'@'%';
 GRANT SELECT ON performance_schema.* TO 'otel_monitor'@'%';
-GRANT SELECT ON information_schema.* TO 'otel_monitor'@'%';
 GRANT SELECT ON mysql.* TO 'otel_monitor'@'%';
 
 -- If using sys schema (recommended for MySQL 5.7+)

@@ -2,8 +2,11 @@ package e2e
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,4 +127,96 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// connectMySQL establishes a MySQL connection
+func connectMySQL(t *testing.T) *sql.DB {
+	host := getEnvOrDefault("MYSQL_HOST", "localhost")
+	port := getEnvOrDefault("MYSQL_PORT", "3306")
+	user := getEnvOrDefault("MYSQL_USER", "root")
+	password := getEnvOrDefault("MYSQL_PASSWORD", "rootpassword")
+	database := getEnvOrDefault("MYSQL_DATABASE", "production")
+	
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", user, password, host, port, database)
+	db, err := sql.Open("mysql", dsn)
+	require.NoError(t, err)
+	
+	err = db.Ping()
+	require.NoError(t, err)
+	
+	return db
+}
+
+// NewRelicClient for API queries
+type NewRelicClient struct {
+	apiKey    string
+	accountID string
+	baseURL   string
+}
+
+// NewNewRelicClient creates a New Relic client
+func NewNewRelicClient(t *testing.T) *NewRelicClient {
+	apiKey := os.Getenv("NEW_RELIC_API_KEY")
+	accountID := os.Getenv("NEW_RELIC_ACCOUNT_ID")
+	
+	require.NotEmpty(t, apiKey, "NEW_RELIC_API_KEY not set")
+	require.NotEmpty(t, accountID, "NEW_RELIC_ACCOUNT_ID not set")
+	
+	return &NewRelicClient{
+		apiKey:    apiKey,
+		accountID: accountID,
+		baseURL:   "https://api.newrelic.com/graphql",
+	}
+}
+
+// QueryNRQL executes NRQL query against New Relic
+func (c *NewRelicClient) QueryNRQL(nrql string) ([]map[string]interface{}, error) {
+	query := fmt.Sprintf(`{
+		actor {
+			account(id: %s) {
+				nrql(query: "%s") {
+					results
+				}
+			}
+		}
+	}`, c.accountID, strings.ReplaceAll(nrql, `"`, `\"`))
+	
+	payload := map[string]string{"query": query}
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	
+	req, err := http.NewRequest("POST", c.baseURL, strings.NewReader(string(jsonPayload)))
+	if err != nil {
+		return nil, err
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("API-Key", c.apiKey)
+	
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	
+	var result struct {
+		Data struct {
+			Actor struct {
+				Account struct {
+					NRQL struct {
+						Results []map[string]interface{} `json:"results"`
+					} `json:"nrql"`
+				} `json:"account"`
+			} `json:"actor"`
+		} `json:"data"`
+	}
+	
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	
+	return result.Data.Actor.Account.NRQL.Results, nil
 }

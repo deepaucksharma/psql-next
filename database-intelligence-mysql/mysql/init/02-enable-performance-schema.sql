@@ -36,11 +36,12 @@ UPDATE performance_schema.setup_instruments
 SET ENABLED = 'YES' 
 WHERE NAME LIKE 'memory/%';
 
--- Set appropriate history sizes
-SET GLOBAL performance_schema_events_statements_history_size = 100;
-SET GLOBAL performance_schema_events_statements_history_long_size = 10000;
-SET GLOBAL performance_schema_events_waits_history_size = 100;
-SET GLOBAL performance_schema_events_waits_history_long_size = 10000;
+-- Note: History sizes must be set in MySQL configuration file or command-line
+-- These are read-only variables at runtime:
+-- performance_schema_events_statements_history_size = 100
+-- performance_schema_events_statements_history_long_size = 10000
+-- performance_schema_events_waits_history_size = 100
+-- performance_schema_events_waits_history_long_size = 10000
 
 -- Verify settings
 SELECT * FROM performance_schema.setup_consumers WHERE ENABLED = 'YES';

@@ -1,11 +1,11 @@
 package e2e
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +17,6 @@ import (
 
 // TestComprehensiveE2EValidation validates the entire pipeline from MySQL to New Relic dashboards
 func TestComprehensiveE2EValidation(t *testing.T) {
-	ctx := context.Background()
-	
 	// Test stages
 	t.Run("Stage1_ValidateMySQL", testValidateMySQLSetup)
 	t.Run("Stage2_GenerateTestWorkload", testGenerateWorkload)
@@ -613,4 +611,24 @@ func (c *NewRelicClient) QueryNRQL(nrql string) ([]map[string]interface{}, error
 	}
 	
 	return result.Data.Actor.Account.NRQL.Results, nil
+}
+
+// print_status prints formatted status messages  
+func print_status(status, message string) {
+	colors := map[string]string{
+		"info":    "\033[0;36m",
+		"success": "\033[0;32m",
+		"error":   "\033[0;31m",
+		"test":    "\033[0;34m",
+	}
+	reset := "\033[0m"
+	
+	symbol := map[string]string{
+		"info":    "ℹ",
+		"success": "✓",
+		"error":   "✗",
+		"test":    "▶",
+	}[status]
+	
+	fmt.Printf("%s%s%s %s\n", colors[status], symbol, reset, message)
 }

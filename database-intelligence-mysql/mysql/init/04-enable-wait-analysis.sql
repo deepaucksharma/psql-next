@@ -43,21 +43,15 @@ WHERE NAME = 'statements_digest';
 -- SET GLOBAL performance_schema_events_waits_history_long_size = 100000;
 -- SET GLOBAL performance_schema_events_statements_history_long_size = 10000;
 
--- Create monitoring user with necessary privileges
-CREATE USER IF NOT EXISTS 'otel_monitor'@'%' IDENTIFIED BY 'otelmonitorpass';
+-- Note: Monitor user already created and granted in 01-create-monitoring-user.sql
+-- Just ensure user exists
+SELECT CONCAT('Monitor user exists: ', user, '@', host) FROM mysql.user WHERE user = 'otel_monitor';
 
--- Grant necessary privileges for wait analysis
-GRANT SELECT ON performance_schema.* TO 'otel_monitor'@'%';
-GRANT SELECT ON information_schema.* TO 'otel_monitor'@'%';
-GRANT SELECT ON mysql.* TO 'otel_monitor'@'%';
-GRANT PROCESS ON *.* TO 'otel_monitor'@'%';
-GRANT REPLICATION CLIENT ON *.* TO 'otel_monitor'@'%';
+-- Note: Views cannot be created in performance_schema database
+-- These queries should be used directly by the monitoring tools
 
--- Create helper views for wait analysis
-USE performance_schema;
-
--- View for current wait profile by statement
-CREATE OR REPLACE VIEW v_wait_profile_by_statement AS
+-- Sample query for current wait profile by statement
+/*
 SELECT 
     esh.DIGEST,
     esh.DIGEST_TEXT,
@@ -77,9 +71,10 @@ JOIN events_waits_history_long ews
 WHERE esh.DIGEST IS NOT NULL
     AND ews.EVENT_NAME NOT LIKE 'idle%'
 GROUP BY esh.DIGEST, esh.DIGEST_TEXT;
+*/
 
--- View for blocking analysis
-CREATE OR REPLACE VIEW v_blocking_threads AS
+-- Sample query for blocking analysis
+/*
 SELECT 
     waiting.PROCESSLIST_ID as waiting_thread,
     waiting.PROCESSLIST_USER as waiting_user,
@@ -99,6 +94,7 @@ JOIN threads blocking
 WHERE waiting.PROCESSLIST_COMMAND = 'Query'
     AND waiting.PROCESSLIST_STATE LIKE '%lock%'
     AND blocking.PROCESSLIST_COMMAND != 'Sleep';
+*/
 
 -- Flush privileges
 FLUSH PRIVILEGES;
