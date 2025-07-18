@@ -180,9 +180,9 @@ processors:
 exporters:
   # New Relic OTLP exporter
   otlphttp/newrelic:
-    endpoint: ${NEW_RELIC_OTLP_ENDPOINT}
+    endpoint: https://otlp.nr-data.net:4318
     headers:
-      api-key: ${NEW_RELIC_LICENSE_KEY}
+      api-key: ${NEW_RELIC_LICENSE_KEY:ea7e83e4e29597b0766cf6c4636fba20FFFFNRAL}
     compression: gzip
     timeout: 30s
     sending_queue:
