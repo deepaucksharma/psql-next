@@ -1,0 +1,1195 @@
+{
+  "name": "MySQL Performance Monitoring - Enhanced OpenTelemetry",
+  "description": "Comprehensive MySQL monitoring with advanced wait-based analysis, performance insights, and intelligent advisories",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Overview & Health",
+      "description": "Database health score and key performance indicators",
+      "widgets": [
+        {
+          "title": "🏥 Database Health Score",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT 100 - (average(mysql.query.wait_profile.wait_percentage) * 0.5 + percentage(count(*), WHERE mysql.advisor.priority IN ('P0', 'P1')) * 0.3 + percentage(count(*), WHERE mysql.blocking.active > 0) * 0.2) as 'Health Score %' FROM Metric WHERE metricName LIKE 'mysql.%' SINCE 5 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 60
+              },
+              {
+                "alertSeverity": "WARNING",
+                "value": 80
+              }
+            ]
+          }
+        },
+        {
+          "title": "⏱️ Current Wait Time Analysis",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(value) FROM Metric WHERE metricName = 'mysql.query.wait_profile' FACET wait.category TIMESERIES AUTO SINCE 30 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "🚨 Active Advisories",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) FROM Metric WHERE advisor.type IS NOT NULL FACET advisor.type, advisor.priority SINCE 1 hour ago LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "📊 Query Performance Distribution",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.histogram"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT histogram(statement_time_ms, 50, 20) FROM Metric WHERE metricName = 'mysql.query.wait_profile' SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "🔒 Lock Activity",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(mysql.blocking.active) as 'Active Blocks', average(mysql.blocking.wait_duration) as 'Avg Wait Duration' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "💾 Resource Utilization",
+          "layout": {
+            "column": 5,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bullet"
+          },
+          "rawConfiguration": {
+            "limit": 100,
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(mysql_global_status_threads_running) / average(mysql_global_variables_max_connections) * 100 as 'Connection Usage %', average(mysql_global_status_innodb_buffer_pool_pages_data) / average(mysql_global_status_innodb_buffer_pool_pages_total) * 100 as 'Buffer Pool Usage %' FROM Metric SINCE 5 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "🎯 Top Wait Events",
+          "layout": {
+            "column": 9,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": true
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(value) FROM Metric WHERE metricName = 'mysql.query.wait_profile' FACET wait_type SINCE 1 hour ago LIMIT 10"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wait Analysis Deep Dive",
+      "description": "Detailed wait event analysis and categorization",
+      "widgets": [
+        {
+          "title": "Wait Category Breakdown Over Time",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.stacked-bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(value) FROM Metric WHERE metricName = 'mysql.query.wait_profile' FACET wait.category TIMESERIES 5 minutes SINCE 3 hours ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Wait Severity Distribution",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.heatmap"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT histogram(wait_percentage, width: 10, buckets: 10) FROM Metric WHERE metricName = 'mysql.query.wait_profile' FACET wait.severity SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Query Wait Correlation",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.scatter"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(wait_percentage) as 'Wait %', average(statement_time_ms) as 'Query Time (ms)' FROM Metric WHERE metricName = 'mysql.query.wait_profile' FACET query_hash SINCE 1 hour ago LIMIT 100"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "I/O Wait Analysis",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(value) as 'Avg Wait Time', count(*) as 'Count', percentage(count(*), WHERE wait_percentage > 50) as '% High Wait' FROM Metric WHERE metricName = 'mysql.query.wait_profile' AND wait.category = 'io' FACET wait_type SINCE 1 hour ago LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Lock Wait Analysis",
+          "layout": {
+            "column": 5,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(value) as 'Avg Wait Time', count(*) as 'Count', max(value) as 'Max Wait' FROM Metric WHERE metricName = 'mysql.query.wait_profile' AND wait.category = 'lock' FACET lock_type, query_hash SINCE 1 hour ago LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "CPU Wait Analysis",
+          "layout": {
+            "column": 9,
+            "row": 7,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(value) as 'Avg Wait Time', count(*) as 'Count', sum(value) as 'Total Wait' FROM Metric WHERE metricName = 'mysql.query.wait_profile' AND wait.category = 'cpu' FACET query_hash SINCE 1 hour ago LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query Performance",
+      "description": "Query-level performance metrics and optimization opportunities",
+      "widgets": [
+        {
+          "title": "Top Queries by Total Wait Time",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(value) as 'Total Wait Time', average(value) as 'Avg Wait Time', count(*) as 'Executions', average(wait_percentage) as 'Avg Wait %', latest(query_text) as 'Query' FROM Metric WHERE metricName = 'mysql.query.wait_profile' FACET query_hash SINCE 1 hour ago LIMIT 50"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Query Execution Trends",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(mysql.statement.digest.exec_count), 1 minute) as 'Queries/min' FROM Metric FACET DIGEST TIMESERIES AUTO SINCE 3 hours ago LIMIT 10"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Query Performance Heatmap",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.heatmap"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT histogram(mysql.statement.digest.avg_time_ms, 50, 20) FROM Metric FACET DIGEST SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Queries Without Indexes",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(NO_INDEX_USED) as 'No Index Count', sum(NO_GOOD_INDEX_USED) as 'Bad Index Count', latest(query_text) as 'Query' FROM Metric WHERE metricName = 'mysql.query.wait_profile' AND (NO_INDEX_USED > 0 OR NO_GOOD_INDEX_USED > 0) FACET query_hash SINCE 1 hour ago LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Temp Table Usage",
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(tmp_tables) as 'Memory Temp Tables', sum(tmp_disk_tables) as 'Disk Temp Tables', latest(query_text) as 'Query' FROM Metric WHERE metricName = 'mysql.query.wait_profile' AND (tmp_tables > 0 OR tmp_disk_tables > 0) FACET query_hash SINCE 1 hour ago LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Advisories & Recommendations",
+      "description": "Intelligent performance advisories and optimization recommendations",
+      "widgets": [
+        {
+          "title": "Advisory Summary by Priority",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) FROM Metric WHERE advisor.priority IS NOT NULL FACET advisor.priority SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 10
+              },
+              {
+                "alertSeverity": "WARNING",
+                "value": 5
+              }
+            ]
+          }
+        },
+        {
+          "title": "Advisory Timeline",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.stacked-bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) FROM Metric WHERE advisor.type IS NOT NULL FACET advisor.type TIMESERIES 5 minutes SINCE 3 hours ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Critical Missing Indexes",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(advisor.recommendation) as 'Recommendation', sum(impact.score) as 'Impact Score', count(*) as 'Occurrences', latest(query_text) as 'Query' FROM Metric WHERE advisor.type = 'missing_index' AND advisor.priority IN ('P0', 'P1') FACET query_hash SINCE 1 hour ago LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Lock Contention Advisories",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(advisor.recommendation) as 'Recommendation', average(mysql.blocking.wait_duration) as 'Avg Wait Duration', count(*) as 'Occurrences' FROM Metric WHERE advisor.type = 'lock_contention' FACET blocking_thread, waiting_thread SINCE 1 hour ago LIMIT 20"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Composite Advisories",
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(advisor.recommendation) as 'Recommendation', latest(advisor.priority) as 'Priority', count(*) as 'Count' FROM Metric WHERE advisor.composite IS NOT NULL FACET advisor.composite SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "InnoDB Insights",
+      "description": "InnoDB-specific performance metrics and analysis",
+      "widgets": [
+        {
+          "title": "Buffer Pool Efficiency",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(mysql_global_status_innodb_buffer_pool_read_requests - mysql_global_status_innodb_buffer_pool_reads) / average(mysql_global_status_innodb_buffer_pool_read_requests) * 100 as 'Hit Ratio %', average(mysql_global_status_innodb_buffer_pool_pages_dirty) / average(mysql_global_status_innodb_buffer_pool_pages_total) * 100 as 'Dirty Pages %' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "InnoDB I/O Activity",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(mysql_global_status_innodb_data_reads), 1 minute) as 'Reads/min', rate(sum(mysql_global_status_innodb_data_writes), 1 minute) as 'Writes/min' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Row Operations",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(mysql_global_status_innodb_rows_read), 1 minute) as 'Rows Read/min', rate(sum(mysql_global_status_innodb_rows_inserted), 1 minute) as 'Rows Inserted/min', rate(sum(mysql_global_status_innodb_rows_updated), 1 minute) as 'Rows Updated/min', rate(sum(mysql_global_status_innodb_rows_deleted), 1 minute) as 'Rows Deleted/min' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Lock Waits",
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(mysql_global_status_innodb_row_lock_waits) as 'Row Lock Waits', average(mysql_global_status_innodb_row_lock_time_avg) as 'Avg Lock Time (ms)' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Deadlocks",
+          "layout": {
+            "column": 9,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(mysql_global_status_innodb_deadlocks), 1 hour) as 'Deadlocks/hour' FROM Metric SINCE 5 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": [
+              {
+                "alertSeverity": "WARNING",
+                "value": 1
+              },
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 5
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Table & Index I/O",
+      "description": "Table and index-level I/O performance analysis",
+      "widgets": [
+        {
+          "title": "Top Tables by I/O Wait",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(mysql_perf_schema_table_io_waits_total) as 'Total I/O Waits', average(mysql_perf_schema_table_io_waits_seconds_total) * 1000 as 'Avg Wait Time (ms)', latest(mysql_info_schema_table_rows) as 'Row Count' FROM Metric FACET object_schema, object_name SINCE 1 hour ago LIMIT 30"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Index Usage Efficiency",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(mysql_perf_schema_index_io_waits_total) as 'Index I/O Waits', average(mysql_perf_schema_index_io_waits_seconds_total) * 1000 as 'Avg Wait (ms)' FROM Metric WHERE index_name != 'PRIMARY' FACET object_schema, object_name, index_name SINCE 1 hour ago LIMIT 30"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Table Size vs I/O Correlation",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.scatter"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(mysql_info_schema_table_size) / 1024 / 1024 as 'Table Size (MB)', sum(mysql_perf_schema_table_io_waits_total) as 'I/O Waits' FROM Metric FACET concat(object_schema, '.', object_name) as 'Table' SINCE 1 hour ago LIMIT 50"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replication & HA",
+      "description": "Replication lag and high availability monitoring",
+      "widgets": [
+        {
+          "title": "Replication Lag",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(mysql_slave_lag_seconds) as 'Replication Lag (s)' FROM Metric FACET server_id TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": [
+              {
+                "alertSeverity": "WARNING",
+                "value": 10
+              },
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 60
+              }
+            ],
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Replication Thread Status",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(mysql_slave_sql_running) as 'SQL Thread', latest(mysql_slave_io_running) as 'IO Thread', latest(mysql_slave_lag_seconds) as 'Lag (s)' FROM Metric FACET server_id, master_host SINCE 5 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Binary Log Activity",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(mysql_global_status_binlog_cache_use), 1 minute) as 'Binlog Cache Use/min', rate(sum(mysql_global_status_binlog_cache_disk_use), 1 minute) as 'Binlog Disk Use/min' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Slave I/O State",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT latest(slave_io_state) as 'I/O State', latest(last_error) as 'Last Error', latest(seconds_behind_master) as 'Seconds Behind' FROM Metric WHERE slave_io_state IS NOT NULL FACET server_id SINCE 5 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resource Utilization",
+      "description": "System resource usage and capacity planning",
+      "widgets": [
+        {
+          "title": "Connection Pool Usage",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(mysql_global_status_threads_connected) as 'Connected', average(mysql_global_status_threads_running) as 'Running', average(mysql_global_variables_max_connections) as 'Max Connections' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Query Cache Performance",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(mysql_global_status_qcache_hits) / (average(mysql_global_status_qcache_hits) + average(mysql_global_status_qcache_inserts) + average(mysql_global_status_qcache_not_cached)) * 100 as 'Query Cache Hit Rate %' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Temporary Objects",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(mysql_global_status_created_tmp_tables), 1 minute) as 'Tmp Tables/min', rate(sum(mysql_global_status_created_tmp_disk_tables), 1 minute) as 'Tmp Disk Tables/min' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Network Traffic",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT rate(sum(mysql_global_status_bytes_received), 1 minute) / 1024 / 1024 as 'MB Received/min', rate(sum(mysql_global_status_bytes_sent), 1 minute) / 1024 / 1024 as 'MB Sent/min' FROM Metric TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "name": "database",
+      "items": null,
+      "defaultValues": [],
+      "nrqlQuery": {
+        "accountIds": [0],
+        "query": "SELECT uniques(db_schema) FROM Metric WHERE metricName LIKE 'mysql.%' SINCE 1 day ago"
+      },
+      "title": "Database",
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING"
+    },
+    {
+      "name": "wait_category",
+      "items": null,
+      "defaultValues": [],
+      "nrqlQuery": {
+        "accountIds": [0],
+        "query": "SELECT uniques(wait.category) FROM Metric WHERE metricName = 'mysql.query.wait_profile' SINCE 1 day ago"
+      },
+      "title": "Wait Category",
+      "type": "NRQL",
+      "isMultiSelection": true,
+      "replacementStrategy": "STRING"
+    }
+  ]
+}
