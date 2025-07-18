@@ -1,0 +1,19 @@
+# Development environment overrides
+version: '3.8'
+
+services:
+  collector:
+    environment:
+      - LOG_LEVEL=debug
+      - GOMAXPROCS=2
+    volumes:
+      - ${CONFIG_FILE:-../../configs/profiles/minimal.yaml}:/etc/otel-collector/config.yaml:ro
+      - ../../configs/environments/development.yaml:/etc/otel-collector/overrides.yaml:ro
+    command: ["--profile=minimal", "--config=/etc/otel-collector/config.yaml", "--config=/etc/otel-collector/overrides.yaml"]
+
+  # Enable all optional services in dev
+  jaeger:
+    profiles: []  # Remove profile to always start
+
+  prometheus:
+    profiles: []  # Remove profile to always start

@@ -1,324 +1,323 @@
-# PostgreSQL Parallel Deployment Guide: Config-Only vs Custom Mode
+# Deployment Guide
 
-This guide explains how to deploy and compare both Database Intelligence modes for PostgreSQL monitoring running in parallel.
+This guide covers deploying Database Intelligence in various environments.
 
-## Overview
-
-The parallel deployment allows you to:
-- Run Config-Only mode (standard OTel components) and Custom mode (enhanced features) simultaneously for PostgreSQL
-- Compare metrics, performance, and capabilities side-by-side
-- Evaluate the value of enhanced features before full adoption
-- Maintain backward compatibility while testing new features
-
-## Architecture
-
-```
-     ┌─────────────────────┐
-     │   PostgreSQL DB     │
-     │   (Shared)          │
-     └──────────┬──────────┘
-                │
-     ┌──────────┴──────────┐
-     │                     │
-┌────▼──────────────┐     ┌──────────▼────────────┐
-│ Config-Only       │     │ Custom/Enhanced       │
-│ Collector         │     │ Collector             │
-│                   │     │                       │
-│ • PostgreSQL recv │     │ • PostgreSQL recv     │
-│ • SQL Query recv  │     │ • ASH receiver        │
-│ • Host Metrics    │     │ • Enhanced SQL recv   │
-│                   │     │ • Kernel Metrics      │
-│ Standard          │     │ • Adaptive Sampling   │
-│ Processors        │     │ • Circuit Breaker     │
-│                   │     │ • Query Plans         │
-│                   │     │ • Cost Control        │
-└────────┬──────────┘     └──────────┬────────────┘
-         │                           │
-         └────────────┬──────────────┘
-                      │
-              ┌───────▼────────┐
-              │  New Relic     │
-              │  • PostgreSQL  │
-              │    Dashboard   │
-              │  • Comparison  │
-              └────────────────┘
-```
+## Table of Contents
+- [Quick Start](#quick-start)
+- [Docker Deployment](#docker-deployment)
+- [Kubernetes Deployment](#kubernetes-deployment)
+- [Configuration Management](#configuration-management)
+- [Security Best Practices](#security-best-practices)
+- [Monitoring and Troubleshooting](#monitoring-and-troubleshooting)
 
 ## Quick Start
 
-### 1. Prerequisites
+The fastest way to get started is using Docker Compose:
 
 ```bash
-# Required environment variables
-export NEW_RELIC_LICENSE_KEY="your-license-key"
-export NEW_RELIC_ACCOUNT_ID="your-account-id"
+# 1. Clone the repository
+git clone https://github.com/newrelic/database-intelligence
+cd database-intelligence
 
-# Optional
-export NEW_RELIC_OTLP_ENDPOINT="https://otlp.nr-data.net:4317"
-export DOCKER_REGISTRY="your-registry"  # If using private registry
+# 2. Copy environment template
+cp configs/env-templates/postgresql.env .env
+
+# 3. Edit .env with your credentials
+vim .env
+
+# 4. Start services
+docker-compose -f docker-compose.databases.yml up -d
+
+# 5. Verify metrics
+./scripts/validate-metrics.sh postgresql
 ```
 
-### 2. Deploy Everything
+## Docker Deployment
+
+### Single Database Deployment
+
+For deploying a single database collector:
 
 ```bash
-# One command deployment
-./scripts/deploy-parallel-modes.sh
+# PostgreSQL
+docker run -d \
+  --name otel-postgres \
+  -v $(pwd)/configs/postgresql-maximum-extraction.yaml:/etc/otel-collector-config.yaml \
+  --env-file configs/env-templates/postgresql.env \
+  otel/opentelemetry-collector-contrib:latest
 
-# This will:
-# 1. Build custom collector image
-# 2. Start all services
-# 3. Wait for health checks
-# 4. Optionally deploy dashboards
+# MySQL
+docker run -d \
+  --name otel-mysql \
+  -v $(pwd)/configs/mysql-maximum-extraction.yaml:/etc/otel-collector-config.yaml \
+  --env-file configs/env-templates/mysql.env \
+  otel/opentelemetry-collector-contrib:latest
+
+# MongoDB
+docker run -d \
+  --name otel-mongodb \
+  -v $(pwd)/configs/mongodb-maximum-extraction.yaml:/etc/otel-collector-config.yaml \
+  --env-file configs/env-templates/mongodb.env \
+  otel/opentelemetry-collector-contrib:latest
+
+# MSSQL
+docker run -d \
+  --name otel-mssql \
+  -v $(pwd)/configs/mssql-maximum-extraction.yaml:/etc/otel-collector-config.yaml \
+  --env-file configs/env-templates/mssql.env \
+  otel/opentelemetry-collector-contrib:latest
+
+# Oracle
+docker run -d \
+  --name otel-oracle \
+  -v $(pwd)/configs/oracle-maximum-extraction.yaml:/etc/otel-collector-config.yaml \
+  --env-file configs/env-templates/oracle.env \
+  otel/opentelemetry-collector-contrib:latest
 ```
 
-### 3. Access Points
+### Multi-Database Deployment
 
-- **Config-Only Collector**: http://localhost:4318 (OTLP HTTP)
-- **Custom Mode Collector**: http://localhost:5318 (OTLP HTTP)
-- **PostgreSQL**: localhost:5432
-- **New Relic Dashboard**: PostgreSQL dashboard showing both modes (deployed automatically)
+Use the provided docker-compose file:
 
-## Mode Comparison
+```bash
+# Start all databases and collectors
+./scripts/start-all-databases.sh
 
-### Config-Only Mode
-
-**What it includes:**
-- Standard PostgreSQL receiver (35+ metrics)
-- SQL Query receiver for custom PostgreSQL queries
-- Host metrics (CPU, memory, disk, network)
-- Basic processors (batch, memory limiter, attributes)
-
-**Use cases:**
-- Basic database monitoring
-- Standard metric collection
-- Simple deployments
-- Lower resource usage
-
-**Example metrics:**
-```
-postgresql.backends
-postgresql.database.size
-postgresql.commits
-postgresql.deadlocks
-postgresql.blocks_read
-postgresql.wal.lag
-system.cpu.utilization
+# Stop all services
+./scripts/stop-all-databases.sh
 ```
 
-### Custom/Enhanced Mode
+## Kubernetes Deployment
 
-**What it includes:**
-- Everything from Config-Only mode, PLUS:
-- ASH (Active Session History) receiver
-- Enhanced SQL receiver with query stats
-- Kernel metrics receiver
-- Query plan extraction
-- Query correlation
-- Adaptive sampling
-- Circuit breaker protection
-- Cost control processor
-- OHI transformation for compatibility
+### Using Helm Charts
 
-**Use cases:**
-- Deep database performance analysis
-- Query optimization
-- Blocking and wait event analysis
-- Advanced troubleshooting
-- Intelligent metric processing
+```bash
+# Add the OpenTelemetry Helm repository
+helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+helm repo update
 
-**Exclusive metrics:**
-```
-db.ash.active_sessions
-db.ash.wait_events
-db.ash.blocked_sessions
-db.ash.long_running_queries
-postgres.slow_queries.* (with plan analysis)
-kernel.cpu.pressure
-adaptive_sampling_rate
-circuit_breaker_state
+# Install for PostgreSQL
+helm install otel-postgres open-telemetry/opentelemetry-collector \
+  --set mode=deployment \
+  --set config.file=configs/postgresql-maximum-extraction.yaml \
+  --set-file config.config=configs/postgresql-maximum-extraction.yaml
+
+# Install for other databases similarly
 ```
 
-## New Relic Dashboard
+### Using Kubernetes Manifests
 
-### PostgreSQL Parallel Monitoring Dashboard
-A comprehensive dashboard that monitors both deployment modes for PostgreSQL:
-
-**Pages**:
-1. **Executive Overview**: Deployment status, health scores, session counts
-2. **Connection & Performance**: Connections, transactions, block I/O, row operations
-3. **Wait Events & Blocking**: Wait event analysis, deadlocks, blocked sessions
-4. **Query Intelligence**: Query performance, plans, execution trends
-5. **Storage & Replication**: Database size, table stats, replication monitoring
-6. **Enhanced Features**: ASH heatmaps, intelligent processing (Custom mode only)
-7. **Mode Comparison**: Metric coverage, performance impact, intelligence value
-8. **System Resources**: CPU, memory, and network usage by mode
-9. **Alerting Recommendations**: PostgreSQL-specific alerts and conditions
-
-**Key Features**:
-- Real-time mode comparison
-- Automatic mode detection via `deployment.mode` attribute
-- Comprehensive metrics from both modes in one view
-- Built-in alert recommendations
-- Cost analysis and optimization metrics
-
-## Configuration Details
-
-### Config-Only Mode (`config-only-mode.yaml`)
+Create a ConfigMap with your configuration:
 
 ```yaml
-receivers:
-  postgresql:
-    collection_interval: 10s
-    # All standard metrics enabled
-    
-  mysql:
-    collection_interval: 10s
-    # All standard metrics enabled
-    
-  sqlquery/postgresql:
-    collection_interval: 30s
-    queries:
-      - sql: "SELECT state, COUNT(*) FROM pg_stat_activity..."
-      
-processors:
-  attributes:
-    actions:
-      - key: deployment.mode
-        value: config-only
-        
-exporters:
-  otlp:
-    endpoint: ${NEW_RELIC_OTLP_ENDPOINT}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  collector.yaml: |
+    # Paste your database-specific configuration here
 ```
 
-### Custom Mode (`custom-mode.yaml`)
+Deploy the collector:
 
 ```yaml
-receivers:
-  ash:
-    collection_interval: 1s
-    sampling:
-      base_rate: 1.0
-      adaptive: true
-      
-  enhancedsql:
-    queries:
-      - name: query_stats
-        sql: "SELECT * FROM pg_stat_statements..."
-        
-processors:
-  adaptivesampler:
-    evaluation_interval: 30s
-    
-  circuitbreaker:
-    failure_threshold: 5
-    
-  planattributeextractor:
-    extract_parameters: true
-    
-  ohitransform:
-    # For backward compatibility
-    
-exporters:
-  otlp:
-    # Metrics to New Relic
-  nri:
-    # Events for OHI compatibility
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:latest
+        args: ["--config=/etc/otel-collector-config.yaml"]
+        volumeMounts:
+        - name: config
+          mountPath: /etc
+        env:
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-license
+              key: license-key
+      volumes:
+      - name: config
+        configMap:
+          name: otel-collector-config
 ```
 
-## Monitoring & Troubleshooting
+## Configuration Management
 
-### View Logs
+### Environment Variables
+
+Use environment files for sensitive data:
 
 ```bash
-# Config-Only mode
-docker logs -f db-intel-collector-config-only
+# Create from template
+cp configs/env-templates/${DATABASE}.env .env
 
-# Custom mode
-docker logs -f db-intel-collector-custom
+# Edit with your values
+vim .env
 
-# Databases
-docker logs db-intel-postgres
-docker logs db-intel-mysql
+# Use with Docker
+docker run --env-file .env ...
+
+# Use with Kubernetes
+kubectl create secret generic db-credentials --from-env-file=.env
 ```
 
-### Check Health
+### Secret Management
 
-```bash
-# All services status
-docker compose -f deployments/docker/compose/docker-compose-parallel.yaml ps
+For production deployments:
 
-# Collector health (custom mode)
-curl http://localhost:13133/health
-```
+1. **Kubernetes Secrets**:
+   ```bash
+   kubectl create secret generic db-credentials \
+     --from-literal=POSTGRES_PASSWORD=secretpass \
+     --from-literal=NEW_RELIC_LICENSE_KEY=licensekey
+   ```
+
+2. **HashiCorp Vault**:
+   ```yaml
+   env:
+   - name: POSTGRES_PASSWORD
+     value: ${vault:secret/data/database#password}
+   ```
+
+3. **AWS Secrets Manager**:
+   ```yaml
+   env:
+   - name: POSTGRES_PASSWORD
+     valueFrom:
+       secretKeyRef:
+         name: db-password
+         key: password
+   ```
+
+## Security Best Practices
+
+### Network Security
+
+1. **Use TLS/SSL** for all database connections:
+   ```yaml
+   postgresql:
+     endpoint: ${POSTGRES_HOST}:5432
+     transport: tcp
+     tls:
+       insecure: false
+       ca_file: /etc/ssl/certs/ca.crt
+       cert_file: /etc/ssl/certs/client.crt
+       key_file: /etc/ssl/certs/client.key
+   ```
+
+2. **Network Policies** in Kubernetes:
+   ```yaml
+   apiVersion: networking.k8s.io/v1
+   kind: NetworkPolicy
+   metadata:
+     name: otel-collector-netpol
+   spec:
+     podSelector:
+       matchLabels:
+         app: otel-collector
+     policyTypes:
+     - Ingress
+     - Egress
+     egress:
+     - to:
+       - namespaceSelector:
+           matchLabels:
+             name: database
+       ports:
+       - protocol: TCP
+         port: 5432
+   ```
+
+### Authentication
+
+1. **Use least-privilege database users**
+2. **Rotate credentials regularly**
+3. **Never commit credentials to version control**
+
+## Monitoring and Troubleshooting
+
+### Health Checks
+
+All collectors expose health endpoints:
+- Health: `http://localhost:13133/health`
+- Metrics: `http://localhost:8888/metrics`
+- pprof: `http://localhost:1777/debug/pprof/`
 
 ### Common Issues
 
-1. **High Memory Usage (Custom Mode)**
-   - Adjust `memory_limiter` processor settings
-   - Reduce ASH sampling rate
-   - Increase `cost_control` limits
+1. **No metrics appearing**:
+   ```bash
+   # Check collector logs
+   docker logs otel-collector
+   
+   # Validate configuration
+   ./scripts/validate-config.sh configs/postgresql-maximum-extraction.yaml
+   
+   # Test database connectivity
+   ./scripts/test-database-config.sh postgresql
+   ```
 
-2. **Missing Metrics**
-   - Check collector logs for errors
-   - Verify database permissions
-   - Ensure receivers are properly configured
+2. **High memory usage**:
+   - Adjust memory_limiter settings
+   - Increase batch timeout
+   - Enable sampling
 
-3. **Dashboard No Data**
-   - Verify `deployment.mode` attribute is set
-   - Check New Relic license key
-   - Confirm OTLP endpoint connectivity
+3. **Connection errors**:
+   - Verify credentials
+   - Check network connectivity
+   - Ensure database user has required permissions
 
-## Performance Comparison
+### Performance Tuning
 
-| Metric | Config-Only | Custom Mode |
-|--------|-------------|-------------|
-| CPU Usage | ~5-10% | ~15-25% |
-| Memory Usage | ~200MB | ~500MB-1GB |
-| Metrics/sec | ~100-200 | ~500-1000 |
-| Unique Metrics | ~150 | ~300+ |
-| Query Analysis | Basic | Advanced |
-| Session Monitoring | Connection count | Full ASH |
-| Cost (DPM) | ~6,000 | ~30,000 |
+1. **Batch Processing**:
+   ```yaml
+   processors:
+     batch:
+       timeout: 30s  # Increase for better compression
+       send_batch_size: 5000  # Larger batches
+   ```
 
-## Migration Path
+2. **Memory Limits**:
+   ```yaml
+   processors:
+     memory_limiter:
+       limit_mib: 2048  # Increase for high-volume
+       spike_limit_mib: 512
+   ```
 
-1. **Phase 1**: Run both modes in parallel
-2. **Phase 2**: Compare dashboards and validate data
-3. **Phase 3**: Gradually shift traffic to custom mode
-4. **Phase 4**: Deprecate config-only mode
+3. **Collection Intervals**:
+   - Adjust based on metric importance
+   - Use different pipelines for different frequencies
 
-## Best Practices
+## Production Checklist
 
-1. **Start with Config-Only** for simple monitoring needs
-2. **Enable Custom Mode** for:
-   - Performance investigations
-   - Query optimization projects
-   - Blocking/deadlock issues
-   - Capacity planning
-
-3. **Resource Planning**:
-   - Custom mode requires 2-3x more resources
-   - Consider dedicated hosts for production
-   - Monitor collector metrics closely
-
-4. **Cost Optimization**:
-   - Use adaptive sampling in custom mode
-   - Enable cost control processor
-   - Set appropriate retention policies
+- [ ] Credentials stored securely
+- [ ] TLS/SSL enabled for database connections
+- [ ] Resource limits configured
+- [ ] Health checks enabled
+- [ ] Monitoring alerts configured
+- [ ] Backup configuration in place
+- [ ] Log rotation configured
+- [ ] Network policies applied
+- [ ] Regular credential rotation scheduled
+- [ ] Documentation updated
 
 ## Next Steps
 
-1. Deploy the parallel setup
-2. Review all three dashboards
-3. Run load tests to see differences
-4. Evaluate which mode fits your needs
-5. Plan migration strategy if choosing custom mode
-
-## Support
-
-For issues or questions:
-1. Check collector logs first
-2. Review dashboard queries
-3. Validate configuration syntax
-4. Contact Database Intelligence team
+- Review [Troubleshooting Guide](TROUBLESHOOTING.md) for common issues
+- Configure [New Relic Dashboards](https://docs.newrelic.com/docs/query-your-data/explore-query-data/dashboards/introduction-dashboards/)
+- Set up [Alerting](https://docs.newrelic.com/docs/alerts-applied-intelligence/new-relic-alerts/get-started/introduction-applied-intelligence/)

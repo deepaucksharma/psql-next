@@ -1,0 +1,252 @@
+# Docker Compose for Testing All Supported Databases
+# This file sets up PostgreSQL, MySQL, MongoDB, MSSQL, and Oracle for testing
+
+version: '3.8'
+
+services:
+  # ============================================
+  # PostgreSQL
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: test-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - db-network
+
+  # ============================================
+  # MySQL
+  # ============================================
+  mysql:
+    image: mysql:8.0
+    container_name: test-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql123
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: otel
+      MYSQL_PASSWORD: otel123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - db-network
+
+  # ============================================
+  # MongoDB
+  # ============================================
+  mongodb:
+    image: mongo:6.0
+    container_name: test-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: mongo123
+      MONGO_INITDB_DATABASE: testdb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - db-network
+
+  # ============================================
+  # Microsoft SQL Server
+  # ============================================
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: test-mssql
+    environment:
+      SA_PASSWORD: "MsSql!123"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "MsSql!123" -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - db-network
+
+  # ============================================
+  # Oracle Database (Express Edition)
+  # ============================================
+  oracle:
+    image: gvenzl/oracle-xe:21-slim
+    container_name: test-oracle
+    environment:
+      ORACLE_PASSWORD: oracle123
+      ORACLE_DATABASE: TESTDB
+      APP_USER: otel
+      APP_USER_PASSWORD: otel123
+    ports:
+      - "1521:1521"
+      - "5500:5500"  # Oracle Enterprise Manager
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo 'SELECT 1 FROM DUAL;' | sqlplus -s system/oracle123@//localhost:1521/XE"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - db-network
+
+  # ============================================
+  # OpenTelemetry Collector for PostgreSQL
+  # ============================================
+  otel-collector-postgres:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-postgres
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./configs/postgresql-maximum-extraction.yaml:/etc/otel-collector-config.yaml
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: testdb
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+    ports:
+      - "8888:8888"   # Prometheus metrics
+      - "13133:13133" # Health check
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - db-network
+
+  # ============================================
+  # OpenTelemetry Collector for MySQL
+  # ============================================
+  otel-collector-mysql:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-mysql
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./configs/mysql-maximum-extraction.yaml:/etc/otel-collector-config.yaml
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: mysql123
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+    ports:
+      - "8889:8889"   # Prometheus metrics
+      - "13134:13133" # Health check
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - db-network
+
+  # ============================================
+  # OpenTelemetry Collector for MongoDB
+  # ============================================
+  otel-collector-mongodb:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-mongodb
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./configs/mongodb-maximum-extraction.yaml:/etc/otel-collector-config.yaml
+    environment:
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_USER: admin
+      MONGODB_PASSWORD: mongo123
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+    ports:
+      - "8890:8890"   # Prometheus metrics
+      - "13135:13133" # Health check
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - db-network
+
+  # ============================================
+  # OpenTelemetry Collector for MSSQL
+  # ============================================
+  otel-collector-mssql:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-mssql
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./configs/mssql-maximum-extraction.yaml:/etc/otel-collector-config.yaml
+    environment:
+      MSSQL_HOST: mssql
+      MSSQL_PORT: 1433
+      MSSQL_USER: sa
+      MSSQL_PASSWORD: "MsSql!123"
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+    ports:
+      - "8893:8893"   # Prometheus metrics
+      - "13136:13133" # Health check
+    depends_on:
+      mssql:
+        condition: service_healthy
+    networks:
+      - db-network
+
+  # ============================================
+  # OpenTelemetry Collector for Oracle
+  # ============================================
+  otel-collector-oracle:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-oracle
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./configs/oracle-maximum-extraction.yaml:/etc/otel-collector-config.yaml
+    environment:
+      ORACLE_HOST: oracle
+      ORACLE_PORT: 1521
+      ORACLE_SERVICE: XE
+      ORACLE_USER: system
+      ORACLE_PASSWORD: oracle123
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+    ports:
+      - "8894:8894"   # Prometheus metrics
+      - "13137:13133" # Health check
+    depends_on:
+      oracle:
+        condition: service_healthy
+    networks:
+      - db-network
+
+networks:
+  db-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mysql_data:
+  mongo_data:
+  mssql_data:
+  oracle_data:

@@ -4,7 +4,7 @@ import (
     "go.opentelemetry.io/collector/component"
     "go.opentelemetry.io/collector/extension"
     
-    "github.com/deepaksharma/db-otel/components/extensions/postgresqlquery"
+    "github.com/database-intelligence/db-intel/components/extensions/postgresqlquery"
 )
 
 // All returns all extension factories

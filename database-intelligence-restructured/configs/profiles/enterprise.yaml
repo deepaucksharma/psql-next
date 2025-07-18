@@ -1,0 +1,120 @@
+# Enterprise Profile Configuration
+# All features plus enterprise capabilities
+
+# Inherits everything from standard profile plus additional enterprise features
+# This configuration extends standard.yaml with enterprise-specific settings
+
+receivers:
+  # All standard receivers plus:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'db-intel-self'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['localhost:8888']
+            
+        - job_name: 'database-exporters'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ${env:PROMETHEUS_TARGETS}
+
+processors:
+  # All standard processors plus:
+  transform:
+    metric_statements:
+      - context: metric
+        statements:
+          - set(attributes["enterprise.tenant"], "${env:TENANT_ID}")
+          - set(attributes["enterprise.region"], "${env:REGION}")
+          
+  filter:
+    metrics:
+      include:
+        match_type: strict
+        metric_names:
+          - db.connections.active
+          - db.queries.slow
+          - db.transactions.rate
+      exclude:
+        match_type: regexp
+        metric_names:
+          - .*\.internal\.*
+
+exporters:
+  # All standard exporters plus:
+  fileexporter:
+    path: /var/log/db-intel/metrics.json
+    rotation:
+      max_megabytes: 100
+      max_days: 7
+      max_backups: 3
+      
+  # Multiple OTLP endpoints for high availability
+  otlphttp/primary:
+    endpoint: ${env:OTLP_PRIMARY_ENDPOINT}
+    headers:
+      api-key: ${env:OTLP_API_KEY}
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 5m
+      
+  otlphttp/secondary:
+    endpoint: ${env:OTLP_SECONDARY_ENDPOINT}
+    headers:
+      api-key: ${env:OTLP_API_KEY}
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 5m
+
+extensions:
+  # All standard extensions plus:
+  file_storage:
+    directory: /var/lib/db-intel/storage
+    timeout: 10s
+    compaction:
+      on_start: true
+      directory: /var/lib/db-intel/storage/compacted
+      
+  oauth2client:
+    client_id: ${env:OAUTH_CLIENT_ID}
+    client_secret: ${env:OAUTH_CLIENT_SECRET}
+    token_url: ${env:OAUTH_TOKEN_URL}
+    scopes: ["metrics.write", "traces.write", "logs.write"]
+
+service:
+  extensions: [health_check, zpages, pprof, file_storage, oauth2client]
+  
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql, sqlquery, ash, enhancedsql, kernelmetrics, prometheus, otlp]
+      processors: [memory_limiter, adaptivesampler, transform, filter, batch, resource, attributes]
+      exporters: [otlphttp/primary, otlphttp/secondary, prometheusexporter, fileexporter, debug]
+      
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, planextractor, querycorrelator, transform, batch, resource]
+      exporters: [otlphttp/primary, otlphttp/secondary]
+      
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, circuitbreaker, costcontrol, transform, batch, resource]
+      exporters: [otlphttp/primary, otlphttp/secondary, fileexporter, nrerror]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}
+      encoding: json
+      output_paths:
+        - stdout
+        - /var/log/db-intel/collector.log
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      
+  # Enterprise features
+  resource:
+    limits:
+      memory_limit_mib: 4096
+      cpu_limit: 4.0
+    check_interval: 5s

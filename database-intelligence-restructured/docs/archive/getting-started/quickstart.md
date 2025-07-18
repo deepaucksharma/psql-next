@@ -51,7 +51,7 @@ wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases
 tar -xzf otelcol-contrib_0.96.0_linux_amd64.tar.gz
 
 # Run with minimal config
-./otelcol-contrib --config=config/collector-minimal.yaml
+./otelcol-contrib --config=configs/postgresql-maximum-extraction.yaml
 ```
 
 ### Option 2: Build Minimal Collector
@@ -134,7 +134,7 @@ curl -s http://localhost:8888/metrics | grep -E "postgresql_backends|mysql_threa
 
 ### Add New Relic Export
 ```yaml
-# Add to config/collector-minimal.yaml
+# Add to configs/postgresql-maximum-extraction.yaml
 exporters:
   otlp/newrelic:
     endpoint: otlp.nr-data.net:4317
@@ -204,7 +204,7 @@ docker logs db-intelligence-postgres
 docker logs db-intelligence-mysql
 
 # Collector not starting?
-./dist/db-intelligence-minimal --config=config/collector-minimal.yaml --log-level=debug
+./dist/db-intelligence-minimal --config=configs/postgresql-maximum-extraction.yaml --log-level=debug
 ```
 
 ## Common Issues

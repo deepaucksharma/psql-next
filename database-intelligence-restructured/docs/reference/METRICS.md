@@ -1,14 +1,17 @@
-# PostgreSQL Metrics Reference
+# Database Metrics Reference
 
-Complete reference for all metrics collected by Database Intelligence.
+Complete reference for all metrics collected by Database Intelligence across PostgreSQL, MySQL, MongoDB, and Redis.
 
 ## Table of Contents
-- [Config-Only Mode Metrics](#config-only-mode-metrics)
-- [Custom Mode Metrics](#custom-mode-metrics)
-- [Metric Details](#metric-details)
+- [PostgreSQL Metrics](#postgresql-metrics)
+- [MySQL Metrics](#mysql-metrics)
+- [MongoDB Metrics](#mongodb-metrics)
+- [Redis Metrics](#redis-metrics)
 - [NRQL Query Examples](#nrql-query-examples)
 
-## Config-Only Mode Metrics
+## PostgreSQL Metrics
+
+### Config-Only Mode Metrics
 
 ### Connection Metrics
 | Metric Name | Description | Type | Unit |
@@ -98,6 +101,256 @@ Complete reference for all metrics collected by Database Intelligence.
 | `system.cpu.utilization` | CPU utilization | Gauge | ratio |
 | `system.memory.utilization` | Memory utilization | Gauge | ratio |
 | `system.disk.io` | Disk I/O | Counter | bytes |
+
+## MySQL Metrics
+
+### Core MySQL Receiver Metrics (40+)
+
+#### Buffer Pool Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mysql.buffer_pool.data_pages` | Number of data pages in buffer pool | Gauge | pages |
+| `mysql.buffer_pool.limit` | Buffer pool size limit | Gauge | bytes |
+| `mysql.buffer_pool.operations` | Buffer pool operations | Counter | operations |
+| `mysql.buffer_pool.page_flushes` | Page flush operations | Counter | flushes |
+| `mysql.buffer_pool.pages` | Buffer pool page statistics | Gauge | pages |
+| `mysql.buffer_pool.usage` | Buffer pool usage | Gauge | bytes |
+
+#### Connection Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mysql.connection.count` | Current connections | Gauge | connections |
+| `mysql.connection.errors` | Connection errors | Counter | errors |
+| `mysql.threads` | Thread statistics | Gauge | threads |
+| `mysql.connection_pool.active_percentage` | Active connection percentage | Gauge | % |
+
+#### Command Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mysql.commands` | Command execution counts | Counter | commands |
+| `mysql.prepared_stmt_count` | Prepared statements | Gauge | statements |
+| `mysql.queries` | Query rate | Counter | queries |
+| `mysql.slow_queries` | Slow query count | Counter | queries |
+
+#### InnoDB Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mysql.innodb_row_lock_time` | Row lock wait time | Counter | milliseconds |
+| `mysql.innodb_row_lock_waits` | Row lock waits | Counter | waits |
+| `mysql.innodb_data_reads` | Data reads | Counter | reads |
+| `mysql.innodb_data_writes` | Data writes | Counter | writes |
+
+#### Table I/O Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mysql.table.io.wait.count` | Table I/O wait events | Counter | waits |
+| `mysql.table.io.wait.time` | Table I/O wait time | Counter | picoseconds |
+| `mysql.index.io.wait.count` | Index I/O wait events | Counter | waits |
+| `mysql.index.io.wait.time` | Index I/O wait time | Counter | picoseconds |
+
+#### Replication Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mysql.replica.lag` | Replication lag | Gauge | seconds |
+| `mysql.replica.sql_delay` | SQL thread delay | Gauge | seconds |
+| `mysql.replication.io_running` | IO thread status | Gauge | status |
+| `mysql.replication.sql_running` | SQL thread status | Gauge | status |
+
+### Performance Schema Metrics
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mysql.query.executions` | Query execution count | Gauge | executions |
+| `mysql.query.avg_latency` | Average query latency | Gauge | ms |
+| `mysql.query.max_latency` | Maximum query latency | Gauge | ms |
+| `mysql.query.rows_examined_avg` | Average rows examined | Gauge | rows |
+
+## MongoDB Metrics
+
+### Core MongoDB Receiver Metrics (50+)
+
+#### Cache Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mongodb.cache.operations` | Cache operations | Counter | operations |
+| `mongodb.cache.hit_ratio` | Cache hit ratio | Gauge | ratio |
+
+#### Collection & Database Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mongodb.collection.count` | Number of collections | Gauge | collections |
+| `mongodb.database.count` | Number of databases | Gauge | databases |
+| `mongodb.data.size` | Data size | Gauge | bytes |
+| `mongodb.storage.size` | Storage size | Gauge | bytes |
+
+#### Connection Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mongodb.connection.count` | Current connections | Gauge | connections |
+| `mongodb.network.bytes_in` | Network bytes received | Counter | bytes |
+| `mongodb.network.bytes_out` | Network bytes sent | Counter | bytes |
+| `mongodb.network.request.count` | Network requests | Counter | requests |
+
+#### Operation Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mongodb.operation.count` | Operation counts | Counter | operations |
+| `mongodb.operation.latency.time` | Operation latency | Gauge | microseconds |
+| `mongodb.document.operation.count` | Document operations | Counter | operations |
+| `mongodb.ash.sessions` | Active sessions (ASH-like) | Gauge | sessions |
+
+#### Lock Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mongodb.global_lock.time` | Global lock time | Counter | microseconds |
+| `mongodb.lock.acquire.count` | Lock acquisitions | Counter | acquisitions |
+| `mongodb.lock.acquire.wait_count` | Lock wait count | Counter | waits |
+| `mongodb.lock.acquire.wait_time` | Lock wait time | Counter | microseconds |
+
+#### Memory Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mongodb.memory.usage` | Memory usage | Gauge | bytes |
+| `mongodb.memory.resident` | Resident memory | Gauge | bytes |
+| `mongodb.memory.virtual` | Virtual memory | Gauge | bytes |
+
+### MongoDB Atlas Metrics (40+)
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mongodbatlas.process.cpu.usage` | CPU usage | Gauge | percent |
+| `mongodbatlas.disk.partition.iops.average` | Disk IOPS | Gauge | operations/s |
+| `mongodbatlas.disk.partition.latency.average` | Disk latency | Gauge | milliseconds |
+| `mongodbatlas.process.cache.io` | Cache I/O | Counter | bytes |
+| `mongodbatlas.process.db.query_executor.scanned` | Documents scanned | Counter | documents |
+
+## MSSQL/SQL Server Metrics
+
+### Core SQL Server Receiver Metrics (40+)
+
+#### Database I/O Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `sqlserver.database.io.read_latency` | Read latency | Gauge | ms |
+| `sqlserver.database.io.write_latency` | Write latency | Gauge | ms |
+| `sqlserver.database.operations` | Database operations | Counter | operations |
+| `sqlserver.database.size` | Database size | Gauge | bytes |
+| `sqlserver.database.transactions` | Transaction count | Counter | transactions |
+
+#### Buffer Manager Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `sqlserver.buffer.cache_hit_ratio` | Buffer cache hit ratio | Gauge | ratio |
+| `sqlserver.buffer.checkpoint_pages` | Checkpoint pages/sec | Counter | pages/s |
+| `sqlserver.buffer.page_life_expectancy` | Page life expectancy | Gauge | seconds |
+| `sqlserver.buffer.page_operations` | Page operations | Counter | operations |
+
+#### Batch and Compilation Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `sqlserver.batch.requests` | Batch requests/sec | Counter | batches/s |
+| `sqlserver.batch.sql_compilations` | SQL compilations/sec | Counter | compilations/s |
+| `sqlserver.batch.sql_recompilations` | SQL recompilations/sec | Counter | recompilations/s |
+
+#### Connection and Lock Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `sqlserver.connection.count` | Connection count | Gauge | connections |
+| `sqlserver.user.connection.count` | User connections | Gauge | connections |
+| `sqlserver.process.blocked` | Blocked processes | Gauge | processes |
+| `sqlserver.lock.wait_time` | Lock wait time | Counter | ms |
+| `sqlserver.lock.waits` | Lock waits/sec | Counter | waits/s |
+
+### Custom SQL Query Metrics
+
+#### Query Performance Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mssql.query.execution_count` | Query execution count | Gauge | executions |
+| `mssql.query.avg_logical_reads` | Average logical reads | Gauge | pages |
+| `mssql.query.avg_worker_time` | Average CPU time | Gauge | μs |
+| `mssql.query.avg_elapsed_time` | Average elapsed time | Gauge | μs |
+
+#### Wait Statistics Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mssql.wait.time_ms` | Wait time by type | Gauge | ms |
+| `mssql.wait.tasks_count` | Waiting tasks count | Gauge | tasks |
+| `mssql.wait.percentage` | Wait time percentage | Gauge | % |
+
+#### Session Metrics
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `mssql.session.active_count` | Active sessions | Gauge | sessions |
+| `mssql.session.wait_time` | Session wait time | Gauge | ms |
+| `mssql.session.cpu_time` | Session CPU time | Gauge | ms |
+| `mssql.session.blocked_count` | Blocked sessions | Gauge | sessions |
+
+## Oracle Database Metrics
+
+### Core Database Metrics
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `oracle.database.uptime` | Database uptime | Gauge | seconds |
+| `oracle.sga.size` | SGA component sizes | Gauge | MB |
+| `oracle.buffer_cache.hit_ratio` | Buffer cache hit ratio | Gauge | % |
+
+### Session and Connection Metrics
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `oracle.sessions.count` | Session count by state | Gauge | sessions |
+| `oracle.sessions.blocked` | Blocked sessions | Gauge | sessions |
+| `oracle.sessions.max_wait_time` | Maximum wait time | Gauge | seconds |
+
+### SQL Performance Metrics
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `oracle.sql.executions` | SQL execution count | Gauge | executions |
+| `oracle.sql.avg_elapsed_time` | Average elapsed time | Gauge | ms |
+| `oracle.sql.avg_cpu_time` | Average CPU time | Gauge | ms |
+| `oracle.sql.avg_buffer_gets` | Average buffer gets | Gauge | blocks |
+
+### Wait Event Metrics
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `oracle.wait.total_waits` | Total wait count | Gauge | waits |
+| `oracle.wait.time_waited` | Time waited | Gauge | seconds |
+| `oracle.wait.avg_wait_time` | Average wait time | Gauge | seconds |
+| `oracle.wait.time_percent` | Wait time percentage | Gauge | % |
+
+### Tablespace Metrics
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `oracle.tablespace.size` | Tablespace total size | Gauge | MB |
+| `oracle.tablespace.used` | Tablespace used space | Gauge | MB |
+| `oracle.tablespace.free` | Tablespace free space | Gauge | MB |
+| `oracle.tablespace.used_percent` | Used percentage | Gauge | % |
+
+### ASM Metrics
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `oracle.asm.diskgroup.total` | Diskgroup total size | Gauge | MB |
+| `oracle.asm.diskgroup.free` | Diskgroup free space | Gauge | MB |
+| `oracle.asm.diskgroup.used_percent` | Used percentage | Gauge | % |
+
+### RAC Metrics
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `oracle.rac.instance.status` | Instance status | Gauge | status |
+
+### Redo Log Metrics
+
+| Metric Name | Description | Type | Unit |
+|-------------|-------------|------|------|
+| `oracle.redo.switches_per_hour` | Log switches per hour | Gauge | switches |
+| `oracle.redo.size_per_hour` | Redo size per hour | Gauge | MB |
 | `system.disk.operations` | Disk operations | Counter | operations |
 | `system.network.io` | Network I/O | Counter | bytes |
 | `system.network.errors` | Network errors | Counter | errors |

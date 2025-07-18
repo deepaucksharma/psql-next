@@ -1,0 +1,212 @@
+# Redis Enhanced Receiver Example Configuration
+
+receivers:
+  # Basic Redis monitoring
+  redis/basic:
+    endpoint: ${env:REDIS_ENDPOINT}
+    password: ${env:REDIS_PASSWORD}
+    collection_interval: 60s
+    max_conns: 10
+    metrics:
+      server_info:
+        server: true
+        clients: true
+        memory: true
+        persistence: true
+        stats: true
+        replication: true
+        cpu: true
+        keyspace: true
+      command_stats: true
+      keyspace_stats: true
+      latency_stats: true
+      memory_stats: true
+    resource_attributes:
+      environment: production
+      service: cache-service
+
+  # Redis Cluster monitoring
+  redis/cluster:
+    collection_interval: 60s
+    password: ${env:REDIS_PASSWORD}
+    cluster:
+      enabled: true
+      nodes:
+        - redis-cluster-node1:6379
+        - redis-cluster-node2:6379
+        - redis-cluster-node3:6379
+        - redis-cluster-node4:6379
+        - redis-cluster-node5:6379
+        - redis-cluster-node6:6379
+      collect_per_node_metrics: true
+      collect_cluster_info: true
+      collect_slot_metrics: true
+      max_redirects: 3
+      route_by_latency: true
+      route_randomly: false
+    metrics:
+      server_info:
+        server: true
+        clients: true
+        memory: true
+        stats: true
+        cluster: true
+      command_stats: true
+      memory_stats: false  # Can be expensive on large clusters
+
+  # Redis Sentinel monitoring
+  redis/sentinel:
+    collection_interval: 30s
+    password: ${env:REDIS_PASSWORD}
+    sentinel:
+      enabled: true
+      master_name: mymaster
+      sentinel_addrs:
+        - sentinel1:26379
+        - sentinel2:26379
+        - sentinel3:26379
+      sentinel_password: ${env:SENTINEL_PASSWORD}
+      collect_sentinel_metrics: true
+    metrics:
+      server_info:
+        server: true
+        clients: true
+        memory: true
+        persistence: true
+        stats: true
+        replication: true
+      command_stats: true
+
+  # Redis with TLS
+  redis/secure:
+    endpoint: secure-redis.example.com:6380
+    username: ${env:REDIS_USERNAME}
+    password: ${env:REDIS_PASSWORD}
+    collection_interval: 60s
+    tls:
+      enabled: true
+      ca_file: /etc/ssl/redis-ca.pem
+      cert_file: /etc/ssl/redis-cert.pem
+      key_file: /etc/ssl/redis-key.pem
+      server_name: redis.example.com
+    metrics:
+      server_info:
+        server: true
+        clients: true
+        memory: true
+        stats: true
+
+  # Redis with Slow Log monitoring
+  redis/slowlog:
+    endpoint: localhost:6379
+    collection_interval: 30s
+    slow_log:
+      enabled: true
+      max_entries: 256
+      include_commands: true
+      track_position: true
+    metrics:
+      server_info:
+        server: true
+        stats: true
+      command_stats: true
+      latency_stats: true
+
+  # Redis with custom metrics
+  redis/custom:
+    endpoint: localhost:6379
+    collection_interval: 60s
+    metrics:
+      server_info:
+        server: true
+        memory: true
+        stats: true
+      custom_commands:
+        # Monitor specific Redis Streams
+        - name: redis.stream.length
+          command: XLEN
+          args: ["events:stream"]
+          type: gauge
+          description: Length of events stream
+          
+        - name: redis.stream.consumer_lag
+          command: XPENDING
+          args: ["events:stream", "consumer-group"]
+          type: gauge
+          description: Pending messages in consumer group
+          value_extractor: "0"  # Extract count from array response
+          
+        # Monitor specific lists
+        - name: redis.queue.length
+          command: LLEN
+          args: ["task:queue"]
+          type: gauge
+          description: Length of task queue
+          
+        # Monitor sorted sets
+        - name: redis.leaderboard.size
+          command: ZCARD
+          args: ["game:leaderboard"]
+          type: gauge
+          description: Number of players in leaderboard
+          
+        # Monitor HyperLogLog
+        - name: redis.unique_users
+          command: PFCOUNT
+          args: ["unique:users:today"]
+          type: gauge
+          description: Unique users today (HLL estimate)
+
+processors:
+  # Add database intelligence processors
+  adaptivesampler:
+    mode: adaptive
+    initial_sampling_rate: 1.0
+    target_records_per_second: 1000
+    
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+exporters:
+  # New Relic
+  otlp/newrelic:
+    endpoint: otlp.nr-data.net:4317
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+service:
+  telemetry:
+    logs:
+      level: info
+      
+  pipelines:
+    # Basic Redis metrics
+    metrics/redis_basic:
+      receivers: [redis/basic]
+      processors: [batch]
+      exporters: [otlp/newrelic]
+      
+    # Redis cluster metrics with sampling
+    metrics/redis_cluster:
+      receivers: [redis/cluster]
+      processors: [adaptivesampler, batch]
+      exporters: [otlp/newrelic]
+      
+    # Redis sentinel metrics
+    metrics/redis_sentinel:
+      receivers: [redis/sentinel]
+      processors: [batch]
+      exporters: [otlp/newrelic]
+      
+    # Debug pipeline
+    metrics/debug:
+      receivers: [redis/basic]
+      processors: [batch]
+      exporters: [debug]

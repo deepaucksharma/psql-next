@@ -40,6 +40,10 @@ func CreateDefaultConfig() component.Config {
 		ReportingInterval:     60 * time.Second,
 		AggressiveMode:        false,
 		DataPlusEnabled:       false,
+		CardinalityLimit:      50000,
+		CardinalityCleanupInterval: 1 * time.Hour,
+		EnableIntelligentAggregation: true,
+		EnableLogReduction:    true,
 		HighCardinalityDimensions: []string{
 			"user.id", "session.id", "request.id", "trace.id", "span.id",
 			"http.request.id", "transaction.id", "correlation.id",
@@ -65,8 +69,8 @@ func createTracesProcessor(
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	processor := newCostControlProcessor(processorConfig, set.Logger)
-	processor.nextTraces = nextConsumer
+	// Create concurrent version for better performance
+	processor := NewConcurrentCostControlProcessor(set.Logger, processorConfig, nextConsumer, nil, nil)
 
 	return processor, nil
 }
@@ -87,8 +91,8 @@ func createMetricsProcessor(
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	processor := newCostControlProcessor(processorConfig, set.Logger)
-	processor.nextMetrics = nextConsumer
+	// Create concurrent version for better performance
+	processor := NewConcurrentCostControlProcessor(set.Logger, processorConfig, nil, nextConsumer, nil)
 
 	return processor, nil
 }
@@ -109,8 +113,8 @@ func createLogsProcessor(
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	processor := newCostControlProcessor(processorConfig, set.Logger)
-	processor.nextLogs = nextConsumer
+	// Create concurrent version for better performance
+	processor := NewConcurrentCostControlProcessor(set.Logger, processorConfig, nil, nil, nextConsumer)
 
 	return processor, nil
 }

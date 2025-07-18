@@ -1,0 +1,1474 @@
+# Database Intelligence Configuration Examples
+# This file contains various configuration examples for the Database Intelligence collector
+# Each example is separated by --- and includes a descriptive header
+
+# ==============================================================================
+# Example 1: PostgreSQL Base Configuration (Config-Only Mode)
+# ==============================================================================
+# This configuration uses only standard OpenTelemetry components for PostgreSQL monitoring
+# No custom code or receivers required - works with standard otel collector contrib image
+---
+# Base Configuration for Config-Only Mode
+# This configuration uses only standard OpenTelemetry components
+# No custom code or receivers required
+
+# Environment variables required:
+# - DB_ENDPOINT: Database connection string
+# - DB_USERNAME: Database read-only username  
+# - DB_PASSWORD: Database password
+# - NEW_RELIC_OTLP_ENDPOINT: New Relic OTLP endpoint
+# - NEW_RELIC_LICENSE_KEY: New Relic license key
+# - SERVICE_NAME: Service identifier
+# - ENVIRONMENT: Deployment environment (dev/staging/prod)
+
+receivers:
+  # PostgreSQL metrics receiver
+  postgresql:
+    endpoint: "${DB_ENDPOINT}"
+    username: "${DB_USERNAME}"
+    password: "${DB_PASSWORD}"
+    databases:
+      - "*"  # Monitor all databases
+    collection_interval: 30s
+    transport: tcp
+    tls:
+      insecure_skip_verify: false
+    # Enable all available metrics
+    metrics:
+      postgresql.bgwriter.buffers.allocated:
+        enabled: true
+      postgresql.bgwriter.buffers.writes:
+        enabled: true
+      postgresql.bgwriter.checkpoint.count:
+        enabled: true
+      postgresql.bgwriter.duration:
+        enabled: true
+      postgresql.bgwriter.maxwritten:
+        enabled: true
+      postgresql.blocks:
+        enabled: true
+      postgresql.commits:
+        enabled: true
+      postgresql.connection.max:
+        enabled: true
+      postgresql.connection.count:
+        enabled: true
+      postgresql.database.count:
+        enabled: true
+      postgresql.database.size:
+        enabled: true
+      postgresql.db_size:
+        enabled: true
+      postgresql.deadlocks:
+        enabled: true
+      postgresql.index.scans:
+        enabled: true
+      postgresql.index.size:
+        enabled: true
+      postgresql.operations:
+        enabled: true
+      postgresql.replication.data_delay:
+        enabled: true
+      postgresql.rollbacks:
+        enabled: true
+      postgresql.rows:
+        enabled: true
+      postgresql.sequential_scans:
+        enabled: true
+      postgresql.table.count:
+        enabled: true
+      postgresql.table.size:
+        enabled: true
+      postgresql.table.vacuum.count:
+        enabled: true
+      postgresql.temp_files:
+        enabled: true
+      postgresql.wal.age:
+        enabled: true
+      postgresql.wal.lag:
+        enabled: true
+
+  # Host metrics receiver
+  hostmetrics:
+    root_path: /
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+          system.memory.usage:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.io_time:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.errors:
+            enabled: true
+          system.network.dropped:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+          system.cpu.load_average.15m:
+            enabled: true
+
+  # SQL query receiver for custom metrics
+  sqlquery:
+    driver: postgres
+    datasource: "host=${DB_HOST} port=${DB_PORT} user=${DB_USERNAME} password=${DB_PASSWORD} sslmode=require"
+    collection_interval: 60s
+    queries:
+      # Active connections by state
+      - sql: |
+          SELECT 
+            state,
+            COUNT(*) as connection_count
+          FROM pg_stat_activity
+          GROUP BY state
+        metrics:
+          - metric_name: postgresql.connections.by_state
+            value_column: connection_count
+            value_type: gauge
+            attribute_columns:
+              - state
+
+      # Long running queries
+      - sql: |
+          SELECT 
+            COUNT(*) FILTER (WHERE extract(epoch from (now() - query_start)) > 60) as long_queries,
+            MAX(extract(epoch from (now() - query_start))) as max_duration
+          FROM pg_stat_activity 
+          WHERE state = 'active' AND query NOT LIKE '%pg_stat_activity%'
+        metrics:
+          - metric_name: postgresql.queries.long_running.count
+            value_column: long_queries
+            value_type: gauge
+          - metric_name: postgresql.queries.duration.max
+            value_column: max_duration
+            value_type: gauge
+            unit: s
+
+      # Table bloat estimation
+      - sql: |
+          SELECT 
+            schemaname,
+            tablename,
+            pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as total_size,
+            pg_total_relation_size(schemaname||'.'||tablename) as size_bytes
+          FROM pg_tables 
+          WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+          ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+          LIMIT 10
+        metrics:
+          - metric_name: postgresql.table.size.top10
+            value_column: size_bytes
+            value_type: gauge
+            unit: By
+            attribute_columns:
+              - schemaname
+              - tablename
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Resource processor to add metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: "${SERVICE_NAME}"
+        action: upsert
+      - key: deployment.environment
+        value: "${ENVIRONMENT}"
+        action: upsert
+      - key: db.system
+        value: "postgresql"
+        action: insert
+      - key: instrumentation.provider
+        value: "opentelemetry"
+        action: insert
+      - key: telemetry.sdk.name
+        value: "opentelemetry"
+        action: insert
+      - key: telemetry.sdk.language
+        value: "go"
+        action: insert
+
+  # Transform processor for metric adjustments
+  transform:
+    error_mode: ignore
+    metric_statements:
+      # Ensure correct units
+      - context: metric
+        statements:
+          - set(unit, "By") where name == "postgresql.database.size"
+          - set(unit, "By") where name == "postgresql.table.size"
+          - set(unit, "1") where name == "postgresql.connections.active"
+
+  # Attributes processor to manage cardinality
+  attributes:
+    actions:
+      # Remove high-cardinality query text
+      - key: query.text
+        action: delete
+      # Remove internal usernames
+      - key: user.name
+        pattern: ^(postgres|pg_|repl).*
+        action: delete
+      # Normalize database names
+      - key: db.name
+        action: hash
+
+  # Filter processor to drop unwanted metrics
+  filter:
+    error_mode: ignore
+    metrics:
+      # Drop metrics from system databases
+      datapoint:
+        - 'attributes["db.name"] == "template0"'
+        - 'attributes["db.name"] == "template1"'
+
+  # Convert cumulative counters to delta for New Relic
+  cumulativetodelta:
+    include:
+      match_type: regexp
+      metric_names:
+        - "postgresql.commits"
+        - "postgresql.rollbacks"
+        - "postgresql.blocks.*"
+        - "postgresql.rows.*"
+        - "postgresql.operations.*"
+        - "postgresql.bgwriter.*"
+
+  # Batch processor for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+exporters:
+  # OTLP exporter to New Relic
+  otlp:
+    endpoint: "${NEW_RELIC_OTLP_ENDPOINT}"
+    headers:
+      api-key: "${NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+      storage: file_storage
+
+  # Debug exporter (comment out in production)
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: "0.0.0.0:13133"
+    path: "/health"
+
+  # Performance profiler (optional)
+  pprof:
+    endpoint: "0.0.0.0:1777"
+
+  # File storage for queue persistence
+  file_storage:
+    directory: /var/lib/otelcol/file_storage
+    timeout: 10s
+
+service:
+  extensions: [health_check, pprof, file_storage]
+  
+  pipelines:
+    metrics:
+      receivers:
+        - postgresql
+        - hostmetrics
+        - sqlquery
+      processors:
+        - memory_limiter
+        - resource
+        - transform
+        - attributes
+        - filter
+        - cumulativetodelta
+        - batch
+      exporters:
+        - otlp
+        # - debug  # Uncomment for troubleshooting
+
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: otel-collector
+    metrics:
+      address: 0.0.0.0:8888
+      level: detailed
+
+---
+# ==============================================================================
+# Example 2: MySQL Configuration (Config-Only Mode)
+# ==============================================================================
+# Standard OpenTelemetry MySQL receiver configuration - no custom code required
+---
+# MySQL Configuration for Config-Only Mode
+# Uses standard OpenTelemetry MySQL receiver - no custom code required
+
+# Environment variables:
+# - DB_MYSQL_HOST: MySQL host
+# - DB_MYSQL_PORT: MySQL port
+# - DB_MYSQL_USER: MySQL username
+# - DB_MYSQL_PASSWORD: MySQL password
+# - NEW_RELIC_OTLP_ENDPOINT: New Relic OTLP endpoint
+# - NEW_RELIC_LICENSE_KEY: New Relic license key
+# - SERVICE_NAME: Service identifier
+# - ENVIRONMENT: Environment name
+
+receivers:
+  # MySQL metrics receiver
+  mysql:
+    endpoint: "${DB_MYSQL_HOST}:${DB_MYSQL_PORT}"
+    username: "${DB_MYSQL_USER}"
+    password: "${DB_MYSQL_PASSWORD}"
+    collection_interval: 30s
+    transport: tcp
+    tls:
+      insecure_skip_verify: true
+    
+    # Enable all available metrics
+    metrics:
+      mysql.buffer_pool.pages:
+        enabled: true
+      mysql.buffer_pool.data_pages:
+        enabled: true
+      mysql.buffer_pool.page_flushes:
+        enabled: true
+      mysql.buffer_pool.operations:
+        enabled: true
+      mysql.buffer_pool.limit:
+        enabled: true
+      mysql.buffer_pool.usage:
+        enabled: true
+      mysql.commands:
+        enabled: true
+      mysql.prepared_statements:
+        enabled: true
+      mysql.handlers:
+        enabled: true
+      mysql.double_writes:
+        enabled: true
+      mysql.log_operations:
+        enabled: true
+      mysql.operations:
+        enabled: true
+      mysql.page_operations:
+        enabled: true
+      mysql.row_locks:
+        enabled: true
+      mysql.row_operations:
+        enabled: true
+      mysql.locks:
+        enabled: true
+      mysql.sorts:
+        enabled: true
+      mysql.threads:
+        enabled: true
+      mysql.created_tmp_disk_tables:
+        enabled: true
+      mysql.created_tmp_files:
+        enabled: true
+      mysql.created_tmp_tables:
+        enabled: true
+      mysql.connection.count:
+        enabled: true
+      mysql.connection.errors:
+        enabled: true
+      mysql.innodb_data_reads:
+        enabled: true
+      mysql.innodb_data_writes:
+        enabled: true
+      mysql.innodb_log_waits:
+        enabled: true
+      mysql.innodb_row_lock_time:
+        enabled: true
+      mysql.innodb_row_lock_waits:
+        enabled: true
+      mysql.key_cache_reads:
+        enabled: true
+      mysql.key_cache_writes:
+        enabled: true
+      mysql.key_cache_write_requests:
+        enabled: true
+      mysql.key_cache_read_requests:
+        enabled: true
+      mysql.opened_files:
+        enabled: true
+      mysql.opened_tables:
+        enabled: true
+      mysql.opened_table_definitions:
+        enabled: true
+      mysql.qcache_hits:
+        enabled: true
+      mysql.qcache_inserts:
+        enabled: true
+      mysql.qcache_lowmem_prunes:
+        enabled: true
+      mysql.qcache_not_cached:
+        enabled: true
+      mysql.queries:
+        enabled: true
+      mysql.questions:
+        enabled: true
+      mysql.select_full_join:
+        enabled: true
+      mysql.select_full_range_join:
+        enabled: true
+      mysql.select_range:
+        enabled: true
+      mysql.select_range_check:
+        enabled: true
+      mysql.select_scan:
+        enabled: true
+      mysql.slow_queries:
+        enabled: true
+      mysql.aborted_clients:
+        enabled: true
+      mysql.aborted_connects:
+        enabled: true
+      mysql.locked_connects:
+        enabled: true
+      mysql.table_locks_immediate:
+        enabled: true
+      mysql.table_locks_waited:
+        enabled: true
+      mysql.table_open_cache:
+        enabled: true
+      mysql.table_open_cache_hits:
+        enabled: true
+      mysql.table_open_cache_misses:
+        enabled: true
+      mysql.table_open_cache_overflows:
+        enabled: true
+      mysql.global_status.uptime:
+        enabled: true
+      mysql.global_status.bytes_received:
+        enabled: true
+      mysql.global_status.bytes_sent:
+        enabled: true
+      mysql.global_status.max_used_connections:
+        enabled: true
+      mysql.global_status.threads_connected:
+        enabled: true
+      mysql.global_status.threads_running:
+        enabled: true
+
+  # SQL query receiver for custom MySQL metrics
+  sqlquery/mysql:
+    driver: mysql
+    datasource: "${DB_MYSQL_USER}:${DB_MYSQL_PASSWORD}@tcp(${DB_MYSQL_HOST}:${DB_MYSQL_PORT})/"
+    collection_interval: 60s
+    queries:
+      # Active connections by user and host
+      - sql: |
+          SELECT 
+            user,
+            host,
+            db,
+            command,
+            time,
+            state,
+            COUNT(*) as connection_count
+          FROM information_schema.processlist
+          WHERE command != 'Sleep'
+          GROUP BY user, host, db, command, state
+        metrics:
+          - metric_name: mysql.connections.active_by_user
+            value_column: connection_count
+            value_type: gauge
+            attribute_columns:
+              - user
+              - host
+              - db
+              - command
+              - state
+
+      # Long running queries
+      - sql: |
+          SELECT 
+            COUNT(*) as long_queries,
+            MAX(time) as max_duration
+          FROM information_schema.processlist
+          WHERE command != 'Sleep' AND time > 60
+        metrics:
+          - metric_name: mysql.queries.long_running.count
+            value_column: long_queries
+            value_type: gauge
+          - metric_name: mysql.queries.duration.max
+            value_column: max_duration
+            value_type: gauge
+            unit: s
+
+      # Table statistics
+      - sql: |
+          SELECT 
+            table_schema,
+            table_name,
+            table_rows,
+            data_length,
+            index_length,
+            data_length + index_length as total_size
+          FROM information_schema.tables
+          WHERE table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+            AND table_type = 'BASE TABLE'
+          ORDER BY total_size DESC
+          LIMIT 20
+        metrics:
+          - metric_name: mysql.table.rows
+            value_column: table_rows
+            value_type: gauge
+            attribute_columns:
+              - table_schema
+              - table_name
+          - metric_name: mysql.table.data_size
+            value_column: data_length
+            value_type: gauge
+            unit: By
+            attribute_columns:
+              - table_schema
+              - table_name
+          - metric_name: mysql.table.index_size
+            value_column: index_length
+            value_type: gauge
+            unit: By
+            attribute_columns:
+              - table_schema
+              - table_name
+
+      # InnoDB buffer pool efficiency
+      - sql: |
+          SELECT 
+            (SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests') as read_requests,
+            (SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_reads') as disk_reads,
+            ((SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests') - 
+             (SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_reads')) / 
+            (SELECT VARIABLE_VALUE FROM information_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests') * 100 as hit_ratio
+        metrics:
+          - metric_name: mysql.innodb.buffer_pool.hit_ratio
+            value_column: hit_ratio
+            value_type: gauge
+            unit: "%"
+
+      # Replication lag (if slave)
+      - sql: |
+          SELECT 
+            Seconds_Behind_Master as lag_seconds
+          FROM information_schema.processlist
+          WHERE command = 'Binlog Dump'
+        metrics:
+          - metric_name: mysql.replication.lag
+            value_column: lag_seconds
+            value_type: gauge
+            unit: s
+
+  # Host metrics
+  hostmetrics:
+    root_path: /
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+          system.memory.usage:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+
+processors:
+  # Memory limiter
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Resource metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: "${SERVICE_NAME}"
+        action: upsert
+      - key: deployment.environment
+        value: "${ENVIRONMENT}"
+        action: upsert
+      - key: db.system
+        value: "mysql"
+        action: insert
+      - key: mysql.version
+        value: "${MYSQL_VERSION}"
+        action: insert
+
+  # Transform for units
+  transform:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - set(unit, "By") where name =~ "mysql.*\\.size$"
+          - set(unit, "1") where name =~ "mysql.*\\.count$"
+          - set(unit, "%") where name =~ "mysql.*\\.ratio$"
+
+  # Attributes cleanup
+  attributes:
+    actions:
+      - key: password
+        action: delete
+      - key: mysql.query
+        action: delete
+
+  # Convert counters to rate
+  cumulativetodelta:
+    include:
+      match_type: regexp
+      metric_names:
+        - "mysql.commands.*"
+        - "mysql.handlers.*"
+        - "mysql.operations.*"
+        - "mysql.queries"
+        - "mysql.questions"
+        - "mysql.slow_queries"
+        - "mysql.bytes.*"
+        - "mysql.innodb_data.*"
+        - "mysql.row_operations.*"
+
+  # Batch for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+exporters:
+  # OTLP to New Relic
+  otlp:
+    endpoint: "${NEW_RELIC_OTLP_ENDPOINT}"
+    headers:
+      api-key: "${NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+
+service:
+  pipelines:
+    metrics:
+      receivers:
+        - mysql
+        - sqlquery/mysql
+        - hostmetrics
+      processors:
+        - memory_limiter
+        - resource
+        - transform
+        - attributes
+        - cumulativetodelta
+        - batch
+      exporters:
+        - otlp
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888
+
+---
+# ==============================================================================
+# Example 3: PostgreSQL Working Configuration with Advanced Features
+# ==============================================================================
+# Complete working configuration with all features enabled for PostgreSQL
+---
+# Config-Only Mode - Working Configuration
+# This configuration uses only standard OpenTelemetry components
+# Works with standard otel/opentelemetry-collector-contrib image
+
+# Environment variables required:
+# - DB_POSTGRES_HOST: PostgreSQL host
+# - DB_POSTGRES_PORT: PostgreSQL port (default: 5432)
+# - DB_POSTGRES_USER: PostgreSQL username
+# - DB_POSTGRES_PASSWORD: PostgreSQL password
+# - DB_POSTGRES_DATABASE: PostgreSQL database name
+# - NEW_RELIC_OTLP_ENDPOINT: New Relic OTLP endpoint (default: https://otlp.nr-data.net:4318)
+# - NEW_RELIC_LICENSE_KEY: New Relic license key
+# - SERVICE_NAME: Service identifier (e.g., postgresql-prod-01)
+# - ENVIRONMENT: Environment name (dev/staging/prod)
+
+receivers:
+  # PostgreSQL receiver for database metrics
+  postgresql:
+    endpoint: "${DB_POSTGRES_HOST}:${DB_POSTGRES_PORT}"
+    username: "${DB_POSTGRES_USER}"
+    password: "${DB_POSTGRES_PASSWORD}"
+    databases:
+      - "${DB_POSTGRES_DATABASE}"
+    collection_interval: 30s
+    transport: tcp
+    tls:
+      insecure: true  # Set to false in production
+    initial_delay: 1s
+
+  # Host metrics receiver
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.io_time:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.connections:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+          system.cpu.load_average.15m:
+            enabled: true
+
+  # SQL Query receiver for custom queries
+  sqlquery:
+    driver: postgres
+    datasource: "host=${DB_POSTGRES_HOST} port=${DB_POSTGRES_PORT} user=${DB_POSTGRES_USER} password=${DB_POSTGRES_PASSWORD} dbname=${DB_POSTGRES_DATABASE} sslmode=disable"
+    collection_interval: 60s
+    queries:
+      # Connection metrics by state
+      - sql: |
+          SELECT 
+            COALESCE(state, 'idle') as state,
+            COUNT(*) as connection_count
+          FROM pg_stat_activity
+          WHERE pid != pg_backend_pid()
+          GROUP BY state
+        metrics:
+          - metric_name: postgresql.connections.by_state
+            value_column: connection_count
+            value_type: int
+            attribute_columns:
+              - state
+
+      # Long running queries
+      - sql: |
+          SELECT 
+            COUNT(*) as count
+          FROM pg_stat_activity
+          WHERE state = 'active'
+            AND query_start < NOW() - INTERVAL '5 minutes'
+            AND query NOT LIKE 'autovacuum:%'
+        metrics:
+          - metric_name: postgresql.queries.long_running.count
+            value_column: count
+            value_type: int
+
+      # Database size metrics
+      - sql: |
+          SELECT 
+            datname as database,
+            pg_database_size(datname) as size_bytes
+          FROM pg_database
+          WHERE datallowconn = true
+        metrics:
+          - metric_name: postgresql.database.size.bytes
+            value_column: size_bytes
+            value_type: int
+            attribute_columns:
+              - database
+
+      # Table bloat estimation
+      - sql: |
+          WITH constants AS (
+            SELECT current_setting('block_size')::numeric AS bs, 23 AS hdr, 4 AS ma
+          ),
+          bloat_info AS (
+            SELECT
+              schemaname,
+              tablename,
+              cc.relpages,
+              bs,
+              CEIL((cc.reltuples*((datahdr+ma-
+                (CASE WHEN datahdr%ma=0 THEN ma ELSE datahdr%ma END))+nullhdr2+4))/(bs-20::float)) AS otta
+            FROM (
+              SELECT
+                schemaname,
+                tablename,
+                hdr,
+                ma,
+                bs,
+                SUM((1-null_frac)*avg_width) AS nullhdr2,
+                MAX(hdr+1+(rint((null_frac*natts)::float/8))) AS datahdr
+              FROM (
+                SELECT
+                  schemaname,
+                  tablename,
+                  hdr,
+                  ma,
+                  bs,
+                  null_frac,
+                  avg_width,
+                  natts
+                FROM pg_stats s2
+                CROSS JOIN constants
+                WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+              ) AS foo
+              GROUP BY schemaname, tablename, hdr, ma, bs
+            ) AS rs
+            JOIN pg_class cc ON cc.relname = rs.tablename
+            JOIN pg_namespace nn ON cc.relnamespace = nn.oid AND nn.nspname = rs.schemaname
+          )
+          SELECT
+            schemaname,
+            tablename,
+            ROUND((CASE WHEN otta=0 THEN 0.0 ELSE relpages/otta::numeric END)::numeric,1) AS bloat_ratio,
+            CASE WHEN relpages < otta THEN 0 ELSE (bs*(relpages-otta))::bigint END AS bloat_bytes
+          FROM bloat_info
+          ORDER BY bloat_bytes DESC
+          LIMIT 10
+        metrics:
+          - metric_name: postgresql.table.bloat.ratio
+            value_column: bloat_ratio
+            value_type: double
+            attribute_columns:
+              - schemaname
+              - tablename
+          - metric_name: postgresql.table.bloat.bytes
+            value_column: bloat_bytes
+            value_type: int
+            attribute_columns:
+              - schemaname
+              - tablename
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Resource processor for standard attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: "${SERVICE_NAME}"
+        action: upsert
+      - key: deployment.environment
+        value: "${ENVIRONMENT}"
+        action: upsert
+      - key: db.system
+        value: postgresql
+        action: insert
+      - key: cloud.provider
+        value: "${CLOUD_PROVIDER}"
+        action: insert
+        from_attribute: cloud_provider
+      - key: cloud.region
+        value: "${CLOUD_REGION}"
+        action: insert
+        from_attribute: cloud_region
+
+  # Transform processor for metric adjustments
+  transform:
+    metric_statements:
+      # Convert bytes to MB for easier reading
+      - context: metric
+        statements:
+          - set(unit, "By") where name == "postgresql.database.size.bytes"
+          - set(unit, "By") where name == "postgresql.table.bloat.bytes"
+      # Calculate cache hit ratio
+      - context: metric
+        statements:
+          - set(name, "postgresql.cache.hit_ratio") where name == "postgresql.blocks.hit"
+          - set(unit, "%") where name == "postgresql.cache.hit_ratio"
+
+  # Attributes processor for cleanup and enrichment
+  attributes:
+    actions:
+      # Remove sensitive information
+      - key: password
+        action: delete
+      - key: postgresql.query
+        action: hash
+      # Standardize attribute names
+      - key: db.name
+        from_attribute: database
+        action: insert
+      - key: db.postgresql.version
+        from_attribute: postgresql.version
+        action: insert
+      # Remove internal attributes
+      - pattern: ^otel\..*
+        action: delete
+
+  # Filter processor to exclude system databases
+  filter:
+    metrics:
+      exclude:
+        match_type: strict
+        metric_names:
+          - postgresql.database.size.bytes
+        attributes:
+          - key: database
+            value: template0
+          - key: database
+            value: template1
+
+  # Cumulative to delta for counter metrics
+  cumulativetodelta:
+    include:
+      match_type: regexp
+      metrics:
+        - postgresql\.commits
+        - postgresql\.rollbacks
+        - postgresql\.blocks\.hit
+        - postgresql\.blocks\.read
+        - postgresql\.rows\.deleted
+        - postgresql\.rows\.fetched
+        - postgresql\.rows\.inserted
+        - postgresql\.rows\.updated
+
+  # Batch processor for efficient sending
+  batch:
+    send_batch_size: 8192
+    timeout: 10s
+    send_batch_max_size: 16384
+
+exporters:
+  # OTLP HTTP exporter to New Relic
+  otlphttp:
+    endpoint: "${NEW_RELIC_OTLP_ENDPOINT}"
+    headers:
+      api-key: "${NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+      storage: file_storage
+
+  # Prometheus exporter for local scraping
+  prometheus:
+    endpoint: "0.0.0.0:9090"
+    namespace: database
+    const_labels:
+      environment: "${ENVIRONMENT}"
+      service: "${SERVICE_NAME}"
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+extensions:
+  # Health check
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: 5s
+      exporter_failure_threshold: 5
+
+  # Performance profiler
+  pprof:
+    endpoint: 0.0.0.0:1777
+    block_profile_fraction: 0
+    mutex_profile_fraction: 0
+
+  # File storage for queue persistence
+  file_storage:
+    directory: /var/lib/otelcol/file_storage
+    timeout: 10s
+    compaction:
+      on_start: true
+      directory: /var/lib/otelcol/file_storage/compaction
+      max_transaction_size: 65536
+
+service:
+  extensions: [health_check, pprof, file_storage]
+  
+  pipelines:
+    metrics:
+      receivers: [postgresql, hostmetrics, sqlquery]
+      processors: [memory_limiter, resource, transform, attributes, filter, cumulativetodelta, batch]
+      exporters: [otlphttp, prometheus]
+
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+      output_paths: [stdout]
+      error_output_paths: [stderr]
+    
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+---
+# ==============================================================================
+# Example 4: New Relic Alert Configurations
+# ==============================================================================
+# YAML format alert definitions for import via New Relic API or Terraform
+---
+# New Relic Alert Configurations for Database Intelligence
+# Import these alerts using New Relic's API or Terraform
+
+alerts:
+  - name: "Database Connection Pool Exhaustion"
+    description: "Alert when database connection pool usage exceeds threshold"
+    nrql: |
+      SELECT max(postgresql.backends / postgresql.backends.max * 100) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET database.name
+    conditions:
+      - type: "critical"
+        threshold: 90
+        threshold_duration: 300
+        threshold_occurrences: "all"
+      - type: "warning"
+        threshold: 80
+        threshold_duration: 300
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 120
+
+  - name: "Database Response Time Degradation"
+    description: "Alert when query response time increases significantly"
+    nrql: |
+      SELECT average(query.duration) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET database.name, database.type
+    conditions:
+      - type: "critical"
+        threshold: 1000  # 1 second
+        threshold_duration: 600
+        threshold_occurrences: "at_least_once"
+      - type: "warning"
+        threshold: 500   # 500ms
+        threshold_duration: 600
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 300
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Replication Lag"
+    description: "Alert when replication lag exceeds acceptable threshold"
+    nrql: |
+      SELECT max(postgresql.replication.lag) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND database.type = 'postgresql'
+      FACET primary.name, replica.name
+    conditions:
+      - type: "critical"
+        threshold: 60    # 60 seconds
+        threshold_duration: 300
+        threshold_occurrences: "all"
+      - type: "warning"
+        threshold: 30    # 30 seconds
+        threshold_duration: 300
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Cache Hit Ratio Low"
+    description: "Alert when cache hit ratio drops below threshold"
+    nrql: |
+      SELECT (sum(postgresql.cache.hit) / 
+              (sum(postgresql.cache.hit) + sum(postgresql.cache.miss))) * 100 as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET database.name
+    conditions:
+      - type: "critical"
+        threshold: 80
+        threshold_duration: 900
+        threshold_occurrences: "all"
+        operator: "below"
+      - type: "warning"
+        threshold: 85
+        threshold_duration: 900
+        threshold_occurrences: "all"
+        operator: "below"
+    signal:
+      aggregation_window: 300
+      aggregation_method: "event_flow"
+      aggregation_delay: 120
+
+  - name: "Database Lock Wait Spike"
+    description: "Alert when lock wait events increase significantly"
+    nrql: |
+      SELECT rate(sum(lock.wait.count), 1 minute) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET database.name, lock.type
+    conditions:
+      - type: "critical"
+        threshold: 10    # 10 lock waits per minute
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+      - type: "warning"
+        threshold: 5     # 5 lock waits per minute
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Error Rate High"
+    description: "Alert when database error rate exceeds threshold"
+    nrql: |
+      SELECT rate(count(*), 1 minute) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND (metricName = 'postgresql.errors' OR metricName = 'mysql.errors')
+      FACET database.name, error.type
+    conditions:
+      - type: "critical"
+        threshold: 5     # 5 errors per minute
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+      - type: "warning"
+        threshold: 2     # 2 errors per minute
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Circuit Breaker Activated"
+    description: "Alert when circuit breaker trips for a database"
+    nrql: |
+      SELECT latest(circuit.breaker.status) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND processor = 'circuitbreaker'
+      FACET database.name
+    conditions:
+      - type: "critical"
+        threshold: 1     # 1 = open/tripped
+        threshold_duration: 60
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 30
+
+  - name: "PII Data Detected"
+    description: "Alert when PII is detected in database queries or results"
+    nrql: |
+      SELECT count(*) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND processor = 'verification'
+      AND pii.detected = true
+      FACET pii.type, database.name
+    conditions:
+      - type: "critical"
+        threshold: 1     # Any PII detection
+        threshold_duration: 60
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 300
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Cost Budget Exceeded"
+    description: "Alert when database operation costs exceed budget"
+    nrql: |
+      SELECT (sum(cost.daily.usd) / latest(cost.budget.daily.usd)) * 100 as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND processor = 'costcontrol'
+    conditions:
+      - type: "critical"
+        threshold: 100   # 100% of budget
+        threshold_duration: 300
+        threshold_occurrences: "all"
+      - type: "warning"
+        threshold: 80    # 80% of budget
+        threshold_duration: 300
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 3600
+      aggregation_method: "event_flow"
+      aggregation_delay: 300
+
+  - name: "Slow Query Detected"
+    description: "Alert when queries exceed duration threshold"
+    nrql: |
+      SELECT count(*) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND query.duration > 5000  # 5 seconds
+      FACET database.name, query.text
+    conditions:
+      - type: "critical"
+        threshold: 10    # 10 slow queries
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+      - type: "warning"
+        threshold: 5     # 5 slow queries
+        threshold_duration: 300
+        threshold_occurrences: "at_least_once"
+    signal:
+      aggregation_window: 300
+      aggregation_method: "event_flow"
+      aggregation_delay: 60
+
+  - name: "Database Table Bloat"
+    description: "Alert when table bloat exceeds threshold"
+    nrql: |
+      SELECT max(table.bloat.ratio) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector' 
+      AND database.type = 'postgresql'
+      FACET database.name, table.name
+    conditions:
+      - type: "critical"
+        threshold: 2.0   # 2x bloat
+        threshold_duration: 3600
+        threshold_occurrences: "all"
+      - type: "warning"
+        threshold: 1.5   # 1.5x bloat
+        threshold_duration: 3600
+        threshold_occurrences: "all"
+    signal:
+      aggregation_window: 3600
+      aggregation_method: "event_flow"
+      aggregation_delay: 300
+
+  - name: "Collector Health Check Failed"
+    description: "Alert when the collector itself is unhealthy"
+    nrql: |
+      SELECT uniqueCount(host.name) as 'value'
+      FROM Metric 
+      WHERE service.name = 'database-intelligence-collector'
+      FACET deployment.environment
+    conditions:
+      - type: "critical"
+        threshold: 1
+        threshold_duration: 300
+        threshold_occurrences: "all"
+        operator: "below"
+    signal:
+      aggregation_window: 60
+      aggregation_method: "event_flow"
+      aggregation_delay: 120
+      fill_option: "last_value"
+      fill_value: 0
+
+# Alert Policy Configuration
+policies:
+  - name: "Database Intelligence - Critical"
+    incident_preference: "per_condition_and_target"
+    channels:
+      - "email-oncall"
+      - "pagerduty-critical"
+      - "slack-database-alerts"
+    conditions:
+      - "Database Connection Pool Exhaustion"
+      - "Database Replication Lag"
+      - "Circuit Breaker Activated"
+      - "PII Data Detected"
+      - "Collector Health Check Failed"
+
+  - name: "Database Intelligence - Performance"
+    incident_preference: "per_condition"
+    channels:
+      - "email-team"
+      - "slack-database-alerts"
+    conditions:
+      - "Database Response Time Degradation"
+      - "Database Cache Hit Ratio Low"
+      - "Database Lock Wait Spike"
+      - "Slow Query Detected"
+
+  - name: "Database Intelligence - Operational"
+    incident_preference: "per_policy"
+    channels:
+      - "email-team"
+      - "slack-operations"
+    conditions:
+      - "Database Error Rate High"
+      - "Database Cost Budget Exceeded"
+      - "Database Table Bloat"
+
+# Notification Channels
+channels:
+  - name: "email-oncall"
+    type: "email"
+    configuration:
+      recipients: "oncall@example.com"
+      include_json_attachment: true
+
+  - name: "email-team"
+    type: "email"
+    configuration:
+      recipients: "database-team@example.com"
+
+  - name: "pagerduty-critical"
+    type: "pagerduty"
+    configuration:
+      service_key: "${PAGERDUTY_SERVICE_KEY}"
+
+  - name: "slack-database-alerts"
+    type: "slack"
+    configuration:
+      url: "${SLACK_WEBHOOK_URL}"
+      channel: "#database-alerts"
+
+  - name: "slack-operations"
+    type: "slack"
+    configuration:
+      url: "${SLACK_WEBHOOK_URL}"
+      channel: "#operations"
+
+---
+# ==============================================================================
+# Example 5: Basic Runtime Collector Configuration
+# ==============================================================================
+# Minimal configuration for basic OTLP collection and forwarding
+---
+# Basic collector configuration that works with minimal components
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+
+exporters:
+  debug:
+    verbosity: detailed
+  
+  otlp/newrelic:
+    endpoint: "otlp.nr-data.net:4317"
+    headers:
+      api-key: "ea7e83e4e29597b0766cf6c4636fba20FFFFNRAL"
+    compression: gzip
+
+service:
+  telemetry:
+    logs:
+      level: info
+  
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, otlp/newrelic]
+    
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, otlp/newrelic]
+    
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, otlp/newrelic]

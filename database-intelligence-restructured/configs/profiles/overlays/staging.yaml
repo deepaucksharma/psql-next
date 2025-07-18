@@ -1,0 +1,30 @@
+# Staging Environment Overlay
+# Apply with: --config=profiles/[profile].yaml --config=profiles/overlays/staging.yaml
+
+processors:
+  memory_limiter:
+    limit_mib: 1024  # Moderate memory limit
+    spike_limit_mib: 256
+    
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+    
+exporters:
+  otlphttp:
+    endpoint: ${env:STAGING_OTLP_ENDPOINT}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      
+service:
+  telemetry:
+    logs:
+      level: info
+      sampling:
+        initial: 10
+        thereafter: 100
+    metrics:
+      level: normal

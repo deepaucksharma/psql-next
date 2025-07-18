@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbintel-config
+  namespace: database-intelligence
+data:
+  collector-config.yaml: |
+    receivers:
+      enhancedsql/postgresql:
+        driver: postgres
+        datasource: "host=postgresql.database-intelligence.svc.cluster.local port=5432 user=postgres password=postgres dbname=production"
+        collection_interval: 30s
+        max_open_connections: 25
+        max_idle_connections: 5
+        samples:
+          enabled: true
+          max_top_queries: 100
+          max_query_length: 2048
+        queries:
+          - name: active_connections
+            sql: "SELECT count(*) as value, state as status FROM pg_stat_activity GROUP BY state"
+            metrics:
+              - name: postgresql.connections.active
+                value_column: value
+                data_type: gauge
+                attributes:
+                  - name: state
+                    value_column: status
+      
+      enhancedsql/mysql:
+        driver: mysql
+        datasource: "mysql:mysql@tcp(mysql.database-intelligence.svc.cluster.local:3306)/production"
+        collection_interval: 30s
+        max_open_connections: 25
+        max_idle_connections: 5
+        
+      mongodb:
+        hosts:
+          - endpoint: mongodb.database-intelligence.svc.cluster.local:27017
+        collection_interval: 30s
+        databases:
+          - production
+        
+      redis:
+        endpoint: redis.database-intelligence.svc.cluster.local:6379
+        collection_interval: 30s
+
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+      
+      ash:
+        sample_interval: 1s
+        max_samples: 1000
+        databases:
+          - type: postgresql
+            connection_string: "host=postgresql.database-intelligence.svc.cluster.local port=5432 user=postgres password=postgres dbname=production"
+          - type: mysql
+            connection_string: "mysql:mysql@tcp(mysql.database-intelligence.svc.cluster.local:3306)/production"
+      
+      adaptivesampling:
+        initial_sampling_rate: 0.1
+        target_rate: 100
+        min_sampling_rate: 0.01
+        max_sampling_rate: 1.0
+        decision_interval: 30s
+      
+      querycorrelator:
+        correlation_window: 5m
+        max_cached_queries: 10000
+        include_patterns:
+          - "^SELECT.*"
+          - "^INSERT.*"
+          - "^UPDATE.*"
+          - "^DELETE.*"
+
+    exporters:
+      otlp:
+        endpoint: otel-collector.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+      
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: dbintel
+        const_labels:
+          environment: production
+          cluster: kubernetes
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      pprof:
+        endpoint: 0.0.0.0:1777
+      zpages:
+        endpoint: 0.0.0.0:55679
+
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        metrics:
+          receivers: [enhancedsql/postgresql, enhancedsql/mysql, mongodb, redis]
+          processors: [ash, adaptivesampling, querycorrelator, batch]
+          exporters: [otlp, prometheus]
+    
+    # Horizontal scaling configuration
+    scaling:
+      enabled: true
+      mode: redis
+      redis:
+        address: redis.database-intelligence.svc.cluster.local:6379
+        db: 0
+        key_prefix: "dbintel:scaling:"
+        leader_ttl: 30s
+      coordinator:
+        heartbeat_interval: 30s
+        node_timeout: 90s
+        rebalance_interval: 5m
+        min_rebalance_interval: 1m
+      receiver_scaling:
+        check_interval: 30s
+        resource_prefix: "db:"
+        ignore_assignments: false

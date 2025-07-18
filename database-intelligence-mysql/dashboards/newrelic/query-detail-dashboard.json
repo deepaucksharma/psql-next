@@ -1,0 +1,226 @@
+{
+  "name": "MySQL Query Detail Analysis",
+  "description": "Deep dive into individual query performance (DPA-style)",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Query Performance Profile",
+      "description": "Detailed analysis of a specific query",
+      "widgets": [
+        {
+          "title": "Query Wait Profile Over Time",
+          "configuration": {
+            "area": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT average(mysql.query.wait_profile) as 'Total Wait', average(wait_percentage) as 'Wait %' FROM Metric WHERE query_hash = '{{query_hash}}' SINCE 7 days ago TIMESERIES 30 minutes"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "title": "Wait Type Breakdown",
+          "configuration": {
+            "pie": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT sum(mysql.query.wait_profile) as 'Wait Time' FROM Metric WHERE query_hash = '{{query_hash}}' FACET wait_type SINCE 1 day ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "title": "Execution Statistics",
+          "configuration": {
+            "billboard": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT count(*) as 'Executions', average(statement_time_ms) as 'Avg Duration', average(lock_time_ms) as 'Avg Lock Time', average(ROWS_EXAMINED) as 'Avg Rows Examined', max(full_scans) as 'Full Table Scans', max(tmp_disk_tables) as 'Disk Temp Tables' FROM Metric WHERE query_hash = '{{query_hash}}' SINCE 1 day ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "title": "Active Advisories",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT latest(advisor.type) as 'Advisory Type', latest(advisor.recommendation) as 'Recommendation', latest(advisor.priority) as 'Priority', count(*) as 'Occurrences' FROM Metric WHERE query_hash = '{{query_hash}}' AND advisor.type IS NOT NULL FACET advisor.type SINCE 1 day ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 12,
+            "height": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance Trends",
+      "description": "Historical performance analysis",
+      "widgets": [
+        {
+          "title": "Execution Time Trend",
+          "configuration": {
+            "line": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT average(statement_time_ms) as 'Avg Time', percentile(statement_time_ms, 95) as 'P95 Time', max(statement_time_ms) as 'Max Time' FROM Metric WHERE query_hash = '{{query_hash}}' SINCE 7 days ago TIMESERIES 1 hour"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "title": "Execution Count Trend",
+          "configuration": {
+            "bar": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT count(*) as 'Executions' FROM Metric WHERE query_hash = '{{query_hash}}' SINCE 7 days ago TIMESERIES 1 hour"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "title": "Plan Changes",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT timestamp, plan.fingerprint as 'Plan ID', avg_rows_examined as 'Rows Examined', full_scans as 'Full Scans' FROM Metric WHERE query_hash = '{{query_hash}}' AND plan.fingerprint IS NOT NULL SINCE 7 days ago LIMIT 50"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wait Analysis Deep Dive",
+      "description": "Detailed wait time analysis",
+      "widgets": [
+        {
+          "title": "Wait Category Trends",
+          "configuration": {
+            "line": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT average(mysql.query.wait_profile) as 'Wait Time' FROM Metric WHERE query_hash = '{{query_hash}}' FACET wait.category SINCE 24 hours ago TIMESERIES 30 minutes"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "title": "Wait Severity Distribution",
+          "configuration": {
+            "histogram": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT histogram(wait_percentage, 10, 10) FROM Metric WHERE query_hash = '{{query_hash}}' SINCE 1 day ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          }
+        },
+        {
+          "title": "Lock Wait Analysis",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT max(mysql.blocking.active) as 'Max Lock Wait', latest(lock_table) as 'Table', latest(lock_type) as 'Lock Type', count(*) as 'Occurrences' FROM Metric WHERE waiting_query LIKE '%{{query_pattern}}%' OR blocking_query LIKE '%{{query_pattern}}%' FACET lock_table, lock_type SINCE 1 hour ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          }
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "name": "query_hash",
+      "title": "Query Hash",
+      "type": "NRQL",
+      "defaultValue": {
+        "value": "*"
+      },
+      "nrqlQuery": {
+        "query": "SELECT uniques(query_hash) FROM Metric WHERE query_hash IS NOT NULL SINCE 1 day ago LIMIT 100"
+      }
+    },
+    {
+      "name": "query_pattern",
+      "title": "Query Pattern",
+      "type": "STRING",
+      "defaultValue": {
+        "value": "%"
+      }
+    }
+  ]
+}

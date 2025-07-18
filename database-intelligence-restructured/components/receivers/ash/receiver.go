@@ -25,7 +25,7 @@ type ashReceiver struct {
 	wg           sync.WaitGroup
 	cancel       context.CancelFunc
 	ticker       *time.Ticker
-	sampler      *ASHSampler
+	sampler      *AdaptiveSampler
 	storage      *ASHStorage
 }
 
@@ -55,10 +55,15 @@ func (r *ashReceiver) Start(ctx context.Context, host component.Host) error {
 	r.db = db
 	
 	// Initialize sampler
-	r.sampler = NewASHSampler(r.logger, r.config)
+	r.sampler = NewAdaptiveSampler(r.config.SamplingConfig, r.logger.Named("sampler"))
 	
 	// Initialize storage
-	r.storage = NewASHStorage(r.config.BufferSize, r.config.RetentionDuration)
+	r.storage = NewASHStorage(
+		r.config.BufferSize,
+		r.config.RetentionDuration,
+		r.config.AggregationWindows,
+		r.logger.Named("storage"),
+	)
 	
 	r.logger.Info("Successfully connected to database")
 
@@ -128,24 +133,25 @@ func (r *ashReceiver) collect(ctx context.Context) {
 
 // scrapeMetrics scrapes ASH metrics from the database
 func (r *ashReceiver) scrapeMetrics(ctx context.Context) error {
-	// Sample current activity
-	samples, err := r.sampler.Sample(ctx, r.db)
+	// Collect current activity snapshot
+	collector := NewASHCollector(r.db, r.storage, r.sampler, r.config, r.logger)
+	snapshot, err := collector.CollectSnapshot(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to sample ASH data: %w", err)
+		return fmt.Errorf("failed to collect ASH data: %w", err)
 	}
 	
-	// Store samples for historical analysis
-	r.storage.AddSamples(samples)
+	// Store snapshot for historical analysis
+	r.storage.AddSnapshot(snapshot)
 	
-	// Create metrics from samples
-	md := r.createMetrics(samples)
+	// Create metrics from snapshot
+	md := r.createMetricsFromSnapshot(snapshot)
 	
 	// Send metrics to consumer
 	return r.consumer.ConsumeMetrics(ctx, md)
 }
 
 // createMetrics converts ASH samples to OpenTelemetry metrics
-func (r *ashReceiver) createMetrics(samples []ASHSample) pmetric.Metrics {
+func (r *ashReceiver) createMetricsFromSnapshot(snapshot *SessionSnapshot) pmetric.Metrics {
 	md := pmetric.NewMetrics()
 	
 	// Add resource metrics
@@ -161,21 +167,21 @@ func (r *ashReceiver) createMetrics(samples []ASHSample) pmetric.Metrics {
 	sm.Scope().SetName("ash_receiver")
 	sm.Scope().SetVersion("1.0.0")
 	
-	// Generate metrics from samples
-	r.createActiveSessionMetrics(sm, samples)
-	r.createWaitEventMetrics(sm, samples)
-	r.createBlockingSessionMetrics(sm, samples)
-	r.createLongRunningQueryMetrics(sm, samples)
+	// Generate metrics from snapshot
+	r.createActiveSessionMetrics(sm, snapshot)
+	r.createWaitEventMetrics(sm, snapshot)
+	r.createBlockingSessionMetrics(sm, snapshot)
+	r.createLongRunningQueryMetrics(sm, snapshot)
 	
 	return md
 }
 
 // createActiveSessionMetrics creates metrics for active sessions
-func (r *ashReceiver) createActiveSessionMetrics(sm pmetric.ScopeMetrics, samples []ASHSample) {
+func (r *ashReceiver) createActiveSessionMetrics(sm pmetric.ScopeMetrics, snapshot *SessionSnapshot) {
 	// Count sessions by state
 	stateCounts := make(map[string]int)
-	for _, sample := range samples {
-		stateCounts[sample.State]++
+	for _, session := range snapshot.Sessions {
+		stateCounts[session.State]++
 	}
 	
 	metric := sm.Metrics().AppendEmpty()
@@ -194,12 +200,16 @@ func (r *ashReceiver) createActiveSessionMetrics(sm pmetric.ScopeMetrics, sample
 }
 
 // createWaitEventMetrics creates metrics for wait events
-func (r *ashReceiver) createWaitEventMetrics(sm pmetric.ScopeMetrics, samples []ASHSample) {
+func (r *ashReceiver) createWaitEventMetrics(sm pmetric.ScopeMetrics, snapshot *SessionSnapshot) {
 	// Count wait events
 	waitEventCounts := make(map[string]int)
-	for _, sample := range samples {
-		if sample.WaitEvent != "" {
-			key := sample.WaitEventType + ":" + sample.WaitEvent
+	for _, session := range snapshot.Sessions {
+		if session.WaitEvent != nil && *session.WaitEvent != "" {
+			eventType := ""
+			if session.WaitEventType != nil {
+				eventType = *session.WaitEventType
+			}
+			key := eventType + ":" + *session.WaitEvent
 			waitEventCounts[key]++
 		}
 	}
@@ -230,10 +240,10 @@ func (r *ashReceiver) createWaitEventMetrics(sm pmetric.ScopeMetrics, samples []
 }
 
 // createBlockingSessionMetrics creates metrics for blocking sessions
-func (r *ashReceiver) createBlockingSessionMetrics(sm pmetric.ScopeMetrics, samples []ASHSample) {
+func (r *ashReceiver) createBlockingSessionMetrics(sm pmetric.ScopeMetrics, snapshot *SessionSnapshot) {
 	blockingCount := 0
-	for _, sample := range samples {
-		if sample.BlockingPID > 0 {
+	for _, session := range snapshot.Sessions {
+		if session.BlockingPID != nil && *session.BlockingPID > 0 {
 			blockingCount++
 		}
 	}
@@ -254,13 +264,16 @@ func (r *ashReceiver) createBlockingSessionMetrics(sm pmetric.ScopeMetrics, samp
 }
 
 // createLongRunningQueryMetrics creates metrics for long-running queries
-func (r *ashReceiver) createLongRunningQueryMetrics(sm pmetric.ScopeMetrics, samples []ASHSample) {
+func (r *ashReceiver) createLongRunningQueryMetrics(sm pmetric.ScopeMetrics, snapshot *SessionSnapshot) {
 	longRunningCount := 0
 	longRunningThreshold := 5 * time.Minute // Configurable
 	
-	for _, sample := range samples {
-		if sample.QueryDuration > longRunningThreshold {
-			longRunningCount++
+	for _, session := range snapshot.Sessions {
+		if session.QueryStart != nil {
+			queryDuration := snapshot.Timestamp.Sub(*session.QueryStart)
+			if queryDuration > longRunningThreshold {
+				longRunningCount++
+			}
 		}
 	}
 	

@@ -1,0 +1,27 @@
+# Development Environment Overlay
+# Apply with: --config=profiles/[profile].yaml --config=profiles/overlays/dev.yaml
+
+processors:
+  batch:
+    timeout: 1s  # Faster batching for development
+    send_batch_size: 100
+    
+exporters:
+  debug:
+    verbosity: detailed  # More verbose logging
+    sampling_initial: 1
+    sampling_thereafter: 1
+    
+  otlphttp:
+    endpoint: http://localhost:4318  # Local endpoint
+    tls:
+      insecure: true  # Allow insecure connections
+      
+service:
+  telemetry:
+    logs:
+      level: debug
+      development: true
+      disable_stacktrace: false
+    metrics:
+      level: detailed

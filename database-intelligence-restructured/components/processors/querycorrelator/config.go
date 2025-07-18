@@ -24,6 +24,15 @@ type Config struct {
 	// MaxQueriesTracked is the maximum number of queries to track
 	MaxQueriesTracked int `mapstructure:"max_queries_tracked"`
 	
+	// MaxQueryCount is the maximum number of queries to keep in memory
+	MaxQueryCount int `mapstructure:"max_query_count"`
+	
+	// MaxTableCount is the maximum number of tables to keep in memory
+	MaxTableCount int `mapstructure:"max_table_count"`
+	
+	// MaxDatabaseCount is the maximum number of databases to keep in memory
+	MaxDatabaseCount int `mapstructure:"max_database_count"`
+	
 	// CorrelationAttributes defines which attributes to add
 	CorrelationAttributes CorrelationAttributesConfig `mapstructure:"correlation_attributes"`
 	

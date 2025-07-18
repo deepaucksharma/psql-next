@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -61,7 +62,10 @@ func main() {
 }
 
 func verifyDatabaseConnection() *sql.DB {
-	dsn := "host=localhost port=5432 user=postgres password=postgres dbname=postgres sslmode=disable"
+	dsn := os.Getenv("E2E_POSTGRES_DSN")
+	if dsn == "" {
+		dsn = "host=localhost port=5432 user=postgres password=postgres dbname=postgres sslmode=disable"
+	}
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)

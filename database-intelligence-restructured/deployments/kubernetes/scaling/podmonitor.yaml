@@ -1,0 +1,22 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: dbintel-collector
+  namespace: database-intelligence
+  labels:
+    app: dbintel-collector
+spec:
+  selector:
+    matchLabels:
+      app: dbintel-collector
+  podMetricsEndpoints:
+  - port: prometheus
+    interval: 30s
+    path: /metrics
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace

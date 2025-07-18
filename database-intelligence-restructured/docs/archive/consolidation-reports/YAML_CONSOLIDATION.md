@@ -93,7 +93,7 @@ This document summarizes the consolidation of YAML files across the Database Int
 ### For Testing
 ```bash
 # Run with test config
-./database-intelligence-collector --config=tests/e2e/configs/collector-test.yaml
+./database-intelligence-collector --config=tests/e2e/configs/postgresql-maximum-extraction.yaml
 ```
 
 ## Migration Notes

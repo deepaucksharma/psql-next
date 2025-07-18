@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 	
-	"github.com/deepaksharma/db-otel/common/featuredetector"
+	"github.com/database-intelligence/db-intel/internal/featuredetector"
 	"go.uber.org/zap"
 )
 

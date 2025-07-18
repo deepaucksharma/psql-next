@@ -1,236 +1,314 @@
-# Database Intelligence with OpenTelemetry - Overview
+# Database Intelligence - Architecture Reference
 
-## 🎯 Project Purpose
+## 🏗️ System Architecture
 
-Monitor PostgreSQL and MySQL databases using OpenTelemetry Collector with New Relic integration, providing comprehensive database intelligence without vendor lock-in.
+### Overview
+Database Intelligence is a specialized OpenTelemetry Collector distribution designed for comprehensive database monitoring with intelligent analysis capabilities.
 
-## 🏗️ Architecture Modes
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Database Intelligence Platform               │
+├─────────────────────────────────────────────────────────────────┤
+│                         Receivers Layer                          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
+│  │PostgreSQL│ │  MySQL   │ │ MongoDB  │ │  Redis   │          │
+│  │ Receiver │ │ Receiver │ │ Receiver │ │ Receiver │          │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                       │
+│  │   ASH    │ │Enhanced  │ │  Kernel  │                       │
+│  │ Receiver │ │   SQL    │ │ Metrics  │                       │
+│  └──────────┘ └──────────┘ └──────────┘                       │
+├─────────────────────────────────────────────────────────────────┤
+│                        Processors Layer                          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
+│  │ Adaptive │ │ Circuit  │ │  Query   │ │   Cost   │          │
+│  │ Sampler  │ │ Breaker  │ │Correlator│ │ Control  │          │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                       │
+│  │Plan Attr │ │  Memory  │ │  Batch   │                       │
+│  │Extractor │ │ Limiter  │ │Processor │                       │
+│  └──────────┘ └──────────┘ └──────────┘                       │
+├─────────────────────────────────────────────────────────────────┤
+│                         Exporters Layer                          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                       │
+│  │   OTLP   │ │   NRI    │ │Prometheus│                       │
+│  │ Exporter │ │ Exporter │ │ Exporter │                       │
+│  └──────────┘ └──────────┘ └──────────┘                       │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### 1. Config-Only Mode (Production Ready) ✅
+## 🎯 Operating Modes
 
-**What it is**: Uses only standard OpenTelemetry components configured via YAML.
+### 1. Config-Only Mode (Production Ready)
+Uses standard OpenTelemetry components configured via YAML.
 
-**Capabilities**:
-- ✅ Core database metrics (connections, transactions, locks)
-- ✅ Performance metrics (query rates, cache hit ratios)
-- ✅ Resource utilization (CPU, memory, disk I/O)
-- ✅ Health monitoring (replication lag, deadlocks)
-- ✅ Custom SQL queries for business metrics
+**Components**:
+- Standard OTel receivers (postgresql, mysql)
+- Standard processors (batch, memory_limiter, resource)
+- Standard exporters (otlp, prometheus)
 
-**Resource Impact**:
-- CPU: <5% overhead
-- Memory: <512MB
-- Network: Low bandwidth usage
+**Characteristics**:
+- ✅ Production-ready with any OTel Collector
+- 📊 35+ metrics per database type
+- 💾 <512MB memory usage
+- ⚡ <5% CPU overhead
+- 🔧 Simple YAML configuration
 
-**Deployment**: Works with any OpenTelemetry Collector distribution.
+### 2. Enhanced Mode (Advanced Features)
+Includes custom components for database intelligence.
 
+**Additional Components**:
+- **ASH Receiver**: Active Session History for PostgreSQL
+- **Enhanced SQL**: Advanced metrics with feature detection
+- **Adaptive Sampler**: Load-based sampling adjustment
+- **Circuit Breaker**: Overload protection
+- **Query Correlator**: Cross-metric correlation
+- **Plan Extractor**: Query plan analysis
+
+**Characteristics**:
+- 🧠 50+ advanced metrics
+- 📈 Query intelligence features
+- 💾 <2GB memory usage
+- ⚡ <20% CPU overhead
+- 🔧 Advanced configuration options
+
+## 📊 Data Flow Architecture
+
+### Standard Pipeline
+```
+Database → Receiver → Processor → Exporter → Backend
+   ↓          ↓           ↓           ↓          ↓
+Metrics   Collect    Transform    Buffer    New Relic
+```
+
+### Enhanced Pipeline
+```
+Database → Receiver → Intelligence → Processor → Exporter
+   ↓          ↓            ↓            ↓           ↓
+Metrics   Collect    Analyze/Enrich  Optimize   New Relic
+```
+
+## 🔧 Component Architecture
+
+### Receivers
+
+#### Standard Receivers
+- **PostgreSQL Receiver**
+  - Connection pooling
+  - Multi-database support
+  - Custom query execution
+  - SSL/TLS support
+
+- **MySQL Receiver**
+  - Performance schema integration
+  - Replication monitoring
+  - InnoDB metrics
+  - Custom query support
+
+#### Custom Receivers
+- **ASH Receiver**
+  - Real-time session sampling
+  - Wait event analysis
+  - Query fingerprinting
+  - Circular buffer storage
+
+- **Enhanced SQL Receiver**
+  - Feature detection
+  - Version-aware queries
+  - Extended metrics
+  - Query plan capture
+
+### Processors
+
+#### Intelligence Processors
+- **Adaptive Sampler**
+  ```go
+  // Adjusts sampling based on system load
+  if systemLoad > threshold {
+      samplingRate = max(minRate, currentRate * 0.9)
+  }
+  ```
+
+- **Circuit Breaker**
+  ```go
+  // Protects against cascading failures
+  if errorRate > 0.8 || latency > maxLatency {
+      circuit.Open()
+  }
+  ```
+
+- **Query Correlator**
+  ```go
+  // Adds correlation metadata
+  metric.Attributes["query_hash"] = hashQuery(sql)
+  metric.Attributes["table"] = extractTable(sql)
+  ```
+
+### Exporters
+
+- **OTLP Exporter**
+  - Compression support
+  - Retry with backoff
+  - Connection pooling
+  - Header injection
+
+- **NRI Exporter**
+  - New Relic specific format
+  - Batch optimization
+  - Metric aggregation
+  - Cost tracking
+
+## 🏗️ Deployment Architecture
+
+### Single Instance
+```
+┌─────────────────┐
+│   Collector     │
+│  ┌───────────┐  │
+│  │ Config    │  │──→ New Relic
+│  │ Components│  │
+│  └───────────┘  │
+└─────────────────┘
+        ↑
+    Databases
+```
+
+### High Availability
+```
+┌─────────────────┐     ┌─────────────────┐
+│  Collector 1    │     │  Collector 2    │
+│   (Primary)     │     │   (Standby)     │
+└─────────────────┘     └─────────────────┘
+         ↑                       ↑
+         └───────────┬───────────┘
+                     │
+                 Databases
+```
+
+### Distributed
+```
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Agent 1     │    │  Agent 2     │    │  Agent 3     │
+│ (PostgreSQL) │    │   (MySQL)    │    │  (MongoDB)   │
+└──────────────┘    └──────────────┘    └──────────────┘
+        ↓                   ↓                   ↓
+┌─────────────────────────────────────────────────────┐
+│                  Gateway Collector                   │
+│              (Aggregation & Routing)                │
+└─────────────────────────────────────────────────────┘
+                           ↓
+                      New Relic
+
+```
+
+## 🔒 Security Architecture
+
+### Authentication & Authorization
+- Database credentials via environment variables
+- New Relic API key protection
+- TLS/SSL for all connections
+- Role-based access control (RBAC)
+
+### Data Protection
+- Sensitive data redaction
+- Query parameter masking
+- Encryption in transit
+- No persistent storage
+
+### Network Security
+```
+Database ←[TLS]→ Collector ←[HTTPS/TLS]→ New Relic
+```
+
+## 📈 Performance Characteristics
+
+### Resource Usage by Mode
+
+| Mode | CPU | Memory | Network | Latency |
+|------|-----|--------|---------|---------|
+| Config-Only | <5% | <512MB | Low | <5ms |
+| Enhanced | <20% | <2GB | Medium | <10ms |
+| Distributed | <10% | <1GB | High | <15ms |
+
+### Scalability Patterns
+
+#### Vertical Scaling
+- Increase memory for larger buffers
+- More CPU cores for parallel processing
+- NVMe storage for temporary data
+
+#### Horizontal Scaling
+- Multiple collectors per database cluster
+- Load balancing across instances
+- Sharding by database or schema
+
+## 🔄 Lifecycle Management
+
+### Configuration Hot Reload
 ```yaml
-# Example: Basic PostgreSQL monitoring
-receivers:
-  postgresql:
-    endpoint: "postgresql://localhost:5432/db"
-    username: "${DB_USER}"
-    password: "${DB_PASS}"
-    collection_interval: 30s
-
-processors:
-  batch: {}
-  resource:
-    attributes:
-      - key: service.name
-        value: "my-database"
-
-exporters:
-  otlp:
-    endpoint: "${NEW_RELIC_OTLP_ENDPOINT}"
-    headers:
-      api-key: "${NEW_RELIC_LICENSE_KEY}"
-
-service:
-  pipelines:
-    metrics:
-      receivers: [postgresql]
-      processors: [resource, batch]
-      exporters: [otlp]
+# Supports live configuration updates
+extensions:
+  configreload:
+    interval: 30s
 ```
 
-### 2. Enhanced Mode (Development) ⚠️
-
-**What it is**: Includes custom receivers and processors for advanced database intelligence.
-
-**Additional Capabilities** (when fully integrated):
-- 🔄 Active Session History (ASH) monitoring
-- 🔄 Query execution plan analysis
-- 🔄 Intelligent adaptive sampling
-- 🔄 Circuit breaker protection
-- 🔄 Cost control and budget management
-- 🔄 Query correlation and tracing
-
-**Current Status**: Components exist in source code but are not integrated into any distribution.
-
-**Resource Impact** (theoretical):
-- CPU: <20% overhead  
-- Memory: <2GB
-- Network: Medium bandwidth usage
-
-## 📊 Data Flow
-
-```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐    ┌─────────────┐
-│  Database   │───▶│  OTel        │───▶│ Processors  │───▶│ New Relic   │
-│ (Postgres/  │    │ Receivers    │    │ (Transform/ │    │ (via OTLP)  │
-│  MySQL)     │    │              │    │  Enrich)    │    │             │
-└─────────────┘    └──────────────┘    └─────────────┘    └─────────────┘
-                            │
-                   ┌──────────────┐
-                   │   Health     │
-                   │  Monitoring  │
-                   │  (Prometheus)│
-                   └──────────────┘
+### Health Monitoring
+```yaml
+# Health check endpoints
+extensions:
+  health_check:
+    endpoint: localhost:13133
 ```
 
-## 🔌 Supported Databases
+### Graceful Shutdown
+- Flush all buffers
+- Complete in-flight requests
+- Close database connections
+- Save state if applicable
 
-| Database | Version | Receiver | Custom SQL | Status |
-|----------|---------|----------|------------|--------|
-| PostgreSQL | 11+ | ✅ Built-in | ✅ Yes | Production |
-| MySQL | 5.7+ | ✅ Built-in | ✅ Yes | Production |
+## 🎯 Design Principles
 
-## 📈 Metrics Coverage
+1. **Zero Persistence**
+   - All state in memory
+   - No local storage dependencies
+   - Clean restart capability
 
-### Core Database Metrics (✅ Available Now)
+2. **Defense in Depth**
+   - Multiple protection layers
+   - Graceful degradation
+   - Circuit breakers everywhere
 
-**Connection Management**:
-- Active/idle/max connections
-- Connection pool utilization
-- New connections per second
+3. **OpenTelemetry First**
+   - Standard components preferred
+   - Custom only when necessary
+   - Ecosystem compatibility
 
-**Transaction Performance**:
-- Commits/rollbacks per second
-- Transaction duration histograms
-- Lock waits and deadlocks
+4. **Performance Focused**
+   - Minimal overhead
+   - Efficient resource usage
+   - Adaptive behavior
 
-**Query Performance**:
-- Query execution rates
-- Slow query detection
-- Cache hit ratios
+## 🔗 Integration Points
 
-**Resource Utilization**:
-- CPU usage by database processes
-- Memory allocation and usage
-- Disk I/O rates and latency
+### Database Integration
+- Native driver connections
+- Connection pooling
+- Prepared statements
+- Batch operations
 
-### Advanced Analytics (⚠️ Development)
+### Backend Integration
+- OTLP protocol support
+- Vendor-specific formats
+- Compression options
+- Retry mechanisms
 
-**Active Session History**:
-- 1-second session sampling
-- Wait event categorization
-- Blocking session identification
+### Monitoring Integration
+- Prometheus metrics
+- Health endpoints
+- Logging framework
+- Trace correlation
 
-**Query Intelligence**:
-- Execution plan capture
-- Performance regression detection
-- Cost estimation analysis
+---
 
-**Operational Intelligence**:
-- Predictive load balancing
-- Automated scaling triggers
-- Health trend analysis
-
-## 🚀 Quick Start Options
-
-### Option 1: Standard OpenTelemetry (Recommended)
-
-```bash
-# 1. Download standard collector
-curl -L -o otelcol \
-  https://github.com/open-telemetry/opentelemetry-collector-releases/releases/latest/download/otelcol_linux_amd64
-
-# 2. Use our config
-curl -L -o config.yaml \
-  https://raw.githubusercontent.com/your-repo/configs/examples/config-only-base.yaml
-
-# 3. Set environment variables
-export NEW_RELIC_LICENSE_KEY="your-key"
-export DB_ENDPOINT="postgresql://localhost:5432/mydb"
-
-# 4. Run
-./otelcol --config=config.yaml
-```
-
-### Option 2: Docker
-
-```bash
-docker run -d \
-  --name db-otel \
-  -v $(pwd)/config.yaml:/etc/otelcol/config.yaml \
-  -e NEW_RELIC_LICENSE_KEY="your-key" \
-  -e DB_ENDPOINT="postgresql://host.docker.internal:5432/mydb" \
-  otel/opentelemetry-collector-contrib:latest \
-  --config=/etc/otelcol/config.yaml
-```
-
-## 🔐 Security Considerations
-
-**Database Access**:
-- Use read-only database credentials
-- Limit connection pool size
-- Enable SSL/TLS for database connections
-
-**Credential Management**:
-- Store secrets in environment variables
-- Use secret management systems (K8s secrets, AWS SSM, etc.)
-- Rotate API keys regularly
-
-**Network Security**:
-- Encrypt OTLP traffic to New Relic
-- Use private networks where possible
-- Implement network segmentation
-
-## 📋 Prerequisites
-
-**Database Requirements**:
-- PostgreSQL 11+ or MySQL 5.7+
-- Read-only user with appropriate permissions
-- Network access from collector to database
-
-**New Relic Requirements**:
-- New Relic account with OTLP endpoint access
-- Valid license key or API key
-- Sufficient data ingest limits
-
-**Infrastructure Requirements**:
-- Linux, macOS, or Windows
-- 512MB+ RAM for Config-Only mode
-- 2GB+ RAM for Enhanced mode (when available)
-- Docker or Kubernetes (optional)
-
-## 🎯 Use Cases
-
-**DevOps Teams**:
-- Monitor database health across environments
-- Set up alerting on key performance indicators
-- Track resource utilization trends
-
-**Database Administrators**:
-- Identify slow queries and performance bottlenecks
-- Monitor replication lag and consistency
-- Analyze query execution patterns
-
-**Application Developers**:
-- Correlate application performance with database metrics
-- Monitor connection pool efficiency
-- Track custom business metrics via SQL queries
-
-**Platform Engineers**:
-- Standardize monitoring across database types
-- Implement infrastructure as code for monitoring
-- Maintain observability without vendor lock-in
-
-## 📖 Next Steps
-
-1. **Get Started**: Follow the [Quick Start Guide](QUICK_START.md)
-2. **Configure**: Review [Configuration Reference](CONFIGURATION.md)
-3. **Deploy**: See [Deployment Guide](DEPLOYMENT.md)
-4. **Test**: Run [E2E Tests](TESTING.md)
-5. **Troubleshoot**: Check [Troubleshooting Guide](TROUBLESHOOTING.md)
+For implementation details, see [Development Guide](../development/SETUP.md).  
+For configuration options, see [Configuration Reference](../guides/CONFIGURATION.md).

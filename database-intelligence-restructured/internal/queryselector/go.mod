@@ -1,9 +1,9 @@
-module github.com/deepaksharma/db-otel/common/queryselector
+module github.com/database-intelligence/db-intel/internal/queryselector
 
-go 1.22
+go 1.23.0
 
 require (
-	github.com/deepaksharma/db-otel/common/featuredetector v0.0.0-00010101000000-000000000000
+	github.com/database-intelligence/db-intel/internal/featuredetector v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.27.0
 )
 
@@ -27,7 +27,5 @@ require (
 )
 
 replace (
-	github.com/deepaksharma/db-otel/components/common => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common
-	github.com/deepaksharma/db-otel/components/common/featuredetector => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common/featuredetector
-	github.com/deepaksharma/db-otel/components/common/queryselector => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common/queryselector
+	github.com/database-intelligence/db-intel/internal/featuredetector => ../featuredetector
 )

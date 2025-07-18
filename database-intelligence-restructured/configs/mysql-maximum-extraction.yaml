@@ -1,0 +1,484 @@
+# MySQL Maximum Metrics Extraction - Config Only Approach
+# This configuration extracts the maximum possible metrics using only stock OpenTelemetry components
+# No custom code required - everything is achieved through configuration
+
+receivers:
+  # ============================================
+  # CORE MYSQL RECEIVER
+  # ============================================
+  mysql:
+    endpoint: ${env:MYSQL_HOST:localhost}:${env:MYSQL_PORT:3306}
+    username: ${env:MYSQL_USER:root}
+    password: ${env:MYSQL_PASSWORD}
+    collection_interval: 10s
+    transport: tcp
+    # Enable all available metrics
+    metrics:
+      mysql.buffer_pool.data_pages:
+        enabled: true
+      mysql.buffer_pool.limit:
+        enabled: true
+      mysql.buffer_pool.operations:
+        enabled: true
+      mysql.buffer_pool.page_flushes:
+        enabled: true
+      mysql.buffer_pool.pages:
+        enabled: true
+      mysql.buffer_pool.usage:
+        enabled: true
+      mysql.commands:
+        enabled: true
+      mysql.connection.count:
+        enabled: true
+      mysql.connection.errors:
+        enabled: true
+      mysql.double_writes:
+        enabled: true
+      mysql.handlers:
+        enabled: true
+      mysql.index.io.wait.count:
+        enabled: true
+      mysql.index.io.wait.time:
+        enabled: true
+      mysql.innodb.row_lock.time:
+        enabled: true
+      mysql.innodb.row_lock.waits:
+        enabled: true
+      mysql.locks:
+        enabled: true
+      mysql.log_operations:
+        enabled: true
+      mysql.opened_resources:
+        enabled: true
+      mysql.operations:
+        enabled: true
+      mysql.page_operations:
+        enabled: true
+      mysql.query.client.count:
+        enabled: true
+      mysql.query.count:
+        enabled: true
+      mysql.query.slow.count:
+        enabled: true
+      mysql.replica.lag:
+        enabled: true
+      mysql.replica.sql_delay:
+        enabled: true
+      mysql.row_locks:
+        enabled: true
+      mysql.row_operations:
+        enabled: true
+      mysql.sorts:
+        enabled: true
+      mysql.statement_event.count:
+        enabled: true
+      mysql.statement_event.wait.time:
+        enabled: true
+      mysql.table.cache:
+        enabled: true
+      mysql.table.io.wait.count:
+        enabled: true
+      mysql.table.io.wait.time:
+        enabled: true
+      mysql.table.lock_wait.read.count:
+        enabled: true
+      mysql.table.lock_wait.read.time:
+        enabled: true
+      mysql.table.lock_wait.write.count:
+        enabled: true
+      mysql.table.lock_wait.write.time:
+        enabled: true
+      mysql.table_open_cache:
+        enabled: true
+      mysql.thread.count:
+        enabled: true
+      mysql.tmp_resources:
+        enabled: true
+      mysql.uptime:
+        enabled: true
+
+  # ============================================
+  # PERFORMANCE SCHEMA METRICS
+  # ============================================
+  sqlquery/performance_schema:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:root}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_HOST:localhost}:${env:MYSQL_PORT:3306})/performance_schema?allowNativePasswords=true"
+    collection_interval: 30s
+    queries:
+      # Statement performance by digest
+      - sql: |
+          SELECT 
+            DIGEST_TEXT as query_digest,
+            COUNT_STAR as exec_count,
+            ROUND(AVG_TIMER_WAIT/1000000000, 3) as avg_latency_ms,
+            ROUND(MAX_TIMER_WAIT/1000000000, 3) as max_latency_ms,
+            ROUND(SUM_TIMER_WAIT/1000000000, 3) as total_latency_ms,
+            SUM_ROWS_SENT as rows_sent,
+            SUM_ROWS_EXAMINED as rows_examined,
+            SUM_CREATED_TMP_TABLES as tmp_tables,
+            SUM_CREATED_TMP_DISK_TABLES as tmp_disk_tables,
+            SUM_SORT_MERGE_PASSES as sort_merge_passes,
+            ROUND(SUM_ROWS_EXAMINED/COUNT_STAR) as avg_rows_examined
+          FROM events_statements_summary_by_digest
+          WHERE DIGEST_TEXT IS NOT NULL
+            AND COUNT_STAR > 10
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 50
+        metrics:
+          - metric_name: mysql.query.executions
+            value_column: exec_count
+            value_type: gauge
+            unit: "{executions}"
+            attribute_columns: [query_digest]
+          - metric_name: mysql.query.avg_latency
+            value_column: avg_latency_ms
+            value_type: gauge
+            unit: ms
+            attribute_columns: [query_digest]
+          - metric_name: mysql.query.max_latency
+            value_column: max_latency_ms
+            value_type: gauge
+            unit: ms
+            attribute_columns: [query_digest]
+          - metric_name: mysql.query.rows_examined_avg
+            value_column: avg_rows_examined
+            value_type: gauge
+            unit: "{rows}"
+            attribute_columns: [query_digest]
+
+  # ============================================
+  # REAL-TIME PROCESSLIST MONITORING
+  # ============================================
+  sqlquery/processlist:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:root}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_HOST:localhost}:${env:MYSQL_PORT:3306})/information_schema?allowNativePasswords=true"
+    collection_interval: 5s
+    queries:
+      # Active session monitoring
+      - sql: |
+          SELECT 
+            USER as session_user,
+            HOST as session_host,
+            DB as database_name,
+            COMMAND as command_type,
+            TIME as query_time,
+            STATE as session_state,
+            COUNT(*) as session_count,
+            MAX(TIME) as max_query_time,
+            AVG(TIME) as avg_query_time
+          FROM PROCESSLIST
+          WHERE ID != CONNECTION_ID()
+          GROUP BY USER, HOST, DB, COMMAND, STATE
+        metrics:
+          - metric_name: mysql.sessions.active
+            value_column: session_count
+            value_type: gauge
+            unit: "{sessions}"
+            attribute_columns: [session_user, database_name, command_type, session_state]
+          - metric_name: mysql.sessions.max_query_time
+            value_column: max_query_time
+            value_type: gauge
+            unit: s
+            attribute_columns: [session_user, database_name, command_type, session_state]
+
+  # ============================================
+  # TABLE AND INDEX STATISTICS
+  # ============================================
+  sqlquery/table_stats:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:root}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_HOST:localhost}:${env:MYSQL_PORT:3306})/information_schema?allowNativePasswords=true"
+    collection_interval: 60s
+    queries:
+      # Table size and fragmentation
+      - sql: |
+          SELECT 
+            TABLE_SCHEMA as schema_name,
+            TABLE_NAME as table_name,
+            ENGINE as storage_engine,
+            TABLE_ROWS as row_count,
+            ROUND(DATA_LENGTH/1024/1024, 2) as data_size_mb,
+            ROUND(INDEX_LENGTH/1024/1024, 2) as index_size_mb,
+            ROUND((DATA_LENGTH + INDEX_LENGTH)/1024/1024, 2) as total_size_mb,
+            ROUND(DATA_FREE/1024/1024, 2) as free_space_mb,
+            ROUND((DATA_FREE/(DATA_LENGTH + INDEX_LENGTH + 1)) * 100, 2) as fragmentation_percent
+          FROM TABLES
+          WHERE TABLE_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+            AND TABLE_TYPE = 'BASE TABLE'
+          ORDER BY DATA_LENGTH + INDEX_LENGTH DESC
+          LIMIT 100
+        metrics:
+          - metric_name: mysql.table.rows
+            value_column: row_count
+            value_type: gauge
+            unit: "{rows}"
+            attribute_columns: [schema_name, table_name, storage_engine]
+          - metric_name: mysql.table.data_size
+            value_column: data_size_mb
+            value_type: gauge
+            unit: MB
+            attribute_columns: [schema_name, table_name, storage_engine]
+          - metric_name: mysql.table.index_size
+            value_column: index_size_mb
+            value_type: gauge
+            unit: MB
+            attribute_columns: [schema_name, table_name, storage_engine]
+          - metric_name: mysql.table.fragmentation
+            value_column: fragmentation_percent
+            value_type: gauge
+            unit: "%"
+            attribute_columns: [schema_name, table_name, storage_engine]
+
+  # ============================================
+  # INNODB METRICS
+  # ============================================
+  sqlquery/innodb:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:root}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_HOST:localhost}:${env:MYSQL_PORT:3306})/information_schema?allowNativePasswords=true"
+    collection_interval: 10s
+    queries:
+      # InnoDB buffer pool statistics
+      - sql: |
+          SELECT 
+            POOL_ID,
+            POOL_SIZE,
+            FREE_BUFFERS,
+            DATABASE_PAGES,
+            OLD_DATABASE_PAGES,
+            MODIFIED_DATABASE_PAGES,
+            PENDING_READS,
+            PENDING_WRITES_LRU,
+            PENDING_WRITES_FLUSH_LIST,
+            PAGES_MADE_YOUNG,
+            PAGES_NOT_MADE_YOUNG,
+            NUMBER_PAGES_READ,
+            NUMBER_PAGES_CREATED,
+            NUMBER_PAGES_WRITTEN,
+            HIT_RATE
+          FROM INNODB_BUFFER_POOL_STATS
+        metrics:
+          - metric_name: mysql.innodb.buffer_pool.size
+            value_column: POOL_SIZE
+            value_type: gauge
+            unit: "{pages}"
+            attribute_columns: [POOL_ID]
+          - metric_name: mysql.innodb.buffer_pool.free
+            value_column: FREE_BUFFERS
+            value_type: gauge
+            unit: "{pages}"
+            attribute_columns: [POOL_ID]
+          - metric_name: mysql.innodb.buffer_pool.modified
+            value_column: MODIFIED_DATABASE_PAGES
+            value_type: gauge
+            unit: "{pages}"
+            attribute_columns: [POOL_ID]
+          - metric_name: mysql.innodb.buffer_pool.hit_rate
+            value_column: HIT_RATE
+            value_type: gauge
+            unit: "1"
+            attribute_columns: [POOL_ID]
+
+  # ============================================
+  # REPLICATION MONITORING
+  # ============================================
+  sqlquery/replication:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:root}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_HOST:localhost}:${env:MYSQL_PORT:3306})/mysql?allowNativePasswords=true"
+    collection_interval: 10s
+    queries:
+      # Replica status
+      - sql: |
+          SHOW REPLICA STATUS
+        metrics:
+          - metric_name: mysql.replication.lag
+            value_column: Seconds_Behind_Source
+            value_type: gauge
+            unit: s
+          - metric_name: mysql.replication.io_running
+            value_column: Replica_IO_Running
+            value_type: gauge
+            unit: "{status}"
+          - metric_name: mysql.replication.sql_running
+            value_column: Replica_SQL_Running
+            value_type: gauge
+            unit: "{status}"
+
+  # ============================================
+  # HOST METRICS
+  # ============================================
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.connections:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      process:
+        metrics:
+          process.cpu.utilization:
+            enabled: true
+          process.memory.utilization:
+            enabled: true
+
+processors:
+  # ============================================
+  # MEMORY MANAGEMENT
+  # ============================================
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  # ============================================
+  # BATCH PROCESSING
+  # ============================================
+  batch:
+    send_batch_size: 10000
+    timeout: 10s
+    send_batch_max_size: 11000
+
+  # ============================================
+  # RESOURCE DETECTION
+  # ============================================
+  resource:
+    attributes:
+      - key: deployment.mode
+        value: config-only-maximum
+        action: upsert
+      - key: database.type
+        value: mysql
+        action: upsert
+      - key: collector.name
+        value: database-intelligence-mysql
+        action: upsert
+
+  # ============================================
+  # METRIC TRANSFORMATIONS
+  # ============================================
+  transform/add_metadata:
+    metric_statements:
+      # Classify slow queries
+      - context: metric
+        statements:
+          - set(attributes["query.classification"], "slow") where name == "mysql.query.avg_latency" and value > 1000
+          - set(attributes["query.classification"], "very_slow") where name == "mysql.query.avg_latency" and value > 5000
+      
+      # Classify table sizes
+      - context: metric
+        statements:
+          - set(attributes["table.size_category"], "small") where name == "mysql.table.data_size" and value < 100
+          - set(attributes["table.size_category"], "medium") where name == "mysql.table.data_size" and value >= 100 and value < 1000
+          - set(attributes["table.size_category"], "large") where name == "mysql.table.data_size" and value >= 1000
+
+  # ============================================
+  # FILTERING AND SAMPLING
+  # ============================================
+  filter/reduce_cardinality:
+    metrics:
+      metric:
+        # Drop metrics for system schemas
+        - 'attributes["schema_name"] == "mysql"'
+        - 'attributes["schema_name"] == "sys"'
+        - 'attributes["schema_name"] == "performance_schema"'
+
+exporters:
+  # ============================================
+  # NEW RELIC EXPORTER
+  # ============================================
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # ============================================
+  # LOCAL DEBUGGING
+  # ============================================
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # ============================================
+  # PROMETHEUS ENDPOINT
+  # ============================================
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: db_mysql
+    const_labels:
+      deployment.mode: config_only_maximum
+
+service:
+  pipelines:
+    # ============================================
+    # HIGH FREQUENCY METRICS (5s)
+    # ============================================
+    metrics/high_frequency:
+      receivers: [sqlquery/processlist]
+      processors: [memory_limiter, resource, transform/add_metadata, batch]
+      exporters: [otlp/newrelic]
+
+    # ============================================
+    # STANDARD METRICS (10s)
+    # ============================================
+    metrics/standard:
+      receivers: [mysql, sqlquery/innodb, sqlquery/replication, hostmetrics]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/newrelic]
+
+    # ============================================
+    # PERFORMANCE METRICS (30s)
+    # ============================================
+    metrics/performance:
+      receivers: [sqlquery/performance_schema]
+      processors: [memory_limiter, resource, transform/add_metadata, filter/reduce_cardinality, batch]
+      exporters: [otlp/newrelic]
+
+    # ============================================
+    # ANALYTICS METRICS (60s)
+    # ============================================
+    metrics/analytics:
+      receivers: [sqlquery/table_stats]
+      processors: [memory_limiter, resource, filter/reduce_cardinality, batch]
+      exporters: [otlp/newrelic]
+
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  extensions: [health_check, pprof, zpages]

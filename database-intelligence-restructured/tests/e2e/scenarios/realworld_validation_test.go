@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	
-	"github.com/deepaksharma/db-otel/tests/e2e/framework"
+	"github.com/database-intelligence/db-intel/tests/e2e/framework"
 )
 
 // RealWorldValidationTestSuite validates real metrics collection

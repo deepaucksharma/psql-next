@@ -1,0 +1,158 @@
+# Heavy Load Configuration - For high-traffic production systems
+# Resource usage: <500MB RAM, <1% CPU
+# Includes aggressive sampling and filtering
+
+receivers:
+  # Optimized collection for heavy load
+  mysql/waits:
+    endpoint: ${env:MYSQL_PRIMARY_HOST}:3306
+    username: ${env:MYSQL_MONITOR_USER}
+    password: ${env:MYSQL_MONITOR_PASS}
+    collection_interval: 30s  # Balanced interval
+    
+  sqlquery/waits:
+    driver: mysql
+    datasource: "${env:MYSQL_MONITOR_USER}:${env:MYSQL_MONITOR_PASS}@tcp(${env:MYSQL_PRIMARY_HOST}:3306)/"
+    collection_interval: 30s
+    queries:
+      # Focus on slowest queries only
+      - sql: |
+          WITH ranked_queries AS (
+            SELECT 
+              DIGEST as query_hash,
+              LEFT(DIGEST_TEXT, 80) as query_text,
+              COUNT_STAR as exec_count,
+              AVG_TIMER_WAIT/1000000 as avg_time_ms,
+              SUM_TIMER_WAIT as total_time,
+              SUM_ROWS_EXAMINED/COUNT_STAR as avg_rows_examined,
+              SUM_NO_INDEX_USED as no_index_used_count,
+              SUM_CREATED_TMP_DISK_TABLES as tmp_disk_tables,
+              PERCENT_RANK() OVER (ORDER BY SUM_TIMER_WAIT DESC) as time_percentile
+            FROM performance_schema.events_statements_summary_by_digest
+            WHERE COUNT_STAR > 100  # High execution count
+              AND AVG_TIMER_WAIT > 50000000  # >50ms avg
+          )
+          SELECT * FROM ranked_queries
+          WHERE time_percentile <= 0.10  # Top 10% by time
+          ORDER BY total_time DESC
+          LIMIT 100
+        metrics:
+          - metric_name: mysql.query.profile.heavy
+            value_column: avg_time_ms
+            attribute_columns: 
+              - query_hash
+              - exec_count
+              - avg_rows_examined
+              - no_index_used_count
+
+  # Prometheus with filtering
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'mysql_exporter'
+          scrape_interval: 60s
+          static_configs:
+            - targets: ['mysql-exporter-primary:9104']
+          metric_relabel_configs:
+            # Drop detailed table metrics
+            - source_labels: [__name__]
+              regex: 'mysql_info_schema_table_.*'
+              action: drop
+
+processors:
+  # Increased memory for heavy load
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 64
+    
+  # Aggressive sampling
+  probabilistic_sampler/dynamic:
+    sampling_percentage: 100  # Will be overridden by rules below
+    
+  # Dynamic sampling based on severity
+  transform/sampling_rules:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Always keep critical
+          - set(attributes["sampling.keep"], true)
+            where attributes["wait.severity"] == "critical"
+          
+          # Sample high severity
+          - set(attributes["sampling.keep"], rand() < 0.5)
+            where attributes["wait.severity"] == "high"
+          
+          # Heavy sampling for medium/low
+          - set(attributes["sampling.keep"], rand() < 0.1)
+            where attributes["wait.severity"] in ["medium", "low"]
+          
+          # Always keep advisories
+          - set(attributes["sampling.keep"], true)
+            where attributes["advisor.type"] != ""
+  
+  # Apply sampling decision
+  filter/sampling:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["sampling.keep"] == true'
+  
+  # Aggressive cardinality reduction
+  filter/cardinality_heavy:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        # Top queries by impact
+        - 'attributes["exec_count"] > 1000'
+        - 'attributes["avg_time_ms"] > 100'
+        # Skip successful fast queries
+        - 'not (attributes["wait.severity"] == "low" and attributes["avg_time_ms"] < 50)'
+  
+  # Heavier batching
+  batch:
+    timeout: 20s
+    send_batch_size: 5000
+    send_batch_max_size: 8000
+
+exporters:
+  otlp/gateway:
+    endpoint: ${GATEWAY_ENDPOINT}
+    compression: gzip  # Enable compression
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 10000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+
+service:
+  pipelines:
+    metrics/critical:
+      # Fast path for critical metrics
+      receivers: [mysql/waits]
+      processors: 
+        - memory_limiter
+        - filter/cardinality_heavy
+        - batch
+      exporters: [otlp/gateway]
+    
+    metrics/sampled:
+      # Sampled path for other metrics
+      receivers: [sqlquery/waits, prometheus]
+      processors:
+        - memory_limiter
+        - transform/sampling_rules
+        - filter/sampling
+        - batch
+      exporters: [otlp/gateway]
+      
+  telemetry:
+    metrics:
+      level: basic  # Reduce telemetry overhead
+    logs:
+      level: warn  # Less logging

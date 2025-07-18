@@ -132,7 +132,7 @@ go build -o load-generator main.go
 # Using standard OTel collector
 docker run -d \
   --name otel-dev \
-  -v $(pwd)/configs/config-only-mode.yaml:/config.yaml \
+  -v $(pwd)/configs/postgresql-maximum-extraction.yaml:/config.yaml \
   --env-file .env \
   --network host \
   otel/opentelemetry-collector-contrib:latest \
@@ -147,7 +147,7 @@ make build-enterprise
 
 # Run
 ./bin/database-intelligence-enterprise \
-  --config=configs/custom-mode.yaml
+  --config=configs/profiles/enterprise.yaml
 ```
 
 ### 3. Run with Docker Compose
@@ -269,7 +269,7 @@ service:
 go build -gcflags="all=-N -l" -o collector ./distributions/enterprise
 
 # Run with delve
-dlv exec ./collector -- --config=configs/custom-mode.yaml
+dlv exec ./collector -- --config=configs/profiles/enterprise.yaml
 ```
 
 ### Performance Profiling

@@ -1,90 +1,198 @@
 # Database Intelligence Scripts
 
-This directory contains streamlined scripts for building, testing, and managing the database-intelligence project.
+Organized collection of scripts for building, testing, deploying, and maintaining the Database Intelligence project.
 
-## Consolidated Scripts
+## 📁 Directory Structure
 
-After refactoring, we've consolidated all build and test functionality into two main scripts:
-
-### 1. build.sh
-Unified build script that handles all distribution types and build scenarios.
-
-**Usage:**
-```bash
-./build.sh [MODE] [OPTIONS]
-
-# Modes:
-#   all         - Build all distributions (default)
-#   minimal     - Build minimal distribution only
-#   production  - Build production distribution only
-#   enterprise  - Build enterprise distribution only
-#   e2e         - Build E2E test collector with OCB
-#   test        - Build and run component tests
-
-# Examples:
-./build.sh                    # Build all distributions
-./build.sh production         # Build production only
-./build.sh test              # Build and test all components
-VERBOSE=true ./build.sh all  # Verbose build
+```
+scripts/
+├── build/          # Build scripts
+├── test/           # Test scripts  
+├── deploy/         # Deployment scripts
+├── dev/            # Development utilities
+├── maintain/       # Maintenance scripts
+└── utils/          # Shared utilities
 ```
 
-### 2. test.sh
-Unified test runner that handles all testing scenarios.
+## 🚀 Quick Start
 
-**Usage:**
+### Building
 ```bash
-./test.sh [MODE] [OPTIONS]
+# Build production distribution
+./scripts/build/build.sh production
 
-# Modes:
-#   e2e           - Full E2E test with databases (default)
-#   smoke         - Quick smoke test with minimal config
-#   validate      - Validate project structure only
-#   production    - Production-style test with monitoring
-#   comprehensive - Run all test types
+# Build all distributions
+./scripts/build/build.sh all
 
-# Examples:
-./test.sh                         # Run E2E test
-./test.sh smoke                   # Quick smoke test
-./test.sh validate               # Structure validation
-KEEP_RUNNING=true ./test.sh e2e  # Keep services running after test
+# Build Docker image
+./scripts/build/build.sh docker
 ```
 
-## Common Library
+### Testing
+```bash
+# Run all tests
+./scripts/test/run-tests.sh
 
-The `lib/common.sh` file contains shared functions used by both scripts:
-- Color-coded logging functions
-- Database management (start/stop/health checks)
-- Prerequisites checking
-- Environment file management
-- Go workspace synchronization
-- Report generation helpers
+# Run specific test type
+./scripts/test/run-tests.sh unit
+./scripts/test/run-tests.sh integration postgresql
+./scripts/test/run-tests.sh e2e
+```
 
-## Legacy Scripts
+### Deployment
+```bash
+# Deploy with Docker
+./scripts/deploy/docker.sh up
 
-All previous individual scripts have been archived in `/archive/scripts/` for reference:
-- Multiple build-*.sh scripts → consolidated into build.sh
-- Multiple run-*.sh scripts → consolidated into test.sh
-- Various fix-*.sh scripts → one-time fixes, no longer needed
-- Utility scripts → functionality moved to common library
+# Deploy to Kubernetes
+./scripts/deploy/kubernetes.sh apply
 
-## Benefits of Consolidation
+# Check deployment status
+./scripts/deploy/docker.sh status
+```
 
-1. **Reduced Redundancy**: Common functions are now in one place
-2. **Consistent Interface**: Both scripts use similar command patterns
-3. **Better Maintenance**: Fewer scripts to maintain and update
-4. **Preserved Functionality**: All features from original scripts are retained
-5. **Improved Documentation**: Clear usage patterns and examples
+### Development
+```bash
+# Fix module issues
+./scripts/dev/fix-modules.sh
 
-## Migration Guide
+# Set up development environment
+./scripts/dev/setup.sh
 
-If you were using the old scripts, here's how to migrate:
+# Format and lint code
+./scripts/dev/lint.sh
+```
 
-| Old Script | New Command |
-|------------|-------------|
-| build-and-test.sh | `./build.sh test` |
-| build-minimal-collector.sh | `./build.sh minimal` |
-| build-working-e2e-collector.sh | `./build.sh e2e` |
-| run-complete-e2e-tests.sh | `./test.sh comprehensive` |
-| run-simple-e2e-test.sh | `./test.sh smoke` |
-| run-production.sh | `./test.sh production` |
-| validate-e2e-structure.sh | `./test.sh validate` |
+### Maintenance
+```bash
+# Clean up everything
+./scripts/maintain/cleanup.sh
+
+# Validate configurations
+./scripts/maintain/validate.sh
+
+# Update dependencies
+./scripts/maintain/update-deps.sh
+```
+
+## 📋 Script Categories
+
+### Build Scripts (`build/`)
+- **build.sh** - Main build script supporting multiple modes and platforms
+- See [build/README.md](build/README.md) for detailed documentation
+
+### Test Scripts (`test/`)
+- **run-tests.sh** - Unified test runner
+- **unit.sh** - Unit test execution
+- **integration.sh** - Integration test execution
+- **config-validation.sh** - Configuration validation
+- **performance.sh** - Performance testing
+
+### Deployment Scripts (`deploy/`)
+- **docker.sh** - Docker deployment management
+- **kubernetes.sh** - Kubernetes deployment
+- **start-services.sh** - Start all services
+- **stop-services.sh** - Stop all services
+
+### Development Scripts (`dev/`)
+- **fix-modules.sh** - Fix Go module issues
+- **setup.sh** - Development environment setup
+- **lint.sh** - Code linting and formatting
+- **watch.sh** - Watch mode for development
+
+### Maintenance Scripts (`maintain/`)
+- **cleanup.sh** - Clean build artifacts and temp files
+- **validate.sh** - Validate project structure
+- **update-deps.sh** - Update dependencies
+- **check-security.sh** - Security scanning
+
+### Utility Scripts (`utils/`)
+- **common.sh** - Shared functions and utilities
+- **colors.sh** - Color definitions
+- **logging.sh** - Logging functions
+
+## 🔧 Common Tasks
+
+### Complete Build and Test
+```bash
+# Build and test everything
+./scripts/build/build.sh production && ./scripts/test/run-tests.sh
+```
+
+### Development Workflow
+```bash
+# Fix modules, build, and test
+./scripts/dev/fix-modules.sh
+./scripts/build/build.sh production
+./scripts/test/run-tests.sh unit
+```
+
+### Clean Development Environment
+```bash
+# Clean everything and rebuild
+./scripts/maintain/cleanup.sh all
+./scripts/build/build.sh clean
+./scripts/build/build.sh production
+```
+
+### Deploy to Production
+```bash
+# Build, test, and deploy
+./scripts/build/build.sh production
+./scripts/test/run-tests.sh
+./scripts/deploy/docker.sh up production
+```
+
+## 🌟 Best Practices
+
+1. **Always source common.sh** for consistent utilities
+2. **Use descriptive logging** with the provided functions
+3. **Handle errors gracefully** with proper exit codes
+4. **Support dry-run mode** where applicable
+5. **Provide help/usage information**
+
+## 🐛 Troubleshooting
+
+### Script Not Found
+```bash
+# Make sure scripts are executable
+chmod +x scripts/**/*.sh
+```
+
+### Module Issues
+```bash
+# Fix all module problems
+./scripts/dev/fix-modules.sh all
+```
+
+### Build Failures
+```bash
+# Clean and rebuild
+./scripts/build/build.sh clean
+./scripts/build/build.sh production
+```
+
+### Test Failures
+```bash
+# Run tests with verbose output
+VERBOSE=true ./scripts/test/run-tests.sh
+```
+
+## 📝 Contributing
+
+When adding new scripts:
+1. Place in appropriate category directory
+2. Source `utils/common.sh` for utilities
+3. Include usage/help information
+4. Make executable with `chmod +x`
+5. Update this README
+
+## 🔗 Related Documentation
+
+- [Project README](../README.md)
+- [Development Guide](../docs/development/SETUP.md)
+- [CI/CD Documentation](../.ci/README.md)
+
+---
+
+**Note**: These scripts have been consolidated from multiple locations to provide a single, organized location for all operational scripts.

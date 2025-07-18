@@ -1,0 +1,125 @@
+version: '3.8'
+
+services:
+  # Database Intelligence Collector
+  collector:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+      args:
+        BUILD_PROFILE: ${DB_INTEL_PROFILE:-standard}
+    container_name: db-intel-collector
+    environment:
+      - DB_INTEL_PROFILE=${DB_INTEL_PROFILE:-standard}
+      - CONFIG_PATH=/etc/otel-collector/config.yaml
+      - POSTGRES_DSN=postgres://monitoring:monitoring_password@postgres:5432/postgres?sslmode=disable
+      - MYSQL_DSN=monitoring:monitoring_password@tcp(mysql:3306)/mysql
+    volumes:
+      - ${CONFIG_FILE:-../../configs/profiles/standard.yaml}:/etc/otel-collector/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Prometheus metrics
+      - "8889:8889"   # Prometheus exporter
+      - "13133:13133" # Health check
+      - "14250:14250" # Jaeger gRPC
+      - "14268:14268" # Jaeger HTTP
+      - "6060:6060"   # pprof (enterprise only)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - db-intel-network
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: db-intel-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    volumes:
+      - ./init-scripts/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - db-intel-network
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: db-intel-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=mysql
+      - MYSQL_USER=monitoring
+      - MYSQL_PASSWORD=monitoring_password
+    volumes:
+      - ./init-scripts/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mysql-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - db-intel-network
+
+  # Optional: Jaeger for trace visualization
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: db-intel-jaeger
+    profiles:
+      - full
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14250:14250" # gRPC
+    networks:
+      - db-intel-network
+
+  # Optional: Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: db-intel-prometheus
+    profiles:
+      - full
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    networks:
+      - db-intel-network
+
+volumes:
+  postgres-data:
+  mysql-data:
+  prometheus-data:
+
+networks:
+  db-intel-network:
+    driver: bridge

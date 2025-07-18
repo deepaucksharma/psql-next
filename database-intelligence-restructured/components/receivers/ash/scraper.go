@@ -12,7 +12,6 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver"
-	"go.opentelemetry.io/collector/scraper/scrapererror"
 	"go.uber.org/zap"
 
 	// PostgreSQL driver
@@ -50,7 +49,7 @@ func newScraper(config *Config, settings receiver.Settings) (*ashScraper, error)
 // start initializes the database connection and components
 func (s *ashScraper) start(ctx context.Context, host component.Host) error {
 	// Connect to database
-	db, err := sql.Open(s.config.Driver, s.config.DataSource)
+	db, err := sql.Open(s.config.Driver, s.config.Datasource)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
@@ -116,7 +115,7 @@ func (s *ashScraper) scrape(ctx context.Context) (pmetric.Metrics, error) {
 	snapshot, err := s.collector.CollectSnapshot(ctx)
 	if err != nil {
 		s.collectionErrors++
-		return pmetric.NewMetrics(), scrapererror.NewPartialScrapeError(err, 0)
+		return pmetric.NewMetrics(), fmt.Errorf("failed to collect snapshot: %w", err)
 	}
 	
 	s.samplesCollected++

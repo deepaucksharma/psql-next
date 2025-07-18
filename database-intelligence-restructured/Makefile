@@ -1,355 +1,191 @@
-# Database Intelligence - Unified Makefile
-# Consolidates all build, test, and deployment operations
+# Database Intelligence Makefile
 
-# Project metadata
-PROJECT_NAME := database-intelligence
-BINARY_NAME := database-intelligence-collector
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+.PHONY: all build test clean docker help dev
 
-# Build flags
-LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitCommit=$(GIT_COMMIT)"
+# Variables
+BINARY_NAME := dbintel
+DOCKER_IMAGE := dbintel
+DOCKER_TAG := latest
+GO_VERSION := 1.23.0
 
-# Docker configuration
-DOCKER_REGISTRY ?= 
-DOCKER_ORG ?= database-intelligence
-DOCKER_IMAGE := $(if $(DOCKER_REGISTRY),$(DOCKER_REGISTRY)/,)$(DOCKER_ORG)/$(PROJECT_NAME)
-DOCKER_TAG ?= $(VERSION)
+# Scripts
+BUILD_SCRIPT := ./scripts/build/build.sh
+TEST_SCRIPT := ./scripts/test/run-tests.sh
+DEPLOY_SCRIPT := ./scripts/deploy/docker.sh
+DEV_SCRIPT := ./scripts/dev/fix-modules.sh
+CLEAN_SCRIPT := ./scripts/maintain/cleanup.sh
 
-# Directories
-SCRIPTS_DIR := ./scripts
-BUILD_DIR := ./distributions
-CONFIGS_DIR := ./configs
-CONFIG_DIR := ./configs
-TESTS_DIR := ./tests
-
-# Default shell
-SHELL := /bin/bash
-
-# Color output
-NO_COLOR := \033[0m
-OK_COLOR := \033[32;01m
-ERROR_COLOR := \033[31;01m
-WARN_COLOR := \033[33;01m
+# Color codes for output
+GREEN := \033[0;32m
+YELLOW := \033[0;33m
+RED := \033[0;31m
+NC := \033[0m # No Color
 
 # Default target
-.DEFAULT_GOAL := help
+all: build
 
-##@ General
+help: ## Show this help message
+	@echo "Database Intelligence Build System"
+	@echo ""
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[32m%-15s\033[0m %s\n", $$1, $$2}'
 
-.PHONY: help
-help: ## Display this help
-	@awk 'BEGIN {FS = ":.*##"; printf "Database Intelligence Makefile\n\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+# Build targets
+build: ## Build production distribution
+	@$(BUILD_SCRIPT) production
 
-.PHONY: version
-version: ## Show version information
-	@echo "Version: $(VERSION)"
-	@echo "Git Commit: $(GIT_COMMIT)"
-	@echo "Build Time: $(BUILD_TIME)"
+build-minimal: ## Build minimal distribution
+	@$(BUILD_SCRIPT) minimal
 
-##@ Development
+build-enterprise: ## Build enterprise distribution
+	@$(BUILD_SCRIPT) enterprise
 
-.PHONY: dev
-dev: fmt lint test-unit ## Run all development checks
-	@echo "$(OK_COLOR)Development checks passed!$(NO_COLOR)"
+build-all: ## Build all distributions
+	@$(BUILD_SCRIPT) all
 
-.PHONY: fmt
-fmt: ## Format code
-	@echo "Formatting code..."
-	@go fmt ./...
-	@gofmt -s -w .
+docker-build: ## Build Docker image
+	@$(BUILD_SCRIPT) docker
 
-.PHONY: lint
-lint: ## Run linters
-	@echo "Running linters..."
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run; \
-	else \
-		echo "$(WARN_COLOR)golangci-lint not installed, skipping$(NO_COLOR)"; \
-	fi
+# Test targets
+test: ## Run all tests
+	@$(TEST_SCRIPT) all
 
-.PHONY: vet
-vet: ## Run go vet
-	@echo "Running go vet..."
-	@go vet ./...
+test-unit: ## Run unit tests only
+	@$(TEST_SCRIPT) unit
 
-.PHONY: security
-security: ## Run security checks
-	@echo "Running security checks..."
-	@if command -v gosec >/dev/null 2>&1; then \
-		gosec -quiet ./...; \
-	else \
-		echo "$(WARN_COLOR)gosec not installed, skipping$(NO_COLOR)"; \
-	fi
-
-##@ Build
-
-.PHONY: build
-build: ## Build production collector
-	@echo "Building $(BINARY_NAME)..."
-	@$(SCRIPTS_DIR)/build/build.sh production
-
-.PHONY: build-all
-build-all: ## Build all distributions (minimal, production, enterprise)
-	@echo "Building all distributions..."
-	@$(SCRIPTS_DIR)/build/build.sh all
-
-.PHONY: build-minimal
-build-minimal: ## Build minimal collector
-	@echo "Building minimal collector..."
-	@$(SCRIPTS_DIR)/build/build.sh minimal
-
-.PHONY: build-debug
-build-debug: ## Build with debug symbols
-	@echo "Building debug binary..."
-	@go build -gcflags="all=-N -l" $(LDFLAGS) -o $(BUILD_DIR)/debug/$(BINARY_NAME) ./distributions/production
-
-.PHONY: build-multiplatform
-build-multiplatform: ## Build for multiple platforms
-	@echo "Building for multiple platforms..."
-	@$(SCRIPTS_DIR)/build/build.sh multiplatform
-
-##@ Docker
-
-.PHONY: docker-build
-docker-build: ## Build Docker images
-	@echo "Building Docker images..."
-	@$(SCRIPTS_DIR)/build/build.sh docker DOCKER_TAG=$(DOCKER_TAG)
-
-.PHONY: docker-push
-docker-push: docker-build ## Push Docker images
-	@echo "Pushing Docker images..."
-	@docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
-	@docker push $(DOCKER_IMAGE):latest
-
-.PHONY: docker-up
-docker-up: ## Start Docker environment
-	@echo "Starting Docker environment..."
-	@cd deployments/docker && docker compose up -d
-
-.PHONY: docker-down
-docker-down: ## Stop Docker environment
-	@echo "Stopping Docker environment..."
-	@cd deployments/docker && docker compose down
-
-.PHONY: docker-logs
-docker-logs: ## Show Docker logs
-	@cd deployments/docker && docker compose logs -f
-
-.PHONY: docker-clean
-docker-clean: ## Clean Docker resources
-	@echo "Cleaning Docker resources..."
-	@cd deployments/docker && docker compose down -v
-	@docker image prune -f
-
-##@ Testing
-
-.PHONY: test
-test: test-unit test-integration ## Run all tests
-
-.PHONY: test-unit
-test-unit: ## Run unit tests
-	@echo "Running unit tests..."
-	@$(SCRIPTS_DIR)/test/test.sh unit
-
-.PHONY: test-integration
 test-integration: ## Run integration tests
-	@echo "Running integration tests..."
-	@$(SCRIPTS_DIR)/test/test.sh integration
+	@$(TEST_SCRIPT) integration
 
-.PHONY: test-e2e
 test-e2e: ## Run end-to-end tests
-	@echo "Running E2E tests..."
-	@$(SCRIPTS_DIR)/test/test.sh e2e
+	@$(TEST_SCRIPT) e2e
 
-.PHONY: test-components
-test-components: ## Test component builds
-	@echo "Testing components..."
-	@$(SCRIPTS_DIR)/test/test.sh components
+# Development targets
+dev: ## Run development checks (format, lint, test)
+	@echo "${YELLOW}Running development checks...${NC}"
+	@$(DEV_SCRIPT) all
+	@$(BUILD_SCRIPT) production
+	@$(TEST_SCRIPT) unit
+	@echo "${GREEN}Development checks complete${NC}"
 
-.PHONY: test-otlp
-test-otlp: ## Run OTLP compliance tests
-	@echo "Running OTLP tests..."
-	@$(SCRIPTS_DIR)/test/test.sh otlp
+dev-run: ## Run collector in development mode
+	@$(DEPLOY_SCRIPT) up
 
-.PHONY: test-coverage
-test-coverage: ## Run tests with coverage
-	@echo "Running tests with coverage..."
-	@COVERAGE=true $(SCRIPTS_DIR)/test/test.sh all
+fix-modules: ## Fix Go module issues
+	@$(DEV_SCRIPT) all
 
-.PHONY: test-performance
-test-performance: ## Run performance tests
-	@echo "Running performance tests..."
-	@$(SCRIPTS_DIR)/test/test.sh performance
+# Deployment targets
+deploy: ## Deploy with Docker
+	@$(DEPLOY_SCRIPT) up production
 
-##@ Deployment
+deploy-status: ## Check deployment status
+	@$(DEPLOY_SCRIPT) status
 
-.PHONY: deploy
-deploy: ## Deploy to production (Docker by default)
-	@echo "Deploying to production..."
-	@$(SCRIPTS_DIR)/deploy/deploy.sh docker production
+stop: ## Stop deployed services
+	@$(DEPLOY_SCRIPT) down
 
-.PHONY: deploy-staging
-deploy-staging: ## Deploy to staging
-	@echo "Deploying to staging..."
-	@$(SCRIPTS_DIR)/deploy/deploy.sh docker staging
+# Maintenance targets
+clean: ## Clean build artifacts and temp files
+	@$(CLEAN_SCRIPT) build
 
-.PHONY: deploy-k8s
-deploy-k8s: ## Deploy to Kubernetes
-	@echo "Deploying to Kubernetes..."
-	@$(SCRIPTS_DIR)/deploy/deploy.sh kubernetes production
+clean-all: ## Clean everything (build, docker, logs, temp)
+	@$(CLEAN_SCRIPT) all
 
-.PHONY: deploy-binary
-deploy-binary: ## Deploy as system service
-	@echo "Deploying as system service..."
-	@$(SCRIPTS_DIR)/deploy/deploy.sh binary production
+clean-docker: ## Clean Docker resources
+	@$(CLEAN_SCRIPT) docker
 
-.PHONY: deploy-parallel
-deploy-parallel: ## Deploy parallel modes (config-only + enhanced)
-	@echo "Deploying parallel modes..."
-	@$(SCRIPTS_DIR)/deploy/deploy.sh parallel production
+validate-config: ## Validate configurations
+	@./scripts/maintain/validate.sh
 
-##@ Configuration
+# Quick commands
+quick-start: ## Quick start (build and run)
+	@$(BUILD_SCRIPT) production
+	@$(DEPLOY_SCRIPT) up
 
-.PHONY: validate-config
-validate-config: ## Validate all configuration files
-	@echo "Validating configurations..."
-	@for config in $(CONFIGS_DIR)/**/*.yaml; do \
-		echo "Validating $$config..."; \
-		$(BINARY_NAME) --config=$$config --dry-run || exit 1; \
-	done
+test-short: ## Run short tests
+	@echo "${YELLOW}Running short tests...${NC}"
+	@go test ./... -short -v
+	@echo "${GREEN}Short tests complete${NC}"
 
-.PHONY: generate-config
-generate-config: ## Generate configuration from templates
-	@echo "Generating configuration..."
-	@./scripts/utils/generate-config.sh
-
-##@ Running
-
-.PHONY: run
-run: build ## Build and run collector
-	@echo "Running collector..."
-	@$(BUILD_DIR)/production/$(BINARY_NAME) --config=$(CONFIGS_DIR)/base.yaml
-
-.PHONY: run-debug
-run-debug: build-debug ## Run with debug logging
-	@echo "Running in debug mode..."
-	@LOG_LEVEL=debug $(BUILD_DIR)/debug/$(BINARY_NAME) --config=$(CONFIGS_DIR)/base.yaml
-
-.PHONY: run-config-only
-run-config-only: ## Run config-only mode
-	@echo "Running config-only mode..."
-	@docker run --rm -it \
-		-v $(PWD)/configs/modes/config-only.yaml:/etc/otel/config.yaml \
-		--env-file .env \
-		otel/opentelemetry-collector-contrib:latest
-
-.PHONY: dev-run
-dev-run: build run ## Quick development cycle (build + run)
-
-##@ Utilities
-
-.PHONY: clean
-clean: ## Clean build artifacts
-	@echo "Cleaning build artifacts..."
-	@rm -rf $(BUILD_DIR)/*/bin
-	@rm -rf $(BUILD_DIR)/*/_build
-	@rm -rf test-results/ coverage/
-	@go clean -cache
-
-.PHONY: deps
-deps: ## Download and tidy dependencies
-	@echo "Managing dependencies..."
-	@go mod download
-	@go mod tidy
-
-.PHONY: install-tools
-install-tools: ## Install required development tools
-	@echo "Installing tools..."
-	@go install go.opentelemetry.io/collector/cmd/builder@latest
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	@go install gotest.tools/gotestsum@latest
-	@go install github.com/securego/gosec/v2/cmd/gosec@latest
-
-.PHONY: generate
-generate: ## Run code generation
-	@echo "Running code generation..."
-	@go generate ./...
-
-.PHONY: verify
-verify: fmt vet lint security ## Verify code quality
-	@echo "$(OK_COLOR)Code verification passed!$(NO_COLOR)"
-
-##@ Database Operations
-
-.PHONY: db-start
-db-start: ## Start test databases
-	@echo "Starting test databases..."
-	@cd deployments/docker && docker compose -f compose/docker-compose-databases.yaml up -d
-
-.PHONY: db-stop
-db-stop: ## Stop test databases
-	@echo "Stopping test databases..."
-	@cd deployments/docker && docker compose -f compose/docker-compose-databases.yaml down
-
-.PHONY: db-reset
-db-reset: db-stop db-start ## Reset test databases
-	@echo "Databases reset"
-
-.PHONY: db-shell-postgres
-db-shell-postgres: ## Connect to PostgreSQL shell
-	@docker exec -it postgres psql -U postgres
-
-.PHONY: db-shell-mysql
-db-shell-mysql: ## Connect to MySQL shell
-	@docker exec -it mysql mysql -u root -proot
-
-##@ Monitoring
-
-.PHONY: metrics
-metrics: ## Show collector metrics
-	@curl -s http://localhost:8888/metrics | grep -E '^otelcol|^db_'
-
-.PHONY: health
-health: ## Check collector health
-	@curl -s http://localhost:13133/health | jq .
-
-.PHONY: status
-status: ## Show deployment status
-	@if pgrep -f $(BINARY_NAME) > /dev/null; then \
-		echo "$(OK_COLOR)Collector is running$(NO_COLOR)"; \
-		curl -s http://localhost:13133/health | jq .; \
+lint: ## Run linters
+	@echo "${YELLOW}Running linters...${NC}"
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run ./...; \
 	else \
-		echo "$(ERROR_COLOR)Collector is not running$(NO_COLOR)"; \
+		echo "${RED}golangci-lint not installed. Install with: brew install golangci-lint${NC}"; \
 	fi
 
-##@ Documentation
+fmt: ## Format code
+	@echo "${YELLOW}Formatting code...${NC}"
+	@go fmt ./...
+	@echo "${GREEN}Formatting complete${NC}"
 
-.PHONY: docs
-docs: ## Generate documentation
-	@echo "Generating documentation..."
-	@go doc -all ./... > docs/API.md
+vet: ## Run go vet
+	@echo "${YELLOW}Running go vet...${NC}"
+	@go vet ./...
+	@echo "${GREEN}Vet complete${NC}"
 
-.PHONY: serve-docs
-serve-docs: ## Serve documentation locally
-	@echo "Serving documentation at http://localhost:8000"
-	@cd docs && python3 -m http.server 8000
+docker-build: ## Build Docker image
+	@echo "${YELLOW}Building Docker image...${NC}"
+	@docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) -f deployments/docker/Dockerfile .
+	@echo "${GREEN}Docker build complete: $(DOCKER_IMAGE):$(DOCKER_TAG)${NC}"
 
-##@ CI/CD
+docker-push: ## Push Docker image to registry
+	@echo "${YELLOW}Pushing Docker image...${NC}"
+	@docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
+	@echo "${GREEN}Docker push complete${NC}"
 
-.PHONY: ci
-ci: deps verify test ## Run CI pipeline
-	@echo "$(OK_COLOR)CI pipeline passed!$(NO_COLOR)"
+clean: ## Clean build artifacts
+	@echo "${YELLOW}Cleaning build artifacts...${NC}"
+	@rm -rf $(OUTPUT_DIR)
+	@rm -f $(BUILD_DIR)/$(BINARY_NAME)
+	@echo "${GREEN}Clean complete${NC}"
 
-.PHONY: pre-commit
-pre-commit: fmt lint test-unit ## Run pre-commit checks
-	@echo "$(OK_COLOR)Pre-commit checks passed!$(NO_COLOR)"
+deps: ## Download dependencies
+	@echo "${YELLOW}Downloading dependencies...${NC}"
+	@go mod download
+	@echo "${GREEN}Dependencies downloaded${NC}"
 
-.PHONY: release
-release: clean verify test build docker-build ## Prepare release
-	@echo "$(OK_COLOR)Release preparation complete!$(NO_COLOR)"
-	@echo "Version: $(VERSION)"
+update-deps: ## Update dependencies
+	@echo "${YELLOW}Updating dependencies...${NC}"
+	@go get -u ./...
+	@go mod tidy
+	@echo "${GREEN}Dependencies updated${NC}"
 
-# Include environment-specific targets if they exist
--include Makefile.local
+verify: ## Verify module dependencies
+	@echo "${YELLOW}Verifying dependencies...${NC}"
+	@go mod verify
+	@echo "${GREEN}Verification complete${NC}"
+
+run-minimal: build ## Run with minimal profile
+	@echo "${YELLOW}Running with minimal profile...${NC}"
+	@$(OUTPUT_DIR)/$(BINARY_NAME) --profile=minimal
+
+run-standard: build ## Run with standard profile
+	@echo "${YELLOW}Running with standard profile...${NC}"
+	@$(OUTPUT_DIR)/$(BINARY_NAME) --profile=standard
+
+run-enterprise: build ## Run with enterprise profile
+	@echo "${YELLOW}Running with enterprise profile...${NC}"
+	@$(OUTPUT_DIR)/$(BINARY_NAME) --profile=enterprise
+
+dev-setup: ## Setup development environment
+	@echo "${YELLOW}Setting up development environment...${NC}"
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@go install golang.org/x/tools/cmd/goimports@latest
+	@echo "${GREEN}Development setup complete${NC}"
+
+check-go-version: ## Check Go version
+	@echo "${YELLOW}Checking Go version...${NC}"
+	@go version | grep -q "go$(GO_VERSION)" || (echo "${RED}Error: Go $(GO_VERSION) required${NC}" && exit 1)
+	@echo "${GREEN}Go version OK${NC}"
+
+# CI/CD targets
+ci: check-go-version fmt vet lint test build ## Run CI pipeline
+	@echo "${GREEN}CI pipeline complete${NC}"
+
+release: clean test build-all ## Create a release build
+	@echo "${YELLOW}Creating release archive...${NC}"
+	@tar -czf $(OUTPUT_DIR)/$(BINARY_NAME)-$(shell git describe --tags --always).tar.gz -C $(OUTPUT_DIR) .
+	@echo "${GREEN}Release created${NC}"

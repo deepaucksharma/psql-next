@@ -1,0 +1,508 @@
+{
+  "name": "Database Intelligence - Cross-Database Correlation Analysis",
+  "description": "Analyze correlations, dependencies, and performance impacts across multiple databases",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Query Correlation",
+      "description": "Identify correlated queries across databases",
+      "widgets": [
+        {
+          "title": "Top Cross-Database Query Patterns",
+          "configuration": {
+            "nrql": "SELECT uniqueCount(query_id), average(correlation_score) FROM DatabaseQueryCorrelation WHERE correlation_score > 0.5 FACET source_db, target_db, query_pattern SINCE 1 hour ago LIMIT 20"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Query Correlation Heatmap",
+          "configuration": {
+            "nrql": "SELECT average(correlation_score) FROM DatabaseQueryCorrelation FACET source_db, target_db SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.heatmap"
+          }
+        },
+        {
+          "title": "Cross-Database Query Timeline",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM DatabaseQuery WHERE cross_db_reference IS NOT NULL FACET database, referenced_database TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Query Sequence Analysis",
+          "configuration": {
+            "nrql": "SELECT count(*), average(sequence_duration_ms) FROM DatabaseQuerySequence WHERE databases_involved > 1 FACET sequence_pattern, databases SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Common Query Dependencies",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM DatabaseQueryDependency FACET parent_query, child_query, dependency_type SINCE 1 hour ago LIMIT 10"
+          },
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transaction Analysis",
+      "description": "Distributed transaction patterns and performance",
+      "widgets": [
+        {
+          "title": "Distributed Transaction Overview",
+          "configuration": {
+            "nrql": "SELECT count(*), average(duration_ms), percentile(duration_ms, 95) FROM DistributedTransaction WHERE database_count > 1 SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          }
+        },
+        {
+          "title": "Transaction Database Participation",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM DistributedTransaction FACET databases SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.pie"
+          }
+        },
+        {
+          "title": "Transaction Success Rate by Database Count",
+          "configuration": {
+            "nrql": "SELECT percentage(count(*), WHERE status = 'success') AS 'Success Rate' FROM DistributedTransaction FACET database_count SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        },
+        {
+          "title": "Cross-Database Transaction Flow",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM DistributedTransaction WHERE database_count > 1 FACET transaction_pattern TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 3,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.area"
+          }
+        },
+        {
+          "title": "Transaction Latency Breakdown",
+          "configuration": {
+            "nrql": "SELECT average(database_latency_ms) FROM DistributedTransactionSegment FACET database, operation_type SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 9,
+            "row": 3,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        },
+        {
+          "title": "Failed Distributed Transactions",
+          "configuration": {
+            "nrql": "SELECT count(*), latest(error_message) FROM DistributedTransaction WHERE status = 'failed' AND database_count > 1 FACET transaction_id, databases, failure_point SINCE 1 hour ago LIMIT 20"
+          },
+          "layout": {
+            "column": 1,
+            "row": 6,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Data Flow & Dependencies",
+      "description": "Data movement and dependency mapping between databases",
+      "widgets": [
+        {
+          "title": "Data Flow Volume",
+          "configuration": {
+            "nrql": "SELECT sum(bytes_transferred) / 1024 / 1024 AS 'MB Transferred' FROM DatabaseDataTransfer FACET source_db, destination_db SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.matrix"
+          }
+        },
+        {
+          "title": "Top Data Transfer Operations",
+          "configuration": {
+            "nrql": "SELECT count(*), sum(bytes_transferred) / 1024 / 1024 AS 'MB', average(duration_ms) AS 'Avg Duration' FROM DatabaseDataTransfer FACET operation_type, source_db, destination_db SINCE 1 hour ago LIMIT 10"
+          },
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Database Dependency Score",
+          "configuration": {
+            "nrql": "SELECT latest(dependency_score) FROM DatabaseDependency FACET dependent_db, provider_db, dependency_type SINCE 5 minutes ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Real-time Data Flow Rate",
+          "configuration": {
+            "nrql": "SELECT rate(sum(bytes_transferred), 1 minute) AS 'Bytes/min' FROM DatabaseDataTransfer FACET source_db, destination_db TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 9,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "ETL Pipeline Performance",
+          "configuration": {
+            "nrql": "SELECT average(duration_ms), sum(records_processed), percentage(count(*), WHERE status = 'success') AS 'Success Rate' FROM ETLPipeline WHERE source_db IS NOT NULL AND destination_db IS NOT NULL FACET pipeline_name, source_db, destination_db SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance Impact",
+      "description": "Cross-database performance impacts and bottlenecks",
+      "widgets": [
+        {
+          "title": "Cascading Performance Impact",
+          "configuration": {
+            "nrql": "SELECT average(impact_score), max(affected_queries) FROM PerformanceImpact WHERE source_db != affected_db FACET source_db, affected_db, impact_type SINCE 30 minutes ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Performance Impact Score Trend",
+          "configuration": {
+            "nrql": "SELECT average(impact_score) FROM PerformanceImpact WHERE impact_score > 5 FACET source_db, affected_db TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Cross-Database Wait Events",
+          "configuration": {
+            "nrql": "SELECT sum(wait_time_ms) FROM DatabaseWaitEvent WHERE remote_db IS NOT NULL FACET local_db, remote_db, wait_event_type SINCE 30 minutes ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        },
+        {
+          "title": "Resource Contention Matrix",
+          "configuration": {
+            "nrql": "SELECT average(contention_score) FROM ResourceContention FACET database1, database2, resource_type SINCE 30 minutes ago"
+          },
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.heatmap"
+          }
+        },
+        {
+          "title": "Lock Chain Analysis",
+          "configuration": {
+            "nrql": "SELECT max(chain_length), count(*) FROM LockChain WHERE databases_involved > 1 FACET initiating_db, blocking_db TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Bottleneck Detection",
+          "configuration": {
+            "nrql": "SELECT count(*), average(delay_ms) FROM BottleneckEvent WHERE upstream_db IS NOT NULL FACET bottleneck_db, upstream_db, bottleneck_type SINCE 30 minutes ago LIMIT 10"
+          },
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Anomaly Detection",
+      "description": "Cross-database anomalies and unusual patterns",
+      "widgets": [
+        {
+          "title": "Anomaly Detection Summary",
+          "configuration": {
+            "nrql": "SELECT count(*) AS 'Total Anomalies', uniqueCount(affected_databases) AS 'Databases Affected' FROM DatabaseAnomaly WHERE severity IN ('HIGH', 'CRITICAL') SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          }
+        },
+        {
+          "title": "Anomaly Types Distribution",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM DatabaseAnomaly FACET anomaly_type, severity SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.pie"
+          }
+        },
+        {
+          "title": "Anomaly Score Trend",
+          "configuration": {
+            "nrql": "SELECT average(anomaly_score) FROM DatabaseAnomaly WHERE anomaly_score > 0.7 FACET affected_databases TIMESERIES SINCE 3 hours ago"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Cross-Database Anomalies",
+          "configuration": {
+            "nrql": "SELECT timestamp, anomaly_score, anomaly_type, description, affected_databases FROM DatabaseAnomaly WHERE database_count > 1 AND anomaly_score > 0.5 SINCE 1 hour ago LIMIT 50"
+          },
+          "layout": {
+            "column": 1,
+            "row": 3,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Correlation Anomaly Patterns",
+          "configuration": {
+            "nrql": "SELECT count(*), average(deviation_from_baseline) FROM CorrelationAnomaly FACET pattern_type, database_pair SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 6,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        },
+        {
+          "title": "Unusual Query Patterns",
+          "configuration": {
+            "nrql": "SELECT count(*), latest(first_seen), latest(last_seen) FROM UnusualQueryPattern WHERE cross_database = true FACET pattern_hash, databases_involved, pattern_description SINCE 24 hours ago LIMIT 10"
+          },
+          "layout": {
+            "column": 7,
+            "row": 6,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Service Impact",
+      "description": "Impact on services from database interactions",
+      "widgets": [
+        {
+          "title": "Service-Database Dependency Map",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM ServiceDatabaseInteraction FACET service_name, database, interaction_type SINCE 30 minutes ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Service Latency by Database",
+          "configuration": {
+            "nrql": "SELECT average(database_latency_ms) FROM ServiceTransaction FACET service_name, database SINCE 30 minutes ago"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        },
+        {
+          "title": "Multi-Database Service Operations",
+          "configuration": {
+            "nrql": "SELECT count(*), average(total_duration_ms), percentile(total_duration_ms, 95) FROM ServiceOperation WHERE database_count > 1 FACET service_name, operation_name, databases SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        }
+      ]
+    }
+  ]
+}

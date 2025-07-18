@@ -1,4 +1,6 @@
-go 1.22
+go 1.23.0
+
+toolchain go1.24.3
 
 use (
 	./components
@@ -7,34 +9,32 @@ use (
 	./components/internal/boundedmap
 	./components/processors
 	./components/receivers
-	./distributions/enterprise
-	./distributions/minimal
-	./distributions/production
+	./distributions/unified
 	./internal
 	./tests
 	./tests/e2e
 )
 
-replace github.com/deepaksharma/db-otel/components/exporters/nri => ./components/exporters/nri
+replace github.com/database-intelligence/db-intel/components/exporters/nri => ./components/exporters/nri
 
-replace github.com/deepaksharma/db-otel/components/processors/adaptivesampler => ./components/processors/adaptivesampler
+replace github.com/database-intelligence/db-intel/components/processors/adaptivesampler => ./components/processors/adaptivesampler
 
-replace github.com/deepaksharma/db-otel/components/processors/circuitbreaker => ./components/processors/circuitbreaker
+replace github.com/database-intelligence/db-intel/components/processors/circuitbreaker => ./components/processors/circuitbreaker
 
-replace github.com/deepaksharma/db-otel/components/processors/planattributeextractor => ./components/processors/planattributeextractor
+replace github.com/database-intelligence/db-intel/components/processors/planattributeextractor => ./components/processors/planattributeextractor
 
-replace github.com/deepaksharma/db-otel/components/processors/verification => ./components/processors/verification
+replace github.com/database-intelligence/db-intel/components/processors/verification => ./components/processors/verification
 
-replace github.com/deepaksharma/db-otel/components/processors/nrerrormonitor => ./components/processors/nrerrormonitor
+replace github.com/database-intelligence/db-intel/components/processors/nrerrormonitor => ./components/processors/nrerrormonitor
 
-replace github.com/deepaksharma/db-otel/components/processors/costcontrol => ./components/processors/costcontrol
+replace github.com/database-intelligence/db-intel/components/processors/costcontrol => ./components/processors/costcontrol
 
-replace github.com/deepaksharma/db-otel/components/processors/querycorrelator => ./components/processors/querycorrelator
+replace github.com/database-intelligence/db-intel/components/processors/querycorrelator => ./components/processors/querycorrelator
 
-replace github.com/deepaksharma/db-otel/components/extensions/healthcheck => ./components/extensions/healthcheck
+replace github.com/database-intelligence/db-intel/components/extensions/healthcheck => ./components/extensions/healthcheck
 
-replace github.com/deepaksharma/db-otel/components/receivers/ash => ./components/receivers/ash
+replace github.com/database-intelligence/db-intel/components/receivers/ash => ./components/receivers/ash
 
-replace github.com/deepaksharma/db-otel/components/receivers/enhancedsql => ./components/receivers/enhancedsql
+replace github.com/database-intelligence/db-intel/components/receivers/enhancedsql => ./components/receivers/enhancedsql
 
-replace github.com/deepaksharma/db-otel/components/receivers/kernelmetrics => ./components/receivers/kernelmetrics
+replace github.com/database-intelligence/db-intel/components/receivers/kernelmetrics => ./components/receivers/kernelmetrics

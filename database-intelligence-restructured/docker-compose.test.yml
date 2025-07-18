@@ -1,0 +1,239 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with replication
+  postgres-primary:
+    image: postgres:15
+    container_name: postgres-primary
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_REPLICATION_MODE: master
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: replicatorpass
+    command: |
+      postgres 
+      -c wal_level=replica 
+      -c hot_standby=on 
+      -c max_wal_senders=10 
+      -c max_replication_slots=10 
+      -c hot_standby_feedback=on
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-primary-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-replica:
+    image: postgres:15
+    container_name: postgres-replica
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_MASTER_SERVICE: postgres-primary
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql/data
+
+  # MySQL with replication
+  mysql-primary:
+    image: mysql:8.0
+    container_name: mysql-primary
+    environment:
+      MYSQL_ROOT_PASSWORD: testpass
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: test
+      MYSQL_PASSWORD: testpass
+    command: --server-id=1 --log-bin=mysql-bin --binlog-do-db=testdb
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-primary-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql-replica:
+    image: mysql:8.0
+    container_name: mysql-replica
+    environment:
+      MYSQL_ROOT_PASSWORD: testpass
+    command: --server-id=2 --relay-log=relay-bin
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-replica-data:/var/lib/mysql
+
+  # MongoDB replica set
+  mongodb-primary:
+    image: mongo:7.0
+    container_name: mongodb-primary
+    command: mongod --replSet rs0 --bind_ip_all
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: testpass
+      MONGO_INITDB_DATABASE: testdb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-primary-data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb-secondary:
+    image: mongo:7.0
+    container_name: mongodb-secondary
+    command: mongod --replSet rs0 --bind_ip_all
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: testpass
+    depends_on:
+      - mongodb-primary
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb-secondary-data:/data/db
+
+  mongodb-arbiter:
+    image: mongo:7.0
+    container_name: mongodb-arbiter
+    command: mongod --replSet rs0 --bind_ip_all
+    depends_on:
+      - mongodb-primary
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongodb-arbiter-data:/data/db
+
+  # Redis with Sentinel
+  redis-master:
+    image: redis:7.2-alpine
+    container_name: redis-master
+    command: redis-server --requirepass testpass --masterauth testpass
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-master-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "testpass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-slave:
+    image: redis:7.2-alpine
+    container_name: redis-slave
+    command: redis-server --slaveof redis-master 6379 --requirepass testpass --masterauth testpass
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-slave-data:/data
+
+  redis-sentinel:
+    image: redis:7.2-alpine
+    container_name: redis-sentinel
+    command: redis-sentinel /etc/redis-sentinel/sentinel.conf
+    depends_on:
+      - redis-master
+      - redis-slave
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./configs/test/redis-sentinel.conf:/etc/redis-sentinel/sentinel.conf
+
+  # Database Intelligence Collector
+  db-intel:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile
+    container_name: db-intel
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      mysql-primary:
+        condition: service_healthy
+      mongodb-primary:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    environment:
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - POSTGRES_PASSWORD=testpass
+      - MYSQL_PASSWORD=testpass
+      - MONGODB_PASSWORD=testpass
+      - REDIS_PASSWORD=testpass
+    volumes:
+      - ./configs/test/multi-db-config.yaml:/etc/db-intel/config.yaml
+    ports:
+      - "8888:8888"   # Prometheus metrics
+      - "13133:13133" # Health check
+      - "55679:55679" # zpages
+    command: ["--config", "/etc/db-intel/config.yaml", "--profile", "enterprise"]
+
+  # Monitoring stack
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./configs/test/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./dashboards:/var/lib/grafana/dashboards
+      - ./configs/test/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./configs/test/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres-primary-data:
+  postgres-replica-data:
+  mysql-primary-data:
+  mysql-replica-data:
+  mongodb-primary-data:
+  mongodb-secondary-data:
+  mongodb-arbiter-data:
+  redis-master-data:
+  redis-slave-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: db-intel-test

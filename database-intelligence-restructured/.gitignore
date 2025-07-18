@@ -29,6 +29,10 @@ Thumbs.db
 # Build artifacts
 dist/
 build/
+/distributions/*/unified
+/distributions/*/db-intel-*
+/distributions/*/*-collector
+/distributions/*/build/
 
 # Logs
 *.log
@@ -44,3 +48,9 @@ configs/generated/
 
 # Runtime files
 runtime/
+
+# Module backup directories
+.module-path-backup-*/
+
+# Temporary files
+*.tmp

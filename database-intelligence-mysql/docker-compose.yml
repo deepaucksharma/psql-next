@@ -1,21 +1,32 @@
 version: '3.8'
 
 services:
+  # MySQL Primary with Performance Schema optimization for wait analysis
   mysql-primary:
     image: mysql:8.0
     container_name: mysql-primary
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-production}
       MYSQL_USER: ${MYSQL_USER:-appuser}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
     ports:
       - "3306:3306"
     volumes:
-      - ./mysql/init:/docker-entrypoint-initdb.d
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
       - mysql_primary_data:/var/lib/mysql
-      - ./mysql/conf/primary.cnf:/etc/mysql/conf.d/custom.cnf
-    command: --default-authentication-plugin=mysql_native_password
+      - ./mysql/conf/primary.cnf:/etc/mysql/conf.d/custom.cnf:ro
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --performance-schema=ON
+      --performance-schema-consumer-events-statements-history=ON
+      --performance-schema-consumer-events-stages-history=ON
+      --performance-schema-consumer-events-waits-history=ON
+      --performance-schema-consumer-global-instrumentation=ON
+      --performance-schema-consumer-thread-instrumentation=ON
+      --performance-schema-instrument='wait/%=ON'
+      --performance-schema-instrument='statement/%=ON'
+      --performance-schema-instrument='stage/%=ON'
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       timeout: 10s
@@ -24,21 +35,26 @@ services:
     networks:
       - mysql-network
 
+  # MySQL Replica for testing replication metrics
   mysql-replica:
     image: mysql:8.0
     container_name: mysql-replica
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-production}
       MYSQL_USER: ${MYSQL_USER:-appuser}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
     ports:
       - "3307:3306"
     volumes:
-      - ./mysql/init:/docker-entrypoint-initdb.d
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
       - mysql_replica_data:/var/lib/mysql
-      - ./mysql/conf/replica.cnf:/etc/mysql/conf.d/custom.cnf
-    command: --default-authentication-plugin=mysql_native_password
+      - ./mysql/conf/replica.cnf:/etc/mysql/conf.d/custom.cnf:ro
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --performance-schema=ON
+      --read-only=ON
+      --server-id=2
     depends_on:
       mysql-primary:
         condition: service_healthy
@@ -50,44 +66,25 @@ services:
     networks:
       - mysql-network
 
-  otel-collector:
+  # Edge Collector - Wait Analysis
+  otel-collector-edge:
     image: otel/opentelemetry-collector-contrib:0.96.0
-    container_name: otel-collector
-    command: ["--config=/etc/otel-collector-config.yaml"]
+    container_name: otel-collector-edge
+    command: ["--config=/etc/otelcol/config.yaml"]
     environment:
-      # MySQL Configuration
-      MYSQL_PRIMARY_ENDPOINT: mysql-primary:3306
-      MYSQL_REPLICA_ENDPOINT: mysql-replica:3306
-      MYSQL_USER: otel_monitor
-      MYSQL_PASSWORD: ${MYSQL_MONITOR_PASSWORD:-otelmonitorpass}
-      MYSQL_DATABASE: ""
-      MYSQL_VERSION: "8.0"
-      
-      # New Relic Configuration
-      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
-      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
-      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
-      
-      # Environment Settings
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      NAMESPACE: docker
-      TEAM_NAME: ${TEAM_NAME:-database-team}
-      SERVICE_NAME: ${SERVICE_NAME:-mysql-monitoring}
-      COST_CENTER: ${COST_CENTER:-engineering}
-      
-      # Cloud Provider Settings
-      CLOUD_PROVIDER: ${CLOUD_PROVIDER:-docker}
-      CLOUD_REGION: ${CLOUD_REGION:-local}
-      
-      # Resource limits
-      GOMAXPROCS: "2"
-      GOMEMLIMIT: "1750MiB"
+      MYSQL_MONITOR_USER: otel_monitor
+      MYSQL_MONITOR_PASS: ${MYSQL_MONITOR_PASSWORD:-otelmonitorpass}
+      MYSQL_PRIMARY_HOST: mysql-primary
+      MYSQL_REPLICA_HOST: mysql-replica
+      GATEWAY_ENDPOINT: otel-gateway:4317
+      HOSTNAME: ${HOSTNAME:-mysql-host-1}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
     volumes:
-      - ./otel/config/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+      - ./config/edge-collector-wait.yaml:/etc/otelcol/config.yaml:ro
+      - /var/log/otel:/var/log/otel
     ports:
-      - "13133:13133" # Health check extension
-      - "55679:55679" # zPages extension
-      - "1777:1777"   # pprof extension
+      - "8888:8888"   # Metrics
+      - "13133:13133" # Health check
     depends_on:
       mysql-primary:
         condition: service_healthy
@@ -96,27 +93,92 @@ services:
     networks:
       - mysql-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13133/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Sample application to generate MySQL traffic
-  mysql-app:
-    image: python:3.9-slim
-    container_name: mysql-app
+  # Gateway Collector - Advisory Processing
+  otel-gateway:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: otel-gateway
+    command: ["--config=/etc/otelcol/config.yaml"]
     environment:
-      MYSQL_HOST: mysql-primary
-      MYSQL_PORT: 3306
-      MYSQL_USER: ${MYSQL_USER:-appuser}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net:4317}
     volumes:
-      - ./app:/app
-    working_dir: /app
-    command: python app.py
-    depends_on:
-      mysql-primary:
-        condition: service_healthy
+      - ./config/gateway-advisory.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8888"   # Metrics
+      - "13134:13133" # Health check
     networks:
       - mysql-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13133/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MySQL Exporter for additional metrics
+  mysql-exporter-primary:
+    image: prom/mysqld-exporter:latest
+    container_name: mysql-exporter-primary
+    environment:
+      DATA_SOURCE_NAME: "${MYSQL_USER:-monitor}:${MYSQL_PASSWORD:-monitorpass}@tcp(mysql-primary:3306)/"
+      COLLECT_INFO_SCHEMA_INNODB_METRICS: "true"
+      COLLECT_INFO_SCHEMA_PROCESSLIST: "true"
+      COLLECT_INFO_SCHEMA_TABLES: "true"
+      COLLECT_INFO_SCHEMA_TABLESTATS: "true"
+      COLLECT_MYSQL_USER: "true"
+      COLLECT_PERF_SCHEMA_EVENTSWAITS: "true"
+    ports:
+      - "9104:9104"
+    networks:
+      - mysql-network
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    command:
+      - --collect.info_schema.innodb_metrics
+      - --collect.info_schema.processlist
+      - --collect.info_schema.tables
+      - --collect.perf_schema.eventswaits
+      - --collect.perf_schema.file_events
+      - --collect.perf_schema.memory_events
+
+  mysql-exporter-replica:
+    image: prom/mysqld-exporter:latest
+    container_name: mysql-exporter-replica
+    environment:
+      DATA_SOURCE_NAME: "${MYSQL_USER:-monitor}:${MYSQL_PASSWORD:-monitorpass}@tcp(mysql-replica:3306)/"
+    ports:
+      - "9105:9104"
+    networks:
+      - mysql-network
+    depends_on:
+      mysql-replica:
+        condition: service_healthy
+
+  # Prometheus for local metrics viewing (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - mysql-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    profiles:
+      - monitoring
 
 networks:
   mysql-network:
@@ -125,3 +187,4 @@ networks:
 volumes:
   mysql_primary_data:
   mysql_replica_data:
+  prometheus-data:

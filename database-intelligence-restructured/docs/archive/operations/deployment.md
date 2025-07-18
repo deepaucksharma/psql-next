@@ -81,7 +81,7 @@ make deps
 make build
 
 # Run with development config
-./dist/database-intelligence-collector --config=config/collector-dev.yaml
+./dist/database-intelligence-collector --config=configs/postgresql-maximum-extraction.yaml
 ```
 
 ### Development Docker Compose
@@ -100,7 +100,7 @@ docker-compose -f docker-compose.dev.yml down
 ### Development Configuration
 
 ```yaml
-# config/collector-dev.yaml
+# configs/postgresql-maximum-extraction.yaml
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -149,7 +149,7 @@ docker build -t database-intelligence:v2.0.0 \
 ### Production Configuration
 
 ```yaml
-# config/collector-production.yaml
+# configs/postgresql-maximum-extraction.yaml
 receivers:
   enhancedsql/postgresql:
     driver: postgres
@@ -501,7 +501,7 @@ services:
     env_file:
       - .env.production
     volumes:
-      - ./config/collector-production.yaml:/etc/otelcol/config.yaml:ro
+      - ./configs/postgresql-maximum-extraction.yaml:/etc/otelcol/config.yaml:ro
       - ./config/queries:/etc/queries:ro
       - collector-data:/var/lib/otelcol
     ports:
@@ -550,7 +550,7 @@ docker stack deploy -c docker-stack.yml db-intelligence
 ```bash
 # Create config from file
 kubectl create configmap collector-config \
-  --from-file=config.yaml=config/collector-production.yaml \
+  --from-file=config.yaml=configs/postgresql-maximum-extraction.yaml \
   -n database-intelligence
 
 # Create query library
@@ -578,11 +578,11 @@ printf "secure-password" | docker secret create postgres_password -
 ```bash
 # Validate configuration before deployment
 ./dist/database-intelligence-collector validate \
-  --config=config/collector-production.yaml
+  --config=configs/postgresql-maximum-extraction.yaml
 
 # Test configuration with dry-run
 ./dist/database-intelligence-collector \
-  --config=config/collector-production.yaml \
+  --config=configs/postgresql-maximum-extraction.yaml \
   --dry-run
 ```
 

@@ -1,0 +1,262 @@
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Create a simple load generator
+RUN cat > main.go << 'EOF'
+package main
+
+import (
+    "database/sql"
+    "fmt"
+    "log"
+    "math/rand"
+    "os"
+    "strconv"
+    "sync"
+    "time"
+
+    _ "github.com/go-sql-driver/mysql"
+)
+
+type LoadGenerator struct {
+    db          *sql.DB
+    pattern     string
+    tps         int
+    logger      *log.Logger
+}
+
+func main() {
+    // Configuration from environment
+    host := getEnv("MYSQL_HOST", "localhost")
+    port := getEnv("MYSQL_PORT", "3306")
+    user := getEnv("MYSQL_USER", "root")
+    password := getEnv("MYSQL_PASSWORD", "rootpassword")
+    database := getEnv("MYSQL_DATABASE", "wait_analysis_test")
+    pattern := getEnv("LOAD_PATTERN", "mixed")
+    tps := getEnvInt("TPS", 10)
+
+    // Connect to MySQL
+    dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true",
+        user, password, host, port, database)
+    
+    db, err := sql.Open("mysql", dsn)
+    if err != nil {
+        log.Fatalf("Failed to connect to MySQL: %v", err)
+    }
+    defer db.Close()
+
+    // Configure connection pool
+    db.SetMaxOpenConns(20)
+    db.SetMaxIdleConns(10)
+    db.SetConnMaxLifetime(5 * time.Minute)
+
+    // Wait for database to be ready
+    for i := 0; i < 30; i++ {
+        if err := db.Ping(); err == nil {
+            break
+        }
+        log.Printf("Waiting for database... attempt %d/30", i+1)
+        time.Sleep(2 * time.Second)
+    }
+
+    generator := &LoadGenerator{
+        db:      db,
+        pattern: pattern,
+        tps:     tps,
+        logger:  log.New(os.Stdout, "[LOAD] ", log.LstdFlags),
+    }
+
+    generator.logger.Printf("Starting load generator: pattern=%s, tps=%d", pattern, tps)
+    generator.Run()
+}
+
+func (lg *LoadGenerator) Run() {
+    ticker := time.NewTicker(time.Second / time.Duration(lg.tps))
+    defer ticker.Stop()
+
+    var wg sync.WaitGroup
+    queryCount := 0
+
+    for range ticker.C {
+        wg.Add(1)
+        go func(count int) {
+            defer wg.Done()
+            
+            switch lg.pattern {
+            case "io":
+                lg.generateIOLoad()
+            case "lock":
+                lg.generateLockLoad()
+            case "cpu":
+                lg.generateCPULoad()
+            case "mixed":
+                switch count % 4 {
+                case 0:
+                    lg.generateIOLoad()
+                case 1:
+                    lg.generateLockLoad()
+                case 2:
+                    lg.generateCPULoad()
+                case 3:
+                    lg.generateMixedLoad()
+                }
+            default:
+                lg.generateMixedLoad()
+            }
+        }(queryCount)
+        
+        queryCount++
+        
+        // Log progress every 100 queries
+        if queryCount%100 == 0 {
+            lg.logger.Printf("Generated %d queries", queryCount)
+        }
+    }
+}
+
+func (lg *LoadGenerator) generateIOLoad() {
+    queries := []string{
+        // Full table scan
+        "SELECT COUNT(*) FROM audit_log WHERE action = 'UPDATE'",
+        // Missing index join
+        "SELECT o.*, oi.* FROM orders o JOIN order_items oi ON o.order_id = oi.order_id WHERE o.total_amount > ?",
+        // Large range scan
+        "SELECT * FROM orders WHERE order_date BETWEEN DATE_SUB(NOW(), INTERVAL ? DAY) AND NOW()",
+    }
+    
+    query := queries[rand.Intn(len(queries))]
+    _, err := lg.db.Exec(query, rand.Intn(1000))
+    if err != nil {
+        lg.logger.Printf("IO query failed: %v", err)
+    }
+}
+
+func (lg *LoadGenerator) generateLockLoad() {
+    tx, err := lg.db.Begin()
+    if err != nil {
+        lg.logger.Printf("Failed to start transaction: %v", err)
+        return
+    }
+    defer tx.Rollback()
+    
+    // Lock random products
+    productIDs := make([]int, 3)
+    for i := range productIDs {
+        productIDs[i] = rand.Intn(50) + 1
+    }
+    
+    for _, pid := range productIDs {
+        _, err = tx.Exec(
+            "UPDATE inventory SET reserved_quantity = reserved_quantity + 1 WHERE product_id = ?",
+            pid)
+        if err != nil {
+            lg.logger.Printf("Lock query failed: %v", err)
+            return
+        }
+    }
+    
+    // Hold lock briefly
+    time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
+    
+    if err := tx.Commit(); err != nil {
+        lg.logger.Printf("Transaction commit failed: %v", err)
+    }
+}
+
+func (lg *LoadGenerator) generateCPULoad() {
+    queries := []string{
+        // Complex aggregation
+        `SELECT customer_id, COUNT(*) as orders, SUM(total_amount) as revenue,
+         AVG(total_amount) as avg_order, MAX(order_date) as last_order
+         FROM orders GROUP BY customer_id HAVING orders > ?`,
+        // Sorting large result
+        "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?",
+        // Complex join with calculations
+        `SELECT o.customer_id, SUM(oi.quantity * oi.unit_price) as total
+         FROM orders o JOIN order_items oi ON o.order_id = oi.order_id
+         GROUP BY o.customer_id ORDER BY total DESC LIMIT ?`,
+    }
+    
+    query := queries[rand.Intn(len(queries))]
+    _, err := lg.db.Exec(query, rand.Intn(100)+1)
+    if err != nil {
+        lg.logger.Printf("CPU query failed: %v", err)
+    }
+}
+
+func (lg *LoadGenerator) generateMixedLoad() {
+    // Combination of different query types
+    switch rand.Intn(5) {
+    case 0:
+        // Simple point query
+        var count int
+        err := lg.db.QueryRow("SELECT COUNT(*) FROM orders WHERE customer_id = ?", 
+            rand.Intn(100)+1).Scan(&count)
+        if err != nil {
+            lg.logger.Printf("Point query failed: %v", err)
+        }
+    case 1:
+        // Update with index
+        _, err := lg.db.Exec(
+            "UPDATE orders SET status = 'processing' WHERE order_id = ? AND status = 'pending'",
+            rand.Intn(1000)+1)
+        if err != nil {
+            lg.logger.Printf("Update failed: %v", err)
+        }
+    case 2:
+        // Insert
+        _, err := lg.db.Exec(
+            "INSERT INTO audit_log (user_id, action, object_type, object_id) VALUES (?, ?, ?, ?)",
+            rand.Intn(100)+1, "VIEW", "order", rand.Intn(1000)+1)
+        if err != nil {
+            lg.logger.Printf("Insert failed: %v", err)
+        }
+    case 3:
+        // Delete old records
+        _, err := lg.db.Exec(
+            "DELETE FROM audit_log WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 10",
+            rand.Intn(30)+30)
+        if err != nil {
+            lg.logger.Printf("Delete failed: %v", err)
+        }
+    case 4:
+        // Call stored procedure
+        _, err := lg.db.Exec("CALL generate_io_waits()")
+        if err != nil {
+            lg.logger.Printf("Stored procedure failed: %v", err)
+        }
+    }
+}
+
+func getEnv(key, defaultValue string) string {
+    if value := os.Getenv(key); value != "" {
+        return value
+    }
+    return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+    if value := os.Getenv(key); value != "" {
+        if intValue, err := strconv.Atoi(value); err == nil {
+            return intValue
+        }
+    }
+    return defaultValue
+}
+EOF
+
+# Initialize module and get dependencies
+RUN go mod init loadgen && \
+    go get github.com/go-sql-driver/mysql && \
+    go build -o loadgen main.go
+
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /app
+
+COPY --from=builder /app/loadgen /app/loadgen
+
+CMD ["/app/loadgen"]

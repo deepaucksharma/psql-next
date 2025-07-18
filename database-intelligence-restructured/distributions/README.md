@@ -2,7 +2,14 @@
 
 This directory contains the different distribution builds of the Database Intelligence Collector.
 
-## Available Distributions
+## Current Structure (Post-Streamlining)
+
+### Unified Distribution (`unified/`)
+**NEW**: A single, parameterized distribution that replaces the three separate distributions. Use the `--profile` flag to select minimal, standard, or enterprise features.
+
+See [unified/README.md](unified/README.md) for details.
+
+## Legacy Distributions (To Be Archived)
 
 ### 1. Minimal Distribution (`minimal/`)
 - **Purpose**: Lightweight deployment with standard components only

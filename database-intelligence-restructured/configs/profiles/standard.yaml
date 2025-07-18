@@ -1,0 +1,188 @@
+# Standard Profile Configuration
+# Full-featured deployment with custom database intelligence components
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  
+  postgresql:
+    endpoint: ${env:POSTGRES_DSN}
+    collection_interval: 10s
+    username: monitoring
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - postgres
+    
+  mysql:
+    endpoint: ${env:MYSQL_DSN}
+    collection_interval: 10s
+    username: monitoring
+    password: ${env:MYSQL_PASSWORD}
+    
+  sqlquery:
+    interval: 30s
+    drivers:
+      - driver: postgres
+        datasource: ${env:POSTGRES_DSN}
+        queries:
+          - sql: "SELECT count(*) as active_connections FROM pg_stat_activity"
+            name: db.connections.active
+      - driver: mysql
+        datasource: ${env:MYSQL_DSN}
+        queries:
+          - sql: "SELECT count(*) as active_connections FROM information_schema.processlist"
+            name: db.connections.active
+            
+  # Custom receivers
+  ash:
+    driver: ${env:ASH_DRIVER}
+    datasource: ${env:ASH_DATASOURCE}
+    collection_interval: 1s
+    sampling:
+      base_rate: 1.0
+      min_rate: 0.1
+      max_rate: 1.0
+    enable_wait_analysis: true
+    enable_blocking_analysis: true
+    
+  enhancedsql:
+    interval: 10s
+    drivers:
+      - driver: postgres
+        datasource: ${env:POSTGRES_DSN}
+        queries:
+          - name: active_queries
+            sql: |
+              SELECT query, state, wait_event_type, wait_event 
+              FROM pg_stat_activity 
+              WHERE state != 'idle'
+            
+  kernelmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        enabled: true
+      memory:
+        enabled: true
+      disk:
+        enabled: true
+      network:
+        enabled: true
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 2048
+    spike_limit_mib: 512
+    
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence
+        action: insert
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENV}
+        action: insert
+        
+  attributes:
+    actions:
+      - key: db.system
+        action: insert
+        from_attribute: database.type
+      - key: internal
+        action: delete
+        
+  # Custom processors
+  adaptivesampler:
+    min_samples_per_second: 10
+    max_samples_per_second: 1000
+    target_heap_usage: 0.7
+    
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 30s
+    max_requests: 100
+    
+  planextractor:
+    drivers:
+      - postgres
+      - mysql
+    extract_mode: auto
+    
+  querycorrelator:
+    correlation_window: 5m
+    max_queries_tracked: 10000
+    
+  costcontrol:
+    daily_limit: 1000000
+    hourly_limit: 50000
+    per_source_limits:
+      postgres: 500000
+      mysql: 500000
+
+exporters:
+  otlphttp:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:OTLP_API_KEY}
+      
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 100
+    
+  prometheusexporter:
+    endpoint: 0.0.0.0:8889
+    namespace: db_intel
+    
+  nrerror:
+    endpoint: ${env:NR_ERROR_ENDPOINT}
+    api_key: ${env:NR_API_KEY}
+    max_errors_per_minute: 100
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /health
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+    
+  pprof:
+    endpoint: 0.0.0.0:6060
+
+service:
+  extensions: [health_check, zpages, pprof]
+  
+  pipelines:
+    metrics:
+      receivers: [postgresql, mysql, sqlquery, ash, enhancedsql, kernelmetrics, otlp]
+      processors: [memory_limiter, adaptivesampler, batch, resource, attributes]
+      exporters: [otlphttp, prometheusexporter, debug]
+      
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, planextractor, querycorrelator, batch, resource]
+      exporters: [otlphttp]
+      
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, circuitbreaker, costcontrol, batch, resource]
+      exporters: [otlphttp, nrerror]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL}
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

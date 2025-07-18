@@ -133,4 +133,4 @@ make help
 
 ## Archived Scripts
 
-Old scripts have been moved to `docs/archive/scripts/` for reference.
+Old scripts have been moved to `scripts/archive/` for reference.

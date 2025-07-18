@@ -8,9 +8,6 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/processor"
-	"go.uber.org/zap"
-	
-	"github.com/deepaksharma/db-otel/components/internal/boundedmap"
 )
 
 var (
@@ -37,6 +34,9 @@ func createDefaultConfig() component.Config {
 		EnableTableCorrelation: true,
 		EnableDatabaseCorrelation: true,
 		MaxQueriesTracked: 10000,
+		MaxQueryCount:     10000,
+		MaxTableCount:     1000,
+		MaxDatabaseCount:  100,
 		CorrelationAttributes: CorrelationAttributesConfig{
 			AddQueryCategory:         true,
 			AddTableStats:           true,
@@ -66,20 +66,8 @@ func createMetricsProcessor(
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	// Create eviction callback for logging
-	onEvict := func(key string, value interface{}) {
-		set.Logger.Debug("Evicting item from correlation cache", zap.String("key", key))
-	}
-
-	correlator := &queryCorrelator{
-		config:        processorConfig,
-		logger:        set.Logger,
-		nextConsumer:  nextConsumer,
-		queryIndex:    boundedmap.New(processorConfig.MaxQueriesTracked, onEvict),
-		tableIndex:    boundedmap.New(processorConfig.MaxQueriesTracked/10, onEvict), // Assume fewer tables than queries
-		databaseIndex: boundedmap.New(100, onEvict), // Assume limited number of databases
-		shutdownChan:  make(chan struct{}),
-	}
-
+	// Create concurrent version for better performance
+	correlator := NewConcurrentQueryCorrelator(set.Logger, processorConfig, nextConsumer)
+	
 	return correlator, nil
 }

@@ -205,7 +205,7 @@ SINCE 30 minutes ago
 
 ### Config-Only Mode Configuration
 
-Located in `deployments/docker/compose/configs/config-only-mode.yaml`:
+Located in `deployments/docker/compose/configs/postgresql-maximum-extraction.yaml`:
 
 ```yaml
 receivers:

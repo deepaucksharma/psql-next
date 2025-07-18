@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Scrape edge collector metrics
+  - job_name: 'otel-edge-collector'
+    static_configs:
+      - targets: ['otel-collector-edge:8888']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: '.*grpc.*'
+        action: drop
+
+  # Scrape gateway metrics
+  - job_name: 'otel-gateway'
+    static_configs:
+      - targets: ['otel-gateway:8888']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: '.*grpc.*'
+        action: drop
+
+  # Scrape gateway prometheus endpoint
+  - job_name: 'mysql-metrics'
+    static_configs:
+      - targets: ['otel-gateway:9091']
+    honor_labels: true

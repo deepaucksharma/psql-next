@@ -1,0 +1,267 @@
+# MySQL Wait-Based Performance Alerts
+# These alerts follow the wait-time methodology for proactive performance management
+
+alerts:
+  # Critical Wait Time Alerts
+  - name: "Critical Query Wait Time"
+    description: "Query spending >90% time waiting - immediate action needed"
+    nrql: |
+      SELECT average(wait_percentage) 
+      FROM Metric 
+      WHERE wait.severity = 'critical'
+      FACET query_hash, service.name
+    critical_threshold: 90
+    duration: 5
+    runbook: |
+      1. Check advisor.recommendation for specific guidance
+      2. Review wait.category to understand wait type
+      3. If I/O wait: Check disk latency and consider index
+      4. If lock wait: Identify blocking session
+      5. If CPU wait: Check system load
+    
+  - name: "Query Wait Time Anomaly"
+    description: "Abnormal wait pattern detected"
+    nrql: |
+      SELECT count(*) 
+      FROM Metric 
+      WHERE anomaly.detected = true
+      FACET query_hash, service.name
+    critical_threshold: 1
+    operator: "above_or_equals"
+    duration: 1
+    
+  # Blocking Chain Alerts
+  - name: "Database Blocking Chain"
+    description: "Long-running blocks impacting multiple sessions"
+    nrql: |
+      SELECT max(mysql.blocking.active) 
+      FROM Metric 
+      FACET service.name, lock_table
+    critical_threshold: 60
+    warning_threshold: 30
+    duration: 1
+    runbook: |
+      1. Identify blocking and blocked sessions
+      2. Review lock_table and lock_type attributes
+      3. Check transaction duration
+      4. Consider killing blocking session if critical
+    
+  - name: "Lock Wait Storm"
+    description: "Rapid increase in lock waits indicating contention"
+    nrql: |
+      SELECT rate(sum(mysql.query.wait_profile), 1 minute) 
+      FROM Metric 
+      WHERE wait.category = 'lock'
+      FACET service.name
+    critical_threshold: 1000
+    duration: 3
+    
+  # Advisory-Based Alerts
+  - name: "P1 Performance Advisory"
+    description: "Critical performance issue requiring immediate action"
+    nrql: |
+      SELECT count(*) 
+      FROM Metric 
+      WHERE advisor.priority = 'P1'
+      FACET advisor.type, service.name
+    critical_threshold: 1
+    operator: "above_or_equals"
+    duration: 1
+    immediate_action: true
+    
+  - name: "High Impact Missing Index"
+    description: "Missing index causing significant performance degradation"
+    nrql: |
+      SELECT sum(mysql.query.wait_profile) 
+      FROM Metric 
+      WHERE advisor.type = 'missing_index'
+        AND wait.severity IN ('critical', 'high')
+      FACET query_hash, db_schema
+    warning_threshold: 10000
+    duration: 5
+    runbook: |
+      1. Review query_hash and advisor.recommendation
+      2. Analyze query WHERE clause and JOIN conditions
+      3. Create recommended index
+      4. Test impact in non-production first
+    
+  # Plan Change Alerts
+  - name: "Query Plan Regression"
+    description: "Query execution plan changed with significant performance impact"
+    nrql: |
+      SELECT count(*) 
+      FROM Metric 
+      WHERE plan.fingerprint IS NOT NULL 
+        AND wait.trend = 'regression'
+      FACET query_hash
+    warning_threshold: 1
+    operator: "above_or_equals"
+    duration: 1
+    
+  # Resource Saturation Alerts
+  - name: "I/O Wait Saturation"
+    description: "Storage subsystem bottleneck detected"
+    nrql: |
+      SELECT sum(mysql.query.wait_profile) 
+      FROM Metric 
+      WHERE wait.category = 'io'
+      FACET service.name
+    critical_threshold: 50000
+    warning_threshold: 30000
+    duration: 5
+    
+  - name: "CPU Wait Saturation"
+    description: "CPU resource contention affecting queries"
+    nrql: |
+      SELECT sum(mysql.query.wait_profile) 
+      FROM Metric 
+      WHERE wait.category = 'cpu'
+      FACET service.name
+    critical_threshold: 30000
+    warning_threshold: 20000
+    duration: 5
+    
+  # SLI Impact Alerts
+  - name: "SLI Impacting Queries"
+    description: "Queries exceeding SLO thresholds"
+    nrql: |
+      SELECT count(*) 
+      FROM Metric 
+      WHERE sli.impacting = true 
+        AND statement_time_ms > 5000
+      FACET service.name
+    critical_threshold: 10
+    warning_threshold: 5
+    duration: 5
+    
+  # Composite Advisory Alerts
+  - name: "Lock Escalation Due to Missing Index"
+    description: "Table-level locking caused by missing index"
+    nrql: |
+      SELECT count(*) 
+      FROM Metric 
+      WHERE advisor.composite = 'lock_escalation_missing_index'
+      FACET service.name, query_hash
+    critical_threshold: 1
+    operator: "above_or_equals"
+    duration: 1
+    immediate_action: true
+    
+  - name: "I/O Saturation with Temp Tables"
+    description: "Disk I/O compounded by temporary table creation"
+    nrql: |
+      SELECT count(*) 
+      FROM Metric 
+      WHERE advisor.composite = 'io_saturation_temp_tables'
+      FACET service.name
+    warning_threshold: 1
+    operator: "above_or_equals"
+    duration: 3
+    
+  # Replication Specific Alerts
+  - name: "Replica Lag High"
+    description: "Replication falling behind"
+    nrql: |
+      SELECT max(mysql.replica.lag) 
+      FROM Metric 
+      WHERE metric.name = 'mysql.replica.lag'
+      FACET service.name, CHANNEL_NAME
+    critical_threshold: 60
+    warning_threshold: 30
+    duration: 5
+    
+  # Wait Category Distribution Alert
+  - name: "Wait Category Imbalance"
+    description: "Unusual distribution of wait types"
+    nrql: |
+      SELECT (sum(mysql.query.wait_profile) / sum(mysql.query.wait_profile) FACET wait.category) * 100 
+      FROM Metric 
+      WHERE wait.category = 'io'
+      FACET service.name
+    critical_threshold: 80
+    duration: 10
+    
+# Alert Policies
+policies:
+  - name: "MySQL Wait Analysis - Critical"
+    incident_preference: "PER_CONDITION_AND_TARGET"
+    alerts:
+      - "Critical Query Wait Time"
+      - "Database Blocking Chain"
+      - "P1 Performance Advisory"
+      - "Lock Escalation Due to Missing Index"
+      - "SLI Impacting Queries"
+    
+  - name: "MySQL Wait Analysis - Warning"
+    incident_preference: "PER_CONDITION"
+    alerts:
+      - "Query Wait Time Anomaly"
+      - "High Impact Missing Index"
+      - "Query Plan Regression"
+      - "I/O Wait Saturation"
+      - "Lock Wait Storm"
+    
+  - name: "MySQL Replication Health"
+    incident_preference: "PER_CONDITION_AND_TARGET"
+    alerts:
+      - "Replica Lag High"
+
+# Notification Channels
+notification_channels:
+  - name: "DBA Team Primary"
+    type: "EMAIL"
+    config:
+      recipients: 
+        - "dba-team@company.com"
+        - "database-oncall@company.com"
+      include_json: true
+      
+  - name: "Database Slack"
+    type: "SLACK"
+    config:
+      url: "${SLACK_WEBHOOK_URL}"
+      channel: "#database-alerts"
+      
+  - name: "Critical PagerDuty"
+    type: "PAGERDUTY"
+    config:
+      service_key: "${PAGERDUTY_SERVICE_KEY}"
+      
+# Workflows
+workflows:
+  - name: "Critical Wait Analysis"
+    triggers:
+      - policy: "MySQL Wait Analysis - Critical"
+        channels:
+          - "DBA Team Primary"
+          - "Database Slack"
+          - "Critical PagerDuty"
+    enrichments:
+      - type: "query_details"
+        nrql: |
+          SELECT latest(query_text), 
+                 latest(advisor.recommendation),
+                 sum(mysql.query.wait_profile) as total_wait,
+                 count(*) as executions
+          FROM Metric 
+          WHERE query_hash = {{query_hash}} 
+          SINCE 1 hour ago
+      - type: "recent_changes"
+        nrql: |
+          SELECT * FROM Deployment 
+          WHERE appName LIKE '%mysql%' 
+          SINCE 4 hours ago
+          
+  - name: "Warning Wait Analysis"
+    triggers:
+      - policy: "MySQL Wait Analysis - Warning"
+        channels:
+          - "Database Slack"
+    enrichments:
+      - type: "impact_analysis"
+        nrql: |
+          SELECT count(DISTINCT query_hash) as affected_queries,
+                 sum(mysql.query.wait_profile) as total_impact
+          FROM Metric
+          WHERE advisor.type IS NOT NULL
+          SINCE 30 minutes ago

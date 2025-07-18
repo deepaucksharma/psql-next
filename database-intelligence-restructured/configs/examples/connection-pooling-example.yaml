@@ -1,0 +1,187 @@
+# Example configuration demonstrating connection pooling features
+
+receivers:
+  # PostgreSQL receiver with connection pooling
+  enhancedsql/postgresql:
+    driver: postgres
+    datasource: "host=localhost port=5432 user=postgres password=password dbname=myapp sslmode=disable"
+    collection_interval: 60s
+    
+    # Connection pool settings
+    max_open_connections: 25  # Maximum number of open connections
+    max_idle_connections: 5   # Maximum number of idle connections
+    
+    # Feature detection with caching
+    feature_detection:
+      enabled: true
+      cache_duration: 1h
+      refresh_interval: 30m
+    
+    # Enable standard PostgreSQL queries
+    queries:
+      - name: postgresql.metrics
+        enabled: true
+      - name: postgresql.ash
+        enabled: true
+      - name: postgresql.replication
+        enabled: true
+    
+    resource_attributes:
+      service.name: "my-postgresql-service"
+      deployment.environment: "production"
+
+  # MySQL receiver with connection pooling
+  enhancedsql/mysql:
+    driver: mysql
+    datasource: "user:password@tcp(localhost:3306)/myapp?parseTime=true"
+    collection_interval: 60s
+    
+    # Connection pool settings
+    max_open_connections: 20  # Slightly lower for MySQL
+    max_idle_connections: 4
+    
+    feature_detection:
+      enabled: true
+      cache_duration: 1h
+      refresh_interval: 30m
+    
+    queries:
+      - name: mysql.metrics
+        enabled: true
+      - name: mysql.innodb
+        enabled: true
+      - name: mysql.performance_schema
+        enabled: true
+    
+    resource_attributes:
+      service.name: "my-mysql-service"
+      deployment.environment: "production"
+
+  # MongoDB receiver with built-in connection pooling
+  mongodb:
+    endpoint: "mongodb://localhost:27017"
+    username: "mongouser"
+    password: "mongopass"
+    database: "admin"
+    collection_interval: 60s
+    
+    # MongoDB native pool settings
+    connection_pool:
+      max_pool_size: 100
+      min_pool_size: 10
+      max_idle_time: 5m
+    
+    metrics:
+      mongodb.database.size: true
+      mongodb.collection.count: true
+      mongodb.index.size: true
+      mongodb.connection.count: true
+    
+    resource_attributes:
+      service.name: "my-mongodb-service"
+      deployment.environment: "production"
+
+  # Redis receiver with connection pooling
+  redis:
+    endpoint: "localhost:6379"
+    password: "redispass"
+    collection_interval: 60s
+    
+    # Redis pool settings
+    pool_size: 10
+    min_idle_conns: 5
+    max_conn_age: 5m
+    pool_timeout: 4s
+    idle_timeout: 5m
+    
+    metrics:
+      - memory
+      - clients
+      - persistence
+      - stats
+      - replication
+      - cpu
+      - commandstats
+      - keyspace
+    
+    resource_attributes:
+      service.name: "my-redis-service"
+      deployment.environment: "production"
+
+processors:
+  # Cost control processor monitors connection pool usage
+  costcontrol:
+    monthly_budget_usd: 1000
+    enable_intelligent_aggregation: true
+    cardinality_limit: 50000
+
+  # Query correlator with bounded memory usage
+  querycorrelator:
+    max_queries_tracked: 10000
+    max_query_count: 10000
+    max_table_count: 1000
+    max_database_count: 100
+    retention_period: 24h
+    cleanup_interval: 1h
+
+exporters:
+  # New Relic exporter
+  newrelic:
+    api_key: "${NEW_RELIC_API_KEY}"
+    
+  # Debug exporter for testing
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+service:
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  pipelines:
+    metrics/postgresql:
+      receivers: [enhancedsql/postgresql]
+      processors: [costcontrol, querycorrelator]
+      exporters: [newrelic]
+    
+    metrics/mysql:
+      receivers: [enhancedsql/mysql]
+      processors: [costcontrol, querycorrelator]
+      exporters: [newrelic]
+    
+    metrics/mongodb:
+      receivers: [mongodb]
+      processors: [costcontrol]
+      exporters: [newrelic]
+    
+    metrics/redis:
+      receivers: [redis]
+      processors: [costcontrol]
+      exporters: [newrelic]
+    
+    # Debug pipeline for all databases
+    metrics/debug:
+      receivers: [enhancedsql/postgresql, enhancedsql/mysql, mongodb, redis]
+      processors: []
+      exporters: [debug]
+
+  # Extension for monitoring connection pools
+  extensions: [health_check, pprof, zpages]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679

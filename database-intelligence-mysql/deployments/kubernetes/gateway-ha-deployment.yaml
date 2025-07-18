@@ -1,0 +1,263 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mysql-monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-ha-config
+  namespace: mysql-monitoring
+data:
+  gateway-ha.yaml: |
+    # Include the gateway-ha.yaml content here
+    # In production, use kustomize or helm to manage this
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway-ha
+  namespace: mysql-monitoring
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: otel-gateway-ha
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+    - name: metrics
+      port: 9091
+      targetPort: 9091
+      protocol: TCP
+    - name: health
+      port: 13133
+      targetPort: 13133
+      protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway-ha-headless
+  namespace: mysql-monitoring
+spec:
+  clusterIP: None
+  selector:
+    app: otel-gateway-ha
+  ports:
+    - name: cluster
+      port: 4319
+      targetPort: 4319
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: otel-gateway-ha
+  namespace: mysql-monitoring
+spec:
+  serviceName: otel-gateway-ha-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: otel-gateway-ha
+  template:
+    metadata:
+      labels:
+        app: otel-gateway-ha
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8888"
+        prometheus.io/path: "/metrics"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - otel-gateway-ha
+              topologyKey: kubernetes.io/hostname
+          - weight: 50
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - otel-gateway-ha
+              topologyKey: topology.kubernetes.io/zone
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:0.91.0
+        args:
+          - --config=/etc/otel/gateway-ha.yaml
+          - --feature-gates=+pkg.translator.prometheus.NormalizeName
+        env:
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: GATEWAY_REGION
+          value: "us-east-1"
+        - name: GATEWAY_AZ
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['topology.kubernetes.io/zone']
+        - name: GATEWAY_CLUSTER
+          value: "primary"
+        - name: PRIMARY_BACKEND_ENDPOINT
+          value: "otlp-backend-1.monitoring.internal:4317"
+        - name: SECONDARY_BACKEND_ENDPOINT
+          value: "otlp-backend-2.monitoring.internal:4317"
+        - name: CROSS_REGION_ENDPOINT
+          value: "otlp-gateway-us-west-2.monitoring.internal:4317"
+        - name: GOGC
+          value: "80"
+        - name: GOMEMLIMIT
+          value: "1750MiB"
+        resources:
+          requests:
+            cpu: 1
+            memory: 2Gi
+          limits:
+            cpu: 2
+            memory: 2Gi
+        ports:
+        - containerPort: 4317
+          name: otlp-grpc
+        - containerPort: 4318
+          name: otlp-http
+        - containerPort: 4319
+          name: cluster
+        - containerPort: 8888
+          name: metrics
+        - containerPort: 13133
+          name: health
+        - containerPort: 9091
+          name: prometheus
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 13133
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 13133
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel
+        - name: queue-storage
+          mountPath: /var/lib/otel/gateway/queue
+      volumes:
+      - name: config
+        configMap:
+          name: gateway-ha-config
+  volumeClaimTemplates:
+  - metadata:
+      name: queue-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "gp3"
+      resources:
+        requests:
+          storage: 50Gi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: otel-gateway-ha-pdb
+  namespace: mysql-monitoring
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: otel-gateway-ha
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: otel-gateway-ha-hpa
+  namespace: mysql-monitoring
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: otel-gateway-ha
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: otelcol_processor_batch_batch_size_trigger_send
+      target:
+        type: AverageValue
+        averageValue: "5000"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: otel-gateway-ha
+  namespace: mysql-monitoring
+spec:
+  selector:
+    matchLabels:
+      app: otel-gateway-ha
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics

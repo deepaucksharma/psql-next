@@ -1,0 +1,420 @@
+{
+  "name": "MySQL Wait-Based Performance Analysis",
+  "description": "Comprehensive wait-time analysis dashboard following SolarWinds DPA methodology",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Wait Time Overview",
+      "description": "Database-wide wait analysis and trends",
+      "widgets": [
+        {
+          "title": "Total Database Wait Time",
+          "configuration": {
+            "area": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT sum(mysql.query.wait_profile) as 'Total Wait Time (ms)', average(mysql.query.wait_profile) as 'Avg Wait per Query (ms)', uniqueCount(query_hash) as 'Unique Queries', rate(sum(mysql.query.wait_profile), 1 minute) as 'Wait Time Rate/min' FROM Metric WHERE wait.category IS NOT NULL FACET service.name SINCE 1 hour ago TIMESERIES"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "title": "Wait Category Breakdown",
+          "configuration": {
+            "pie": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT sum(mysql.query.wait_profile) as 'Wait Time' FROM Metric FACET wait.category SINCE 1 hour ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "title": "Wait Severity Distribution",
+          "configuration": {
+            "bar": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT count(*) as 'Query Executions' FROM Metric WHERE wait.severity IS NOT NULL FACET wait.severity SINCE 1 hour ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "title": "Active Performance Advisories",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT count(*) as 'Count', latest(advisor.recommendation) as 'Recommendation', max(mysql.query.wait_profile) as 'Max Wait (ms)', latest(advisor.priority) as 'Priority' FROM Metric WHERE advisor.type IS NOT NULL FACET advisor.type SINCE 1 hour ago LIMIT 10"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 9,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "Top Wait Contributors",
+      "description": "Queries causing the most wait time",
+      "widgets": [
+        {
+          "title": "Top Queries by Total Wait Time",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT sum(mysql.query.wait_profile) as 'Total Wait (ms)', average(mysql.query.wait_profile) as 'Avg Wait (ms)', max(wait_percentage) as 'Max Wait %', latest(advisor.recommendation) as 'Recommendation', latest(query_text) as 'Query' FROM Metric WHERE query_hash IS NOT NULL FACET query_hash, advisor.type SINCE 1 hour ago LIMIT 20"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "title": "Wait Time Trends for Top Queries",
+          "configuration": {
+            "line": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT average(mysql.query.wait_profile) as 'Avg Wait Time' FROM Metric WHERE query_hash IS NOT NULL FACET query_hash SINCE 24 hours ago TIMESERIES 30 minutes LIMIT 10"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "title": "Query Wait Regression Detection",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT latest(query_text) as 'Query', average(wait_percentage) as 'Avg Wait %', count(*) as 'Executions', latest(wait.trend) as 'Trend' FROM Metric WHERE wait.trend = 'regression' FACET query_hash SINCE 1 hour ago LIMIT 10"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 9,
+            "row": 5,
+            "width": 4,
+            "height": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "Blocking Analysis",
+      "description": "Lock waits and blocking chains",
+      "widgets": [
+        {
+          "title": "Active Blocking Sessions",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT max(mysql.blocking.active) as 'Max Block Duration (s)', uniqueCount(waiting_thread) as 'Blocked Threads', latest(lock_table) as 'Table', latest(lock_type) as 'Lock Type', latest(lock_mode) as 'Mode' FROM Metric WHERE metric.name = 'mysql.blocking.active' FACET service.name, blocking_thread SINCE 30 minutes ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "title": "Lock Wait Timeline",
+          "configuration": {
+            "line": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT max(mysql.blocking.active) as 'Lock Wait Duration' FROM Metric WHERE metric.name = 'mysql.blocking.active' FACET lock_table SINCE 1 hour ago TIMESERIES 1 minute"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "title": "Lock Wait Heatmap",
+          "configuration": {
+            "heatmap": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT histogram(mysql.blocking.active, 10, 20) FROM Metric WHERE metric.name = 'mysql.blocking.active' SINCE 1 hour ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query Intelligence",
+      "description": "Smart advisories and optimization opportunities",
+      "widgets": [
+        {
+          "title": "Missing Index Impact Analysis",
+          "configuration": {
+            "bar": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT sum(mysql.query.wait_profile) as 'Total Wait from Missing Indexes' FROM Metric WHERE advisor.type = 'missing_index' AND wait.severity IN ('critical', 'high') FACET query_hash, db_schema SINCE 24 hours ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          }
+        },
+        {
+          "title": "Composite Advisory Analysis",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT latest(advisor.composite) as 'Composite Issue', latest(advisor.recommendation) as 'Recommendation', count(*) as 'Occurrences', sum(mysql.query.wait_profile) as 'Total Wait Impact' FROM Metric WHERE advisor.composite IS NOT NULL FACET query_hash SINCE 1 hour ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          }
+        },
+        {
+          "title": "Plan Change Detection",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT uniqueCount(plan.fingerprint) as 'Plan Variations', latest(avg_rows_examined) as 'Rows Examined', latest(full_scans) as 'Full Scans', latest(tmp_disk_tables) as 'Disk Temp Tables' FROM Metric WHERE query_hash IS NOT NULL AND metric.name = 'mysql.query.execution_stats' FACET query_hash, DIGEST SINCE 1 day ago LIMIT 20"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resource Correlation",
+      "description": "Wait times correlated with system resources",
+      "widgets": [
+        {
+          "title": "Wait Time vs System Resources",
+          "configuration": {
+            "line": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT average(system.cpu.utilization) as 'CPU %', average(mysql.innodb.buffer_pool.reads) as 'Buffer Pool Reads/s', average(mysql.query.wait_profile) as 'Avg Wait (ms)' FROM Metric WHERE service.name IS NOT NULL FACET service.name SINCE 1 hour ago TIMESERIES 1 minute"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "title": "I/O Wait Saturation Analysis",
+          "configuration": {
+            "area": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT sum(mysql.query.wait_profile) as 'I/O Wait Time' FROM Metric WHERE wait.category = 'io' FACET service.name SINCE 1 hour ago TIMESERIES 5 minutes"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          }
+        },
+        {
+          "title": "Lock Wait Storm Detection",
+          "configuration": {
+            "line": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT rate(sum(mysql.query.wait_profile), 1 minute) as 'Lock Wait Rate' FROM Metric WHERE wait.category = 'lock' FACET service.name SINCE 1 hour ago TIMESERIES 1 minute"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "SLI Impact",
+      "description": "Service level indicator impact from waits",
+      "widgets": [
+        {
+          "title": "SLI Impacting Queries",
+          "configuration": {
+            "table": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT latest(query_text) as 'Query', average(statement_time_ms) as 'Avg Duration (ms)', average(wait_percentage) as 'Avg Wait %', count(*) as 'Executions' FROM Metric WHERE sli.impacting = true FACET query_hash SINCE 1 hour ago LIMIT 20"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "title": "Anomaly Detection",
+          "configuration": {
+            "billboard": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT count(*) as 'Anomalies Detected', uniqueCount(query_hash) as 'Unique Queries', average(wait_percentage) as 'Avg Wait %' FROM Metric WHERE anomaly.detected = true SINCE 1 hour ago"
+                }
+              ],
+              "thresholds": [
+                {
+                  "alertSeverity": "CRITICAL",
+                  "value": 10
+                },
+                {
+                  "alertSeverity": "WARNING",
+                  "value": 5
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "title": "P1 Advisory Summary",
+          "configuration": {
+            "billboard": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT count(*) as 'P1 Advisories' FROM Metric WHERE advisor.priority = 'P1' SINCE 1 hour ago"
+                }
+              ],
+              "thresholds": [
+                {
+                  "alertSeverity": "CRITICAL",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "title": "Impact Score Distribution",
+          "configuration": {
+            "histogram": {
+              "nrqlQueries": [
+                {
+                  "query": "SELECT histogram(impact.score, 10, 20) FROM Metric WHERE impact.score IS NOT NULL SINCE 1 hour ago"
+                }
+              ]
+            }
+          },
+          "layout": {
+            "column": 9,
+            "row": 4,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ]
+    }
+  ],
+  "variables": []
+}

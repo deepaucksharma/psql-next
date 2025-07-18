@@ -1,0 +1,76 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'mysql-wait-monitoring-ha'
+    environment: 'local'
+
+scrape_configs:
+  # Edge Collectors
+  - job_name: 'edge-collector-1'
+    static_configs:
+      - targets: ['edge-collector-1:8888']
+        labels:
+          instance: 'edge-1'
+          component: 'edge-collector'
+
+  - job_name: 'edge-collector-2'
+    static_configs:
+      - targets: ['edge-collector-2:8888']
+        labels:
+          instance: 'edge-2'
+          component: 'edge-collector'
+
+  # HA Gateways
+  - job_name: 'gateway-ha-1'
+    static_configs:
+      - targets: ['gateway-ha-1:8888']
+        labels:
+          instance: 'gateway-1'
+          component: 'gateway'
+          region: 'us-east-1'
+          az: 'us-east-1a'
+
+  - job_name: 'gateway-ha-2'
+    static_configs:
+      - targets: ['gateway-ha-2:8888']
+        labels:
+          instance: 'gateway-2'
+          component: 'gateway'
+          region: 'us-east-1'
+          az: 'us-east-1b'
+
+  - job_name: 'gateway-ha-3'
+    static_configs:
+      - targets: ['gateway-ha-3:8888']
+        labels:
+          instance: 'gateway-3'
+          component: 'gateway'
+          region: 'us-west-2'
+          az: 'us-west-2a'
+
+  # MySQL Wait Metrics from Edge Collectors
+  - job_name: 'mysql-wait-metrics-1'
+    static_configs:
+      - targets: ['edge-collector-1:9091']
+        labels:
+          mysql_instance: 'primary'
+          collector: 'edge-1'
+
+  - job_name: 'mysql-wait-metrics-2'
+    static_configs:
+      - targets: ['edge-collector-2:9091']
+        labels:
+          mysql_instance: 'primary'
+          collector: 'edge-2'
+
+  # HAProxy Stats
+  - job_name: 'haproxy'
+    static_configs:
+      - targets: ['gateway-lb:8404']
+        labels:
+          component: 'load-balancer'
+
+# Alerting rules would go here
+rule_files:
+  # - 'alerts.yml'

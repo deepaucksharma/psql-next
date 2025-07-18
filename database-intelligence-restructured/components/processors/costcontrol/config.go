@@ -36,6 +36,18 @@ type Config struct {
 	
 	// HighCardinalityDimensions defines which dimensions to remove for cardinality reduction
 	HighCardinalityDimensions []string `mapstructure:"high_cardinality_dimensions"`
+	
+	// CardinalityLimit is the maximum allowed cardinality
+	CardinalityLimit int `mapstructure:"cardinality_limit"`
+	
+	// CardinalityCleanupInterval is how often to clean up cardinality tracking
+	CardinalityCleanupInterval time.Duration `mapstructure:"cardinality_cleanup_interval"`
+	
+	// EnableIntelligentAggregation enables smart metric aggregation
+	EnableIntelligentAggregation bool `mapstructure:"enable_intelligent_aggregation"`
+	
+	// EnableLogReduction enables log size reduction
+	EnableLogReduction bool `mapstructure:"enable_log_reduction"`
 }
 
 // Validate checks the processor configuration

@@ -1,11 +1,46 @@
 # Database Intelligence Dashboards
 
-This directory contains dashboard configurations for Database Intelligence monitoring, supporting both OHI (On-Host Integration) and OpenTelemetry formats.
+This directory contains dashboard configurations for Database Intelligence monitoring, supporting multiple monitoring platforms and database types.
+
+## Available Dashboards
+
+### Multi-Database Overview Dashboards
+Comprehensive monitoring across PostgreSQL, MySQL, MongoDB, and Redis databases.
+
+- **`multi-database-overview.json`** - Grafana dashboard with Prometheus queries
+- **`multi-database-overview-newrelic.json`** - New Relic dashboard with NRQL queries
+
+Features:
+- Unified health monitoring across all database types
+- Performance metrics comparison
+- Resource usage tracking
+- Replication and high availability status
+- Alert correlation and issue tracking
+
+### Cross-Database Correlation Dashboards
+Advanced correlation analysis and dependency mapping between databases.
+
+- **`cross-database-correlation.json`** - Grafana dashboard for correlation analysis
+- **`cross-database-correlation-newrelic.json`** - New Relic dashboard for correlation analysis
+
+Features:
+- Query correlation across databases
+- Distributed transaction tracking
+- Data flow visualization
+- Performance impact analysis
+- Resource contention detection
+- Anomaly detection for unusual patterns
+- Service-to-database dependency mapping
+
+### Legacy and Migration Dashboards
+For OHI (On-Host Integration) to OpenTelemetry migration.
 
 ## Directory Structure
 
 ```
 dashboards/
+├── multi-database-overview.json         # Grafana multi-DB dashboard
+├── multi-database-overview-newrelic.json # New Relic multi-DB dashboard
 ├── newrelic/           # Legacy OHI dashboards
 │   ├── database-intelligence-dashboard.json
 │   └── alerts-config.yaml

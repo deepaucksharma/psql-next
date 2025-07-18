@@ -1,0 +1,225 @@
+# Critical System Configuration - For business-critical databases
+# Full instrumentation with custom thresholds and alerting
+# Resource usage: <768MB RAM, <1.5% CPU
+
+receivers:
+  # Full wait analysis
+  mysql/waits:
+    endpoint: ${env:MYSQL_PRIMARY_HOST}:3306
+    username: ${env:MYSQL_MONITOR_USER}
+    password: ${env:MYSQL_MONITOR_PASS}
+    collection_interval: 10s  # Frequent collection
+    
+  sqlquery/waits:
+    driver: mysql
+    datasource: "${env:MYSQL_MONITOR_USER}:${env:MYSQL_MONITOR_PASS}@tcp(${env:MYSQL_PRIMARY_HOST}:3306)/"
+    collection_interval: 10s
+    queries:
+      # Comprehensive wait profile
+      - sql: |
+          SELECT 
+            DIGEST as query_hash,
+            LEFT(DIGEST_TEXT, 120) as query_text,
+            CURRENT_SCHEMA as db_schema,
+            COUNT_STAR as exec_count,
+            SUM_TIMER_WAIT/1000000000 as total_time_sec,
+            AVG_TIMER_WAIT/1000000 as avg_time_ms,
+            MIN_TIMER_WAIT/1000000 as min_time_ms,
+            MAX_TIMER_WAIT/1000000 as max_time_ms,
+            SUM_LOCK_TIME/1000000 as total_lock_ms,
+            SUM_ROWS_EXAMINED as total_rows_examined,
+            SUM_ROWS_SENT as total_rows_sent,
+            SUM_SELECT_SCAN as full_scans,
+            SUM_NO_INDEX_USED as no_index_used_count,
+            SUM_NO_GOOD_INDEX_USED as no_good_index_used_count,
+            SUM_CREATED_TMP_DISK_TABLES as tmp_disk_tables,
+            SUM_SORT_SCAN as sort_scans,
+            FIRST_SEEN,
+            LAST_SEEN,
+            QUANTILE_95 as p95_time_ns,
+            QUANTILE_99 as p99_time_ns
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE COUNT_STAR > 0
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 200  # More queries tracked
+      
+      # Real-time blocking analysis
+      - sql: |
+          SELECT 
+            t.PROCESSLIST_ID as thread_id,
+            t.PROCESSLIST_USER as user,
+            t.PROCESSLIST_HOST as host,
+            t.PROCESSLIST_DB as db,
+            t.PROCESSLIST_COMMAND as command,
+            t.PROCESSLIST_TIME as time,
+            t.PROCESSLIST_STATE as state,
+            LEFT(t.PROCESSLIST_INFO, 100) as query,
+            ml.OBJECT_SCHEMA as lock_schema,
+            ml.OBJECT_NAME as lock_table,
+            ml.LOCK_TYPE as lock_type,
+            ml.LOCK_STATUS as lock_status
+          FROM performance_schema.threads t
+          LEFT JOIN performance_schema.metadata_locks ml
+            ON t.THREAD_ID = ml.OWNER_THREAD_ID
+          WHERE t.PROCESSLIST_COMMAND != 'Sleep'
+            AND (t.PROCESSLIST_STATE LIKE '%lock%' 
+                 OR ml.LOCK_STATUS = 'PENDING')
+
+  # Full prometheus metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'mysql_exporter_critical'
+          scrape_interval: 15s  # Frequent scraping
+          static_configs:
+            - targets: ['mysql-exporter-primary:9104']
+
+  # Critical query monitoring
+  sqlquery/critical:
+    driver: mysql
+    datasource: "${env:MYSQL_MONITOR_USER}:${env:MYSQL_MONITOR_PASS}@tcp(${env:MYSQL_PRIMARY_HOST}:3306)/"
+    collection_interval: 5s  # Very frequent for critical queries
+    queries:
+      # Monitor specific critical queries
+      - sql: |
+          SELECT 
+            'payment_processing' as query_type,
+            COUNT(*) as active_count,
+            AVG(TIMER_WAIT)/1000000 as avg_time_ms,
+            MAX(TIMER_WAIT)/1000000 as max_time_ms
+          FROM performance_schema.events_statements_current
+          WHERE DIGEST_TEXT LIKE '%payment%'
+            AND TIMER_END IS NULL
+        metrics:
+          - metric_name: mysql.critical.query.active
+            value_column: active_count
+            attribute_columns: [query_type, avg_time_ms, max_time_ms]
+
+processors:
+  # Higher memory for critical systems
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 768
+    spike_limit_mib: 128
+    
+  # Critical query thresholds
+  transform/critical_thresholds:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Payment queries - 100ms threshold
+          - set(attributes["critical.threshold"], 100)
+            where IsMatch(attributes["query_text"], ".*payment.*")
+          
+          # User authentication - 50ms threshold
+          - set(attributes["critical.threshold"], 50)
+            where IsMatch(attributes["query_text"], ".*user.*auth.*")
+          
+          # Reporting queries - 5s threshold
+          - set(attributes["critical.threshold"], 5000)
+            where IsMatch(attributes["query_text"], ".*report.*")
+          
+          # Mark as critical if exceeds threshold
+          - set(attributes["wait.severity"], "critical")
+            where attributes["avg_time_ms"] > attributes["critical.threshold"]
+          
+          # Always P0 for payment issues
+          - set(attributes["advisor.priority"], "P0")
+            where IsMatch(attributes["query_text"], ".*payment.*")
+              and attributes["wait.severity"] == "critical"
+  
+  # No filtering for critical systems
+  filter/none:
+    error_mode: ignore
+    metrics:
+      include:
+        match_type: regexp
+        metric_names:
+          - ".*"  # Keep everything
+  
+  # Quick batching for low latency
+  batch:
+    timeout: 5s
+    send_batch_size: 3000
+
+  # Add alerting processor
+  transform/alerting:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Immediate alert for critical payment issues
+          - set(attributes["alert.immediate"], true)
+            where attributes["query_type"] == "payment_processing"
+              and attributes["max_time_ms"] > 1000
+          
+          # Page for sustained issues
+          - set(attributes["alert.page"], true)
+            where attributes["wait.severity"] == "critical"
+              and attributes["exec_count"] > 100
+
+exporters:
+  # Primary gateway
+  otlp/gateway:
+    endpoint: ${GATEWAY_ENDPOINT}
+    compression: gzip
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 20000
+  
+  # Backup gateway for HA
+  otlp/gateway_backup:
+    endpoint: ${GATEWAY_BACKUP_ENDPOINT}
+    compression: gzip
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 10000
+  
+  # Local metrics for debugging
+  prometheus:
+    endpoint: 0.0.0.0:9091
+    namespace: mysql_critical
+
+service:
+  pipelines:
+    # Critical query pipeline - fastest path
+    metrics/critical:
+      receivers: [sqlquery/critical]
+      processors: 
+        - memory_limiter
+        - transform/critical_thresholds
+        - transform/alerting
+        - batch
+      exporters: [otlp/gateway, otlp/gateway_backup]
+    
+    # Main metrics pipeline
+    metrics/main:
+      receivers: [mysql/waits, sqlquery/waits]
+      processors:
+        - memory_limiter
+        - transform/critical_thresholds
+        - batch
+      exporters: [otlp/gateway, prometheus]
+    
+    # Prometheus metrics
+    metrics/prometheus:
+      receivers: [prometheus]
+      processors:
+        - memory_limiter
+        - batch
+      exporters: [otlp/gateway]
+      
+  extensions: [health_check, pprof, zpages]
+  
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["/var/log/otel/critical-collector.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

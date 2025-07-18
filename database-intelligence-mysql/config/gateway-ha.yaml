@@ -1,0 +1,311 @@
+# High Availability Gateway Configuration
+# This configuration enables redundancy and load balancing for the gateway collectors
+# Deploy multiple instances with shared configuration
+
+receivers:
+  # Primary OTLP receiver with load balancing
+  otlp/primary:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+        max_concurrent_streams: 1000
+        keepalive:
+          server_parameters:
+            max_connection_idle: 11s
+            max_connection_age: 30s
+            max_connection_age_grace: 5s
+            time: 30s
+            timeout: 20s
+        auth:
+          authenticator: headers_setter
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://*"
+            - "https://*"
+  
+  # Health check receiver for load balancer
+  prometheus/health:
+    config:
+      scrape_configs:
+        - job_name: 'gateway_health'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['localhost:8888']
+
+  # Cluster coordination receiver (for peer discovery)
+  otlp/cluster:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4319  # Internal cluster communication port
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: "5s"
+      exporter_failure_threshold: 5
+  
+  headers_setter:
+    headers:
+      - key: X-Gateway-Instance
+        value: ${HOSTNAME}
+      - key: X-Gateway-Region
+        value: ${GATEWAY_REGION}
+  
+  # Memory ballast for consistent performance
+  memory_ballast:
+    size_in_percentage: 20
+
+processors:
+  # Resource detection for HA tracking
+  resource/ha:
+    attributes:
+      - key: gateway.instance
+        value: ${HOSTNAME}
+        action: upsert
+      - key: gateway.region
+        value: ${GATEWAY_REGION}
+        action: upsert
+      - key: gateway.az
+        value: ${GATEWAY_AZ}
+        action: upsert
+      - key: gateway.cluster
+        value: ${GATEWAY_CLUSTER}
+        action: upsert
+  
+  # Memory limiter with HA-appropriate settings
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024  # Higher limit for gateway
+    spike_limit_mib: 256
+  
+  # Load balancing for downstream exporters
+  loadbalancing:
+    protocol:
+      otlp:
+        timeout: 3s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 100ms
+          max_interval: 1s
+          max_elapsed_time: 10s
+    resolver:
+      static:
+        hostnames:
+          - ${BACKEND_ENDPOINT_1}
+          - ${BACKEND_ENDPOINT_2}
+          - ${BACKEND_ENDPOINT_3}
+  
+  # Deduplication for cross-zone redundancy
+  groupbytrace:
+    wait_duration: 10s
+    num_traces: 100000
+    num_workers: 4
+  
+  # Rate limiting per source
+  ratelimit:
+    processors:
+      - name: edge_collector_limiter
+        key: ${attributes["service.name"]}
+        rate: 10000  # 10k data points per second per edge collector
+  
+  # Circuit breaker for backend protection
+  circuitbreaker:
+    failure_threshold: 5
+    recovery_timeout: 30s
+    operations:
+      - export
+  
+  # Advanced advisory processing with HA awareness
+  transform/advisors_ha:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Add HA metadata
+          - set(attributes["gateway.processed_by"], "${HOSTNAME}")
+          - set(attributes["gateway.processed_at"], Now())
+          
+          # Deduplicate advisories across gateways
+          - set(attributes["advisory.hash"], 
+              Concat([attributes["query_hash"], 
+                     attributes["advisor.type"], 
+                     attributes["db_instance"]], "_"))
+          
+          # Existing advisory logic
+          - set(attributes["advisor.type"], "missing_index")
+            where attributes["no_index_used_count"] > 0 
+              and attributes["avg_time_ms"] > 100
+              and attributes["exec_count"] > 10
+          
+          - set(attributes["advisor.composite"], "critical_missing_index")
+            where attributes["advisor.type"] == "missing_index"
+              and attributes["wait_percentage"] > 80
+              and attributes["exec_count"] > 1000
+          
+          - set(attributes["advisor.priority"], "P0")
+            where attributes["advisor.composite"] == "critical_missing_index"
+  
+  # Consistent hashing for metric routing
+  routing/consistent_hash:
+    from_attribute: query_hash
+    table:
+      - exporters: [otlp/primary_backend]
+        value: hash_bucket_1
+      - exporters: [otlp/secondary_backend]
+        value: hash_bucket_2
+  
+  # Batch with HA-optimized settings
+  batch/ha:
+    timeout: 5s
+    send_batch_size: 8000
+    send_batch_max_size: 10000
+
+exporters:
+  # Primary backend with HA settings
+  otlp/primary_backend:
+    endpoint: ${PRIMARY_BACKEND_ENDPOINT}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 50000
+      storage: file_storage/queue
+  
+  # Secondary backend for redundancy
+  otlp/secondary_backend:
+    endpoint: ${SECONDARY_BACKEND_ENDPOINT}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 2s
+      max_interval: 60s
+      max_elapsed_time: 600s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 25000
+      storage: file_storage/queue
+  
+  # Cross-region replication (optional)
+  otlp/cross_region:
+    endpoint: ${CROSS_REGION_ENDPOINT}
+    compression: gzip
+    timeout: 60s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 10000
+  
+  # Prometheus for local monitoring
+  prometheus:
+    endpoint: 0.0.0.0:9091
+    namespace: mysql_gateway_ha
+    const_labels:
+      gateway_instance: ${HOSTNAME}
+      gateway_cluster: ${GATEWAY_CLUSTER}
+  
+  # Debug exporter (disabled in production)
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+# Persistent queue storage
+extensions:
+  file_storage/queue:
+    directory: /var/lib/otel/gateway/queue
+    timeout: 10s
+    compaction:
+      on_start: true
+      directory: /var/lib/otel/gateway/queue_compact
+      max_transaction_size: 65536
+
+service:
+  extensions: 
+    - health_check
+    - headers_setter
+    - memory_ballast
+    - file_storage/queue
+  
+  pipelines:
+    # Primary metrics pipeline with HA processing
+    metrics/primary:
+      receivers: [otlp/primary]
+      processors:
+        - memory_limiter
+        - resource/ha
+        - ratelimit
+        - circuitbreaker
+        - transform/advisors_ha
+        - groupbytrace
+        - batch/ha
+      exporters: 
+        - loadbalancing
+        - prometheus
+    
+    # High-priority metrics bypass most processing
+    metrics/priority:
+      receivers: [otlp/primary]
+      processors:
+        - memory_limiter
+        - resource/ha
+        - circuitbreaker
+        - batch/ha
+      exporters: [otlp/primary_backend, otlp/secondary_backend]
+    
+    # Cross-region replication pipeline
+    metrics/replication:
+      receivers: [otlp/primary]
+      processors:
+        - memory_limiter
+        - resource/ha
+        - batch/ha
+      exporters: [otlp/cross_region]
+    
+    # Health monitoring pipeline
+    metrics/health:
+      receivers: [prometheus/health]
+      processors:
+        - memory_limiter
+        - batch/ha
+      exporters: [prometheus]
+    
+    # Cluster coordination pipeline
+    metrics/cluster:
+      receivers: [otlp/cluster]
+      processors:
+        - memory_limiter
+      exporters: [otlp/primary_backend]
+  
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["/var/log/otel/gateway-ha.log"]
+      error_output_paths: ["/var/log/otel/gateway-ha-error.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      readers:
+        - periodic:
+            interval: 10000
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8889

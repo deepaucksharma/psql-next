@@ -4,14 +4,14 @@ import (
     "go.opentelemetry.io/collector/component"
     "go.opentelemetry.io/collector/processor"
     
-    "github.com/deepaksharma/db-otel/components/processors/adaptivesampler"
-    "github.com/deepaksharma/db-otel/components/processors/circuitbreaker"
-    "github.com/deepaksharma/db-otel/components/processors/costcontrol"
-    "github.com/deepaksharma/db-otel/components/processors/nrerrormonitor"
-    "github.com/deepaksharma/db-otel/components/processors/planattributeextractor"
-    "github.com/deepaksharma/db-otel/components/processors/querycorrelator"
-    "github.com/deepaksharma/db-otel/components/processors/verification"
-    "github.com/deepaksharma/db-otel/components/processors/ohitransform"
+    "github.com/database-intelligence/db-intel/components/processors/adaptivesampler"
+    "github.com/database-intelligence/db-intel/components/processors/circuitbreaker"
+    "github.com/database-intelligence/db-intel/components/processors/costcontrol"
+    "github.com/database-intelligence/db-intel/components/processors/nrerrormonitor"
+    "github.com/database-intelligence/db-intel/components/processors/planattributeextractor"
+    "github.com/database-intelligence/db-intel/components/processors/querycorrelator"
+    "github.com/database-intelligence/db-intel/components/processors/verification"
+    "github.com/database-intelligence/db-intel/components/processors/ohitransform"
 )
 
 // All returns all processor factories

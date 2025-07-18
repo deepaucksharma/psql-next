@@ -120,7 +120,7 @@ All test code, configurations, and validation tools have been created and are av
 - `cmd/simple_validation/`: Dashboard parsing and basic validation
 - `cmd/check_newrelic_data/`: New Relic data verification
 - `cmd/validate_ohi_mapping/`: OHI to OTEL mapping validation
-- `configs/collector-test.yaml`: OpenTelemetry collector configuration
+- `configs/postgresql-maximum-extraction.yaml`: OpenTelemetry collector configuration
 - `pkg/validation/`: Validation framework components
 
 ## Conclusion

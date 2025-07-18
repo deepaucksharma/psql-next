@@ -1,0 +1,65 @@
+# Consolidated test configuration
+# Combines features from multiple test configs
+
+receivers:
+  # Simple test receiver
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  
+  # PostgreSQL for testing
+  postgresql:
+    endpoint: ${env:POSTGRES_HOST:localhost}:${env:POSTGRES_PORT:5432}
+    username: ${env:POSTGRES_USER:postgres}
+    password: ${env:POSTGRES_PASSWORD:password}
+    databases:
+      - ${env:POSTGRES_DB:postgres}
+    collection_interval: 10s
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 50
+
+exporters:
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 20
+  
+  prometheus:
+    endpoint: "0.0.0.0:8888"
+    namespace: test
+  
+  # Optional: New Relic for integration testing
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+
+service:
+  pipelines:
+    metrics:
+      receivers: [postgresql]
+      processors: [memory_limiter, batch]
+      exporters: [debug, prometheus]
+    
+    metrics/otlp:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: debug
+    metrics:
+      level: detailed
+      address: localhost:8889

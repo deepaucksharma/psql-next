@@ -1,0 +1,572 @@
+# Oracle Database Maximum Metrics Extraction - Config Only Approach
+# This configuration extracts the maximum possible metrics using only stock OpenTelemetry components
+# Leverages SQL queries for comprehensive Oracle monitoring
+
+receivers:
+  # ============================================
+  # ORACLE DATABASE METRICS VIA SQLQUERY
+  # ============================================
+  # Note: Oracle doesn't have a dedicated receiver in OpenTelemetry yet,
+  # so we use the sqlquery receiver with Oracle driver
+  
+  # ============================================
+  # CORE DATABASE METRICS
+  # ============================================
+  sqlquery/oracle_core:
+    driver: oracle
+    datasource: "oracle://${env:ORACLE_USER:system}:${env:ORACLE_PASSWORD}@${env:ORACLE_HOST:localhost}:${env:ORACLE_PORT:1521}/${env:ORACLE_SERVICE:ORCLPDB1}"
+    collection_interval: 10s
+    queries:
+      # Database status and uptime
+      - sql: |
+          SELECT 
+            name,
+            open_mode,
+            database_role,
+            log_mode,
+            force_logging,
+            flashback_on,
+            protection_mode,
+            ROUND((SYSDATE - startup_time) * 24 * 60 * 60) as uptime_seconds
+          FROM v$database, v$instance
+        metrics:
+          - metric_name: oracle.database.uptime
+            value_column: uptime_seconds
+            value_type: gauge
+            unit: "s"
+            attribute_columns: [name, open_mode, database_role, log_mode]
+      
+      # System global area (SGA) metrics
+      - sql: |
+          SELECT 
+            name as component,
+            bytes/1024/1024 as size_mb,
+            resizeable
+          FROM v$sgainfo
+        metrics:
+          - metric_name: oracle.sga.size
+            value_column: size_mb
+            value_type: gauge
+            unit: "MB"
+            attribute_columns: [component, resizeable]
+      
+      # Buffer cache hit ratio
+      - sql: |
+          SELECT 
+            ROUND((1 - (physical_reads / (db_block_gets + consistent_gets))) * 100, 2) as cache_hit_ratio
+          FROM (
+            SELECT 
+              SUM(DECODE(name, 'physical reads', value, 0)) physical_reads,
+              SUM(DECODE(name, 'db block gets', value, 0)) db_block_gets,
+              SUM(DECODE(name, 'consistent gets', value, 0)) consistent_gets
+            FROM v$sysstat
+            WHERE name IN ('physical reads', 'db block gets', 'consistent gets')
+          )
+        metrics:
+          - metric_name: oracle.buffer_cache.hit_ratio
+            value_column: cache_hit_ratio
+            value_type: gauge
+            unit: "%"
+
+  # ============================================
+  # SESSION AND CONNECTION MONITORING
+  # ============================================
+  sqlquery/oracle_sessions:
+    driver: oracle
+    datasource: "oracle://${env:ORACLE_USER:system}:${env:ORACLE_PASSWORD}@${env:ORACLE_HOST:localhost}:${env:ORACLE_PORT:1521}/${env:ORACLE_SERVICE:ORCLPDB1}"
+    collection_interval: 5s
+    queries:
+      # Active sessions
+      - sql: |
+          SELECT 
+            status,
+            type,
+            state,
+            event,
+            wait_class,
+            COUNT(*) as session_count,
+            SUM(DECODE(blocking_session, NULL, 0, 1)) as blocked_sessions,
+            MAX(seconds_in_wait) as max_wait_seconds,
+            AVG(seconds_in_wait) as avg_wait_seconds
+          FROM v$session
+          WHERE type = 'USER'
+          GROUP BY status, type, state, event, wait_class
+        metrics:
+          - metric_name: oracle.sessions.count
+            value_column: session_count
+            value_type: gauge
+            unit: "{sessions}"
+            attribute_columns: [status, state, event, wait_class]
+          - metric_name: oracle.sessions.blocked
+            value_column: blocked_sessions
+            value_type: gauge
+            unit: "{sessions}"
+            attribute_columns: [status, state, event, wait_class]
+          - metric_name: oracle.sessions.max_wait_time
+            value_column: max_wait_seconds
+            value_type: gauge
+            unit: "s"
+            attribute_columns: [event, wait_class]
+
+  # ============================================
+  # PERFORMANCE METRICS
+  # ============================================
+  sqlquery/oracle_performance:
+    driver: oracle
+    datasource: "oracle://${env:ORACLE_USER:system}:${env:ORACLE_PASSWORD}@${env:ORACLE_HOST:localhost}:${env:ORACLE_PORT:1521}/${env:ORACLE_SERVICE:ORCLPDB1}"
+    collection_interval: 30s
+    queries:
+      # Top SQL by CPU and elapsed time
+      - sql: |
+          SELECT * FROM (
+            SELECT 
+              sql_id,
+              plan_hash_value,
+              executions,
+              ROUND(elapsed_time/1000000, 2) as elapsed_seconds,
+              ROUND(cpu_time/1000000, 2) as cpu_seconds,
+              buffer_gets,
+              disk_reads,
+              rows_processed,
+              ROUND(elapsed_time/DECODE(executions, 0, 1, executions)/1000, 2) as avg_elapsed_ms,
+              ROUND(cpu_time/DECODE(executions, 0, 1, executions)/1000, 2) as avg_cpu_ms,
+              ROUND(buffer_gets/DECODE(executions, 0, 1, executions), 2) as avg_buffer_gets,
+              SUBSTR(sql_text, 1, 100) as sql_text_sample
+            FROM v$sqlarea
+            WHERE executions > 10
+            ORDER BY elapsed_time DESC
+          ) WHERE ROWNUM <= 50
+        metrics:
+          - metric_name: oracle.sql.executions
+            value_column: executions
+            value_type: gauge
+            unit: "{executions}"
+            attribute_columns: [sql_id, plan_hash_value, sql_text_sample]
+          - metric_name: oracle.sql.avg_elapsed_time
+            value_column: avg_elapsed_ms
+            value_type: gauge
+            unit: "ms"
+            attribute_columns: [sql_id, plan_hash_value, sql_text_sample]
+          - metric_name: oracle.sql.avg_cpu_time
+            value_column: avg_cpu_ms
+            value_type: gauge
+            unit: "ms"
+            attribute_columns: [sql_id, plan_hash_value, sql_text_sample]
+          - metric_name: oracle.sql.avg_buffer_gets
+            value_column: avg_buffer_gets
+            value_type: gauge
+            unit: "{blocks}"
+            attribute_columns: [sql_id, plan_hash_value, sql_text_sample]
+
+  # ============================================
+  # WAIT EVENT ANALYSIS
+  # ============================================
+  sqlquery/oracle_waits:
+    driver: oracle
+    datasource: "oracle://${env:ORACLE_USER:system}:${env:ORACLE_PASSWORD}@${env:ORACLE_HOST:localhost}:${env:ORACLE_PORT:1521}/${env:ORACLE_SERVICE:ORCLPDB1}"
+    collection_interval: 10s
+    queries:
+      # System wait events
+      - sql: |
+          SELECT 
+            wait_class,
+            event,
+            total_waits,
+            total_timeouts,
+            time_waited/100 as time_waited_seconds,
+            average_wait/100 as avg_wait_seconds,
+            ROUND(RATIO_TO_REPORT(time_waited) OVER () * 100, 2) as wait_time_percent
+          FROM v$system_event
+          WHERE wait_class NOT IN ('Idle')
+            AND time_waited > 0
+          ORDER BY time_waited DESC
+        metrics:
+          - metric_name: oracle.wait.total_waits
+            value_column: total_waits
+            value_type: gauge
+            unit: "{waits}"
+            attribute_columns: [wait_class, event]
+          - metric_name: oracle.wait.time_waited
+            value_column: time_waited_seconds
+            value_type: gauge
+            unit: "s"
+            attribute_columns: [wait_class, event]
+          - metric_name: oracle.wait.avg_wait_time
+            value_column: avg_wait_seconds
+            value_type: gauge
+            unit: "s"
+            attribute_columns: [wait_class, event]
+          - metric_name: oracle.wait.time_percent
+            value_column: wait_time_percent
+            value_type: gauge
+            unit: "%"
+            attribute_columns: [wait_class, event]
+
+  # ============================================
+  # TABLESPACE MONITORING
+  # ============================================
+  sqlquery/oracle_tablespace:
+    driver: oracle
+    datasource: "oracle://${env:ORACLE_USER:system}:${env:ORACLE_PASSWORD}@${env:ORACLE_HOST:localhost}:${env:ORACLE_PORT:1521}/${env:ORACLE_SERVICE:ORCLPDB1}"
+    collection_interval: 60s
+    queries:
+      # Tablespace usage
+      - sql: |
+          SELECT 
+            df.tablespace_name,
+            df.total_space_mb,
+            (df.total_space_mb - fs.free_space_mb) as used_space_mb,
+            fs.free_space_mb,
+            ROUND((df.total_space_mb - fs.free_space_mb) / df.total_space_mb * 100, 2) as used_percent,
+            df.max_space_mb,
+            dt.contents,
+            dt.status
+          FROM 
+            (SELECT tablespace_name, 
+                    ROUND(SUM(bytes)/1024/1024, 2) total_space_mb,
+                    ROUND(SUM(DECODE(maxbytes, 0, bytes, maxbytes))/1024/1024, 2) max_space_mb
+             FROM dba_data_files
+             GROUP BY tablespace_name) df,
+            (SELECT tablespace_name, ROUND(SUM(bytes)/1024/1024, 2) free_space_mb
+             FROM dba_free_space
+             GROUP BY tablespace_name) fs,
+            dba_tablespaces dt
+          WHERE df.tablespace_name = fs.tablespace_name(+)
+            AND df.tablespace_name = dt.tablespace_name
+        metrics:
+          - metric_name: oracle.tablespace.size
+            value_column: total_space_mb
+            value_type: gauge
+            unit: "MB"
+            attribute_columns: [tablespace_name, contents, status]
+          - metric_name: oracle.tablespace.used
+            value_column: used_space_mb
+            value_type: gauge
+            unit: "MB"
+            attribute_columns: [tablespace_name, contents, status]
+          - metric_name: oracle.tablespace.free
+            value_column: free_space_mb
+            value_type: gauge
+            unit: "MB"
+            attribute_columns: [tablespace_name, contents, status]
+          - metric_name: oracle.tablespace.used_percent
+            value_column: used_percent
+            value_type: gauge
+            unit: "%"
+            attribute_columns: [tablespace_name, contents, status]
+
+  # ============================================
+  # ASM DISK GROUP MONITORING
+  # ============================================
+  sqlquery/oracle_asm:
+    driver: oracle
+    datasource: "oracle://${env:ORACLE_USER:system}:${env:ORACLE_PASSWORD}@${env:ORACLE_HOST:localhost}:${env:ORACLE_PORT:1521}/${env:ORACLE_SERVICE:ORCLPDB1}"
+    collection_interval: 60s
+    queries:
+      # ASM disk group usage
+      - sql: |
+          SELECT 
+            name as diskgroup_name,
+            state,
+            type as redundancy,
+            total_mb,
+            free_mb,
+            usable_file_mb,
+            ROUND((total_mb - free_mb) / total_mb * 100, 2) as used_percent,
+            offline_disks
+          FROM v$asm_diskgroup
+        metrics:
+          - metric_name: oracle.asm.diskgroup.total
+            value_column: total_mb
+            value_type: gauge
+            unit: "MB"
+            attribute_columns: [diskgroup_name, state, redundancy]
+          - metric_name: oracle.asm.diskgroup.free
+            value_column: free_mb
+            value_type: gauge
+            unit: "MB"
+            attribute_columns: [diskgroup_name, state, redundancy]
+          - metric_name: oracle.asm.diskgroup.used_percent
+            value_column: used_percent
+            value_type: gauge
+            unit: "%"
+            attribute_columns: [diskgroup_name, state, redundancy]
+
+  # ============================================
+  # REAL APPLICATION CLUSTERS (RAC) MONITORING
+  # ============================================
+  sqlquery/oracle_rac:
+    driver: oracle
+    datasource: "oracle://${env:ORACLE_USER:system}:${env:ORACLE_PASSWORD}@${env:ORACLE_HOST:localhost}:${env:ORACLE_PORT:1521}/${env:ORACLE_SERVICE:ORCLPDB1}"
+    collection_interval: 30s
+    queries:
+      # RAC instance metrics
+      - sql: |
+          SELECT 
+            inst_id,
+            instance_name,
+            host_name,
+            status,
+            archiver,
+            thread#,
+            TO_CHAR(startup_time, 'YYYY-MM-DD HH24:MI:SS') as startup_time
+          FROM gv$instance
+        metrics:
+          - metric_name: oracle.rac.instance.status
+            value_column: inst_id
+            value_type: gauge
+            unit: "{instance}"
+            attribute_columns: [instance_name, host_name, status, archiver]
+
+  # ============================================
+  # REDO LOG MONITORING
+  # ============================================
+  sqlquery/oracle_redo:
+    driver: oracle
+    datasource: "oracle://${env:ORACLE_USER:system}:${env:ORACLE_PASSWORD}@${env:ORACLE_HOST:localhost}:${env:ORACLE_PORT:1521}/${env:ORACLE_SERVICE:ORCLPDB1}"
+    collection_interval: 60s
+    queries:
+      # Redo log switch frequency
+      - sql: |
+          SELECT 
+            TO_CHAR(first_time, 'YYYY-MM-DD HH24') as log_hour,
+            COUNT(*) as switches,
+            ROUND(SUM(blocks * block_size)/1024/1024, 2) as redo_mb
+          FROM v$archived_log
+          WHERE first_time > SYSDATE - 1
+            AND dest_id = 1
+          GROUP BY TO_CHAR(first_time, 'YYYY-MM-DD HH24')
+          ORDER BY log_hour DESC
+        metrics:
+          - metric_name: oracle.redo.switches_per_hour
+            value_column: switches
+            value_type: gauge
+            unit: "{switches}"
+            attribute_columns: [log_hour]
+          - metric_name: oracle.redo.size_per_hour
+            value_column: redo_mb
+            value_type: gauge
+            unit: "MB"
+            attribute_columns: [log_hour]
+
+  # ============================================
+  # DATA GUARD MONITORING
+  # ============================================
+  sqlquery/oracle_dataguard:
+    driver: oracle
+    datasource: "oracle://${env:ORACLE_USER:system}:${env:ORACLE_PASSWORD}@${env:ORACLE_HOST:localhost}:${env:ORACLE_PORT:1521}/${env:ORACLE_SERVICE:ORCLPDB1}"
+    collection_interval: 60s
+    queries:
+      # Data Guard status
+      - sql: |
+          SELECT 
+            database_role,
+            db_unique_name,
+            open_mode,
+            protection_mode,
+            protection_level,
+            switchover_status,
+            dataguard_broker
+          FROM v$database
+        metrics:
+          - metric_name: oracle.dataguard.status
+            value_column: database_role
+            value_type: gauge
+            unit: "{status}"
+            attribute_columns: [db_unique_name, open_mode, protection_mode, switchover_status]
+
+  # ============================================
+  # HOST METRICS
+  # ============================================
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.connections:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      process:
+        metrics:
+          process.cpu.utilization:
+            enabled: true
+          process.memory.utilization:
+            enabled: true
+
+processors:
+  # ============================================
+  # MEMORY MANAGEMENT
+  # ============================================
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  # ============================================
+  # BATCH PROCESSING
+  # ============================================
+  batch:
+    send_batch_size: 10000
+    timeout: 10s
+    send_batch_max_size: 11000
+
+  # ============================================
+  # RESOURCE DETECTION
+  # ============================================
+  resource:
+    attributes:
+      - key: deployment.mode
+        value: config-only-maximum
+        action: upsert
+      - key: database.type
+        value: oracle
+        action: upsert
+      - key: collector.name
+        value: database-intelligence-oracle
+        action: upsert
+
+  # ============================================
+  # METRIC TRANSFORMATIONS
+  # ============================================
+  transform/add_metadata:
+    metric_statements:
+      # Classify wait events
+      - context: metric
+        statements:
+          - set(attributes["wait.severity"], "critical") where name == "oracle.wait.time_percent" and value > 20
+          - set(attributes["wait.severity"], "warning") where name == "oracle.wait.time_percent" and value > 10 and value <= 20
+          - set(attributes["wait.severity"], "normal") where name == "oracle.wait.time_percent" and value <= 10
+      
+      # Classify SQL performance
+      - context: metric
+        statements:
+          - set(attributes["sql.performance"], "fast") where name == "oracle.sql.avg_elapsed_time" and value < 100
+          - set(attributes["sql.performance"], "normal") where name == "oracle.sql.avg_elapsed_time" and value >= 100 and value < 1000
+          - set(attributes["sql.performance"], "slow") where name == "oracle.sql.avg_elapsed_time" and value >= 1000
+      
+      # Classify tablespace usage
+      - context: metric
+        statements:
+          - set(attributes["tablespace.status"], "critical") where name == "oracle.tablespace.used_percent" and value > 90
+          - set(attributes["tablespace.status"], "warning") where name == "oracle.tablespace.used_percent" and value > 80 and value <= 90
+          - set(attributes["tablespace.status"], "healthy") where name == "oracle.tablespace.used_percent" and value <= 80
+
+  # ============================================
+  # FILTERING
+  # ============================================
+  filter/reduce_cardinality:
+    metrics:
+      metric:
+        # Keep only significant SQL statements
+        - 'name == "oracle.sql.executions" and value < 100'
+
+exporters:
+  # ============================================
+  # NEW RELIC EXPORTER
+  # ============================================
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # ============================================
+  # LOCAL DEBUGGING
+  # ============================================
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # ============================================
+  # PROMETHEUS ENDPOINT
+  # ============================================
+  prometheus:
+    endpoint: "0.0.0.0:8894"
+    namespace: db_oracle
+    const_labels:
+      deployment.mode: config_only_maximum
+
+service:
+  pipelines:
+    # ============================================
+    # HIGH FREQUENCY METRICS (5s)
+    # ============================================
+    metrics/high_frequency:
+      receivers: [sqlquery/oracle_sessions]
+      processors: [memory_limiter, resource, transform/add_metadata, batch]
+      exporters: [otlp/newrelic]
+
+    # ============================================
+    # STANDARD METRICS (10s)
+    # ============================================
+    metrics/standard:
+      receivers: [sqlquery/oracle_core, sqlquery/oracle_waits, hostmetrics]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/newrelic]
+
+    # ============================================
+    # PERFORMANCE METRICS (30s)
+    # ============================================
+    metrics/performance:
+      receivers: [sqlquery/oracle_performance, sqlquery/oracle_rac]
+      processors: [memory_limiter, resource, transform/add_metadata, filter/reduce_cardinality, batch]
+      exporters: [otlp/newrelic]
+
+    # ============================================
+    # ANALYTICS METRICS (60s)
+    # ============================================
+    metrics/analytics:
+      receivers: [sqlquery/oracle_tablespace, sqlquery/oracle_asm, sqlquery/oracle_redo, sqlquery/oracle_dataguard]
+      processors: [memory_limiter, resource, transform/add_metadata, batch]
+      exporters: [otlp/newrelic]
+
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  extensions: [health_check, pprof, zpages]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679

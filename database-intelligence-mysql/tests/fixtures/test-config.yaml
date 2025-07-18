@@ -1,0 +1,96 @@
+receivers:
+  mysql:
+    endpoint: ${env:MYSQL_HOST}:${env:MYSQL_PORT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DATABASE}
+    collection_interval: 10s
+    metrics:
+      mysql.query.count:
+        enabled: true
+      mysql.query.slow.count:
+        enabled: true
+      mysql.connection.count:
+        enabled: true
+      mysql.connection.errors:
+        enabled: true
+      mysql.buffer_pool.usage:
+        enabled: true
+      mysql.buffer_pool.operations:
+        enabled: true
+      mysql.innodb.row_operations:
+        enabled: true
+      mysql.innodb.row_lock_waits:
+        enabled: true
+      mysql.table.io.wait.count:
+        enabled: true
+      mysql.table.io.wait.time:
+        enabled: true
+
+  # Custom SQL queries for additional metrics
+  sqlquery:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_HOST}:${env:MYSQL_PORT})/${env:MYSQL_DATABASE}"
+    collection_interval: 30s
+    queries:
+      - sql: |
+          SELECT 
+            table_schema,
+            SUM(data_length + index_length) / 1024 / 1024 AS size_mb
+          FROM information_schema.tables
+          WHERE table_schema NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+          GROUP BY table_schema
+        metrics:
+          - metric_name: mysql.database.size
+            value_column: size_mb
+            attribute_columns: [table_schema]
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  
+  resource:
+    attributes:
+      - key: service.name
+        value: mysql-monitoring-test
+        action: insert
+      - key: environment
+        value: test
+        action: insert
+
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:9090"
+    namespace: "mysql"
+    const_labels:
+      environment: "test"
+      service: "mysql-monitoring"
+  
+  file:
+    path: /tmp/mysql-metrics.json
+    format: json
+  
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 10
+
+service:
+  telemetry:
+    logs:
+      level: debug
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+  
+  pipelines:
+    metrics:
+      receivers: [mysql, sqlquery]
+      processors: [memory_limiter, batch, resource]
+      exporters: [prometheus, file, debug]

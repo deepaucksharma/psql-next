@@ -1,0 +1,172 @@
+# MongoDB Enhanced Receiver Example Configuration
+
+receivers:
+  # Basic MongoDB monitoring
+  mongodb/basic:
+    uri: ${env:MONGODB_URI}
+    collection_interval: 60s
+    max_pool_size: 10
+    connect_timeout: 10s
+    metrics:
+      server_status: true
+      database_stats: true
+      collection_stats: false  # Can be expensive
+      index_stats: false      # Can be expensive
+      current_op: true
+      wired_tiger: true
+    resource_attributes:
+      environment: production
+      service: user-service
+
+  # MongoDB Replica Set monitoring
+  mongodb/replica_set:
+    uri: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0
+    collection_interval: 30s
+    replica_set:
+      enabled: true
+      collect_oplog_metrics: true
+      collect_repl_lag_metrics: true
+      oplog_window: 2h
+      lag_threshold: 60s
+    metrics:
+      server_status: true
+      database_stats: true
+      collection_stats: true
+      index_stats: true
+    # Monitor specific databases
+    database: myapp
+    collections:
+      - users
+      - sessions
+      - products
+
+  # MongoDB Sharded Cluster monitoring
+  mongodb/sharded:
+    uri: mongodb://mongos1:27017,mongos2:27017
+    collection_interval: 300s  # 5 minutes for sharding metrics
+    sharding:
+      enabled: true
+      collect_chunk_metrics: true
+      collect_balancer_metrics: true
+      chunk_metrics_interval: 10m
+    metrics:
+      server_status: true
+      database_stats: true
+      collection_stats: false  # Too expensive for sharded clusters
+      index_stats: false
+
+  # MongoDB with TLS
+  mongodb/secure:
+    uri: mongodb+srv://cluster0.mongodb.net
+    collection_interval: 60s
+    tls:
+      enabled: true
+      ca_file: /etc/ssl/mongodb-ca.pem
+      cert_file: /etc/ssl/mongodb-cert.pem
+      key_file: /etc/ssl/mongodb-key.pem
+    metrics:
+      server_status: true
+      database_stats: true
+
+  # MongoDB with Query Monitoring
+  mongodb/profiling:
+    uri: mongodb://localhost:27017
+    collection_interval: 30s
+    query_monitoring:
+      enabled: true
+      profile_level: 1          # Slow queries only
+      slow_op_threshold: 50ms   # Consider queries > 50ms as slow
+      max_queries: 2000
+      collect_query_plans: true
+      collect_query_shapes: true
+    metrics:
+      server_status: true
+      profile: true
+
+  # MongoDB with Custom Metrics
+  mongodb/custom:
+    uri: mongodb://localhost:27017
+    collection_interval: 60s
+    metrics:
+      server_status: true
+      custom_metrics:
+        - name: mongodb.custom.active_clients
+          command: currentOp
+          database: admin
+          value_path: inprog.length
+          type: gauge
+          description: Number of active client operations
+        
+        - name: mongodb.custom.index_build_progress
+          command: currentOp
+          database: admin
+          value_path: inprog.0.progress.done
+          type: gauge
+          description: Index build progress percentage
+          labels:
+            index_name: inprog.0.command.createIndexes
+            
+        - name: mongodb.custom.cache_dirty_bytes
+          command: serverStatus
+          database: admin
+          value_path: wiredTiger.cache.tracked_dirty_bytes_in_the_cache
+          type: gauge
+          description: Dirty bytes in WiredTiger cache
+
+processors:
+  # Add database intelligence processors
+  querycorrelator:
+    retention_period: 24h
+    max_queries_tracked: 10000
+    
+  adaptivesampler:
+    mode: adaptive
+    initial_sampling_rate: 1.0
+    target_records_per_second: 1000
+    
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+exporters:
+  # New Relic
+  otlp/newrelic:
+    endpoint: otlp.nr-data.net:4317
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+service:
+  telemetry:
+    logs:
+      level: info
+      
+  pipelines:
+    # Basic metrics pipeline
+    metrics/basic:
+      receivers: [mongodb/basic]
+      processors: [batch]
+      exporters: [otlp/newrelic]
+      
+    # Replica set metrics with correlation
+    metrics/replica_set:
+      receivers: [mongodb/replica_set]
+      processors: [querycorrelator, adaptivesampler, batch]
+      exporters: [otlp/newrelic]
+      
+    # Sharded cluster metrics
+    metrics/sharded:
+      receivers: [mongodb/sharded]
+      processors: [batch]
+      exporters: [otlp/newrelic]
+      
+    # Debug pipeline for testing
+    metrics/debug:
+      receivers: [mongodb/basic]
+      processors: [batch]
+      exporters: [debug]

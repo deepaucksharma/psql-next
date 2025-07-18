@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 	
-	"github.com/deepaksharma/db-otel/common/featuredetector"
-	"github.com/deepaksharma/db-otel/common/queryselector"
-	"github.com/deepaksharma/db-otel/internal/database"
+	"github.com/database-intelligence/db-intel/internal/featuredetector"
+	"github.com/database-intelligence/db-intel/internal/queryselector"
+	"github.com/database-intelligence/db-intel/internal/database"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-	"go.opentelemetry.io/collector/receiver"
 	"go.uber.org/zap"
 	
 	// Database drivers
@@ -314,7 +314,7 @@ func (r *Receiver) emitFeatureMetrics(ctx context.Context, features *featuredete
 	
 	for name, ext := range features.Extensions {
 		dp := gauge.DataPoints().AppendEmpty()
-		dp.SetTimestamp(pmetric.NewTimestampFromTime(timestamp))
+		dp.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
 		dp.Attributes().PutStr("extension", name)
 		if ext.Available {
 			dp.SetIntValue(1)
@@ -331,7 +331,7 @@ func (r *Receiver) emitFeatureMetrics(ctx context.Context, features *featuredete
 	
 	for name, cap := range features.Capabilities {
 		dp := capGauge.DataPoints().AppendEmpty()
-		dp.SetTimestamp(pmetric.NewTimestampFromTime(timestamp))
+		dp.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
 		dp.Attributes().PutStr("capability", name)
 		if cap.Available {
 			dp.SetIntValue(1)
@@ -348,42 +348,20 @@ func (r *Receiver) emitFeatureMetrics(ctx context.Context, features *featuredete
 	}
 }
 
-// collect performs the main data collection
-func (r *Receiver) collect(ctx context.Context) {
-	startTime := time.Now()
-	
-	// Get current feature set for intelligent query selection
-	r.featureMutex.RLock()
-	features := r.featureSet
-	r.featureMutex.RUnlock()
-	
-	// Collect metrics and logs
-	if err := r.collectMetrics(ctx, features); err != nil {
-		r.errorCount++
-		r.logger.Error("Failed to collect metrics", zap.Error(err))
-	}
-	
-	if err := r.collectLogs(ctx, features); err != nil {
-		r.errorCount++
-		r.logger.Error("Failed to collect logs", zap.Error(err))
-	}
-	
-	r.successCount++
-	
-	duration := time.Since(startTime)
-	r.logger.Debug("Collection completed",
-		zap.Duration("duration", duration),
-		zap.Uint64("success_count", r.successCount),
-		zap.Uint64("error_count", r.errorCount))
-}
-
 // collectMetrics executes queries and collects metrics
 func (r *Receiver) collectMetrics(ctx context.Context, features *featuredetector.FeatureSet) error {
 	collectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	
 	// Get appropriate queries for current features
-	queries := r.selector.GetQueriesForCategory(queryselector.CategoryMetrics)
+	// Get queries for table stats and general metrics
+	queries := make([]*featuredetector.QueryDefinition, 0)
+	if tableQuery, err := r.selector.GetQuery(collectCtx, queryselector.CategoryTableStats); err == nil && tableQuery != nil {
+		queries = append(queries, tableQuery)
+	}
+	if connQuery, err := r.selector.GetQuery(collectCtx, queryselector.CategoryConnections); err == nil && connQuery != nil {
+		queries = append(queries, connQuery)
+	}
 	if len(queries) == 0 {
 		r.fallbackCount++
 		r.logger.Debug("No feature-specific queries available, using fallback")
@@ -411,7 +389,7 @@ func (r *Receiver) collectMetrics(ctx context.Context, features *featuredetector
 	
 	// Execute queries and create metrics
 	for _, queryDef := range queries {
-		if err := r.executeMetricQuery(collectCtx, queryDef, sm, timestamp); err != nil {
+		if err := r.executeMetricQuery(collectCtx, *queryDef, sm, timestamp); err != nil {
 			r.logger.Warn("Failed to execute metric query",
 				zap.String("query", queryDef.Name),
 				zap.Error(err))
@@ -439,7 +417,14 @@ func (r *Receiver) collectLogs(ctx context.Context, features *featuredetector.Fe
 	defer cancel()
 	
 	// Get log queries (includes pg_querylens if available)
-	queries := r.selector.GetQueriesForCategory(queryselector.CategoryLogs)
+	// Get queries for slow queries and active sessions
+	queries := make([]*featuredetector.QueryDefinition, 0)
+	if slowQuery, err := r.selector.GetQuery(collectCtx, queryselector.CategorySlowQueries); err == nil && slowQuery != nil {
+		queries = append(queries, slowQuery)
+	}
+	if activeQuery, err := r.selector.GetQuery(collectCtx, queryselector.CategoryActiveSession); err == nil && activeQuery != nil {
+		queries = append(queries, activeQuery)
+	}
 	if len(queries) == 0 {
 		return nil // No log collection needed
 	}
@@ -460,7 +445,7 @@ func (r *Receiver) collectLogs(ctx context.Context, features *featuredetector.Fe
 	
 	// Execute log queries
 	for _, queryDef := range queries {
-		if err := r.executeLogQuery(collectCtx, queryDef, sl, timestamp); err != nil {
+		if err := r.executeLogQuery(collectCtx, *queryDef, sl, timestamp); err != nil {
 			r.logger.Warn("Failed to execute log query",
 				zap.String("query", queryDef.Name),
 				zap.Error(err))
@@ -511,7 +496,7 @@ func (r *Receiver) executeMetricQuery(ctx context.Context, queryDef featuredetec
 		}
 		
 		dp := gauge.DataPoints().AppendEmpty()
-		dp.SetTimestamp(pmetric.NewTimestampFromTime(timestamp))
+		dp.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
 		
 		// Process columns - first numeric column is the value, others become attributes
 		var metricValue float64
@@ -592,7 +577,7 @@ func (r *Receiver) executeLogQuery(ctx context.Context, queryDef featuredetector
 		
 		// Create log record
 		logRecord := sl.LogRecords().AppendEmpty()
-		logRecord.SetTimestamp(plog.NewTimestampFromTime(timestamp))
+		logRecord.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
 		logRecord.SetSeverityNumber(plog.SeverityNumberInfo)
 		logRecord.SetSeverityText("INFO")
 		
@@ -650,19 +635,19 @@ func (r *Receiver) executeLogQuery(ctx context.Context, queryDef featuredetector
 }
 
 // getFallbackMetricQueries returns basic queries when feature detection fails
-func (r *Receiver) getFallbackMetricQueries() []featuredetector.QueryDefinition {
-	queries := []featuredetector.QueryDefinition{}
+func (r *Receiver) getFallbackMetricQueries() []*featuredetector.QueryDefinition {
+	queries := []*featuredetector.QueryDefinition{}
 	
 	switch r.config.Driver {
 	case "postgres":
-		queries = append(queries, featuredetector.QueryDefinition{
+		queries = append(queries, &featuredetector.QueryDefinition{
 			Name:        "pg_database_size",
 			SQL:         "SELECT pg_database_size(current_database()) as database_size_bytes",
 			Description: "Current database size in bytes",
 			Priority:    100,
 		})
 		
-		queries = append(queries, featuredetector.QueryDefinition{
+		queries = append(queries, &featuredetector.QueryDefinition{
 			Name:        "pg_connection_count",
 			SQL:         "SELECT count(*) as active_connections FROM pg_stat_activity WHERE state = 'active'",
 			Description: "Number of active database connections",
@@ -670,7 +655,7 @@ func (r *Receiver) getFallbackMetricQueries() []featuredetector.QueryDefinition 
 		})
 		
 	case "mysql":
-		queries = append(queries, featuredetector.QueryDefinition{
+		queries = append(queries, &featuredetector.QueryDefinition{
 			Name:        "mysql_connection_count",
 			SQL:         "SELECT VARIABLE_VALUE as active_connections FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected'",
 			Description: "Number of active MySQL connections",

@@ -1,4 +1,4 @@
-module github.com/deepaksharma/db-otel/common/featuredetector
+module github.com/database-intelligence/db-intel/internal/featuredetector
 
 go 1.23.0
 
@@ -28,8 +28,3 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 )
 
-replace (
-	github.com/deepaksharma/db-otel/components/common => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common
-	github.com/deepaksharma/db-otel/components/common/featuredetector => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common/featuredetector
-	github.com/deepaksharma/db-otel/components/common/queryselector => /Users/deepaksharma/syc/db-otel/database-intelligence-restructured/common/queryselector
-)

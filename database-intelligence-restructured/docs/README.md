@@ -1,102 +1,99 @@
-# Documentation
-
-Welcome to the Database Intelligence documentation. This directory contains all project documentation organized by purpose.
+# Database Intelligence Documentation
 
 ## 📚 Documentation Structure
 
 ```
 docs/
-├── guides/           # How-to guides and tutorials
-│   ├── QUICK_START.md      # 5-minute getting started
-│   ├── CONFIGURATION.md    # Configuration reference
-│   ├── DEPLOYMENT.md       # Production deployment
-│   └── TROUBLESHOOTING.md  # Problem solving
-│
-├── reference/        # Technical references
-│   ├── ARCHITECTURE.md     # System design
-│   ├── METRICS.md          # All metrics collected
-│   ├── API.md              # Component APIs
-│   └── POSTGRESQL_METRICS.md # PostgreSQL specifics
-│
-├── development/      # Developer documentation
-│   ├── SETUP.md            # Development setup
-│   ├── TESTING.md          # Testing guide
-│   ├── TEST_REPORT.md      # Latest test results
-│   ├── e2e-validation-queries.md # Validation queries
-│   └── CLAUDE.md           # AI assistant context
-│
+├── guides/           # Step-by-step instructions
+├── reference/        # Technical specifications  
+├── development/      # Developer resources
 └── archive/          # Historical documentation
-    └── [100+ archived files for reference]
 ```
 
-## 🚀 Quick Navigation
+## 🚀 Start Here
 
-### For New Users
-1. Start with [Quick Start Guide](guides/QUICK_START.md)
-2. Configure using [Configuration Guide](guides/CONFIGURATION.md)
-3. Deploy with [Deployment Guide](guides/DEPLOYMENT.md)
-4. Fix issues using [Troubleshooting Guide](guides/TROUBLESHOOTING.md)
+### New Users
+1. **[Quick Start Guide](guides/QUICK_START.md)** - Get running in 5 minutes
+2. **[Configuration Guide](guides/CONFIGURATION.md)** - Customize your setup
+3. **[Deployment Guide](guides/DEPLOYMENT.md)** - Production deployment
 
-### For Developers
-1. Set up with [Development Setup](development/SETUP.md)
-2. Run tests with [Testing Guide](development/TESTING.md)
-3. Check [API Reference](reference/API.md)
-4. Review [Architecture](reference/ARCHITECTURE.md)
+### Developers
+1. **[Development Setup](development/SETUP.md)** - Set up your environment
+2. **[Architecture Overview](reference/ARCHITECTURE.md)** - Understand the system
+3. **[Testing Guide](development/TESTING.md)** - Run and write tests
 
-### For Operations
-1. Understand [Metrics Reference](reference/METRICS.md)
-2. Follow [Deployment Guide](guides/DEPLOYMENT.md)
-3. Monitor with [PostgreSQL Metrics](reference/POSTGRESQL_METRICS.md)
-4. Troubleshoot with [Troubleshooting Guide](guides/TROUBLESHOOTING.md)
+### Operators
+1. **[Metrics Reference](reference/METRICS.md)** - All available metrics
+2. **[Troubleshooting Guide](guides/TROUBLESHOOTING.md)** - Solve common issues
+3. **[API Reference](reference/API.md)** - Component interfaces
 
-## 📊 Current Implementation
+## 📖 Documentation by Topic
 
-- **Version**: 2.0 (PostgreSQL-Only)
-- **Modes**: Config-Only (Standard OTel) and Custom (Enhanced)
-- **Metrics**: 35+ PostgreSQL metrics in Config-Only, 50+ in Custom
-- **Status**: Production Ready
+### Configuration & Deployment
+- [Configuration Guide](guides/CONFIGURATION.md) - YAML configuration reference
+- [Deployment Guide](guides/DEPLOYMENT.md) - Docker, Kubernetes, binary
+- [Unified Deployment](guides/UNIFIED_DEPLOYMENT_GUIDE.md) - Multi-mode deployment
 
-## 🗂️ Archive
+### Database-Specific Guides
+- [PostgreSQL Metrics](reference/POSTGRESQL_METRICS.md) - PostgreSQL monitoring
+- [MySQL Guide](guides/MYSQL_MAXIMUM_GUIDE.md) - MySQL configuration
+- [MongoDB Guide](guides/MONGODB_MAXIMUM_GUIDE.md) - MongoDB setup
+- [Config-Only Mode](guides/CONFIG_ONLY_MAXIMUM_GUIDE.md) - Standard OTel mode
 
-The `archive/` directory contains 100+ historical documentation files that provide context on:
-- Project evolution
-- Architecture decisions
-- Implementation details
-- Testing strategies
+### Development
+- [Setup Guide](development/SETUP.md) - Development environment
+- [Testing Guide](development/TESTING.md) - Testing strategies
+- [E2E Queries](development/e2e-validation-queries.md) - Validation queries
 
-These files are preserved for reference but may not reflect the current implementation.
+### Reference
+- [Architecture](reference/ARCHITECTURE.md) - System design
+- [Metrics Reference](reference/METRICS.md) - Complete metrics list
+- [API Reference](reference/API.md) - Component APIs
 
-## 📝 Documentation Standards
+## 🏗️ Key Concepts
 
-- **Guides**: Task-oriented, how-to documentation
-- **Reference**: Technical specifications and APIs
-- **Development**: Code-focused documentation
-- **Archive**: Historical context
+### Two Operating Modes
+1. **Config-Only Mode** - Uses standard OpenTelemetry components
+   - Works with official OTel Collector
+   - Minimal resource usage
+   - Quick setup
 
-## 🔍 Finding Information
+2. **Enhanced Mode** - Includes custom intelligence
+   - Query plan analysis
+   - Active Session History
+   - Adaptive sampling
+   - Advanced processors
 
-### By Topic
-- **Configuration**: See [CONFIGURATION.md](guides/CONFIGURATION.md)
-- **Metrics**: See [METRICS.md](reference/METRICS.md)
-- **Troubleshooting**: See [TROUBLESHOOTING.md](guides/TROUBLESHOOTING.md)
-- **Architecture**: See [ARCHITECTURE.md](reference/ARCHITECTURE.md)
+### Component Types
+- **Receivers** - Collect metrics from databases
+- **Processors** - Transform and enrich data
+- **Exporters** - Send data to backends
 
-### By Task
-- **Get Started**: [QUICK_START.md](guides/QUICK_START.md)
-- **Deploy**: [DEPLOYMENT.md](guides/DEPLOYMENT.md)
-- **Develop**: [SETUP.md](development/SETUP.md)
-- **Test**: [TESTING.md](development/TESTING.md)
-
-## 🤝 Contributing to Documentation
+## 📝 Contributing to Docs
 
 When adding documentation:
-1. Place guides in `guides/`
-2. Place technical specs in `reference/`
-3. Place dev docs in `development/`
-4. Archive old docs in `archive/`
+- **Guides** go in `guides/` - How-to instructions
+- **Reference** goes in `reference/` - Technical specs
+- **Development** goes in `development/` - Code-focused docs
 
 Keep documentation:
-- **Current**: Update when code changes
-- **Clear**: Use examples and diagrams
-- **Concise**: Get to the point
-- **Consistent**: Follow existing patterns
+- **Current** - Update when code changes
+- **Clear** - Use examples and diagrams
+- **Concise** - Get to the point quickly
+
+## 🔍 Quick Search
+
+| Looking for... | See... |
+|---------------|--------|
+| Getting started | [Quick Start](guides/QUICK_START.md) |
+| Configuration options | [Configuration Guide](guides/CONFIGURATION.md) |
+| Available metrics | [Metrics Reference](reference/METRICS.md) |
+| Troubleshooting | [Troubleshooting Guide](guides/TROUBLESHOOTING.md) |
+| System design | [Architecture](reference/ARCHITECTURE.md) |
+| Development setup | [Setup Guide](development/SETUP.md) |
+| Testing | [Testing Guide](development/TESTING.md) |
+| API docs | [API Reference](reference/API.md) |
+
+---
+
+For project status and roadmap, see [PROJECT_STATUS.md](../PROJECT_STATUS.md).

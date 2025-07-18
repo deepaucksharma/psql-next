@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 	
-	"github.com/deepaksharma/db-otel/common/featuredetector"
-	"github.com/deepaksharma/db-otel/common/queryselector"
+	"github.com/database-intelligence/db-intel/internal/featuredetector"
+	"github.com/database-intelligence/db-intel/internal/queryselector"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -209,7 +209,7 @@ func (r *Receiver) processMetrics(ctx context.Context, rows *sql.Rows, columns [
 			switch metric.Type() {
 			case pmetric.MetricTypeGauge:
 				dp := metric.Gauge().DataPoints().AppendEmpty()
-				dp.SetTimestamp(pmetric.NewTimestampFromTime(timestamp))
+				dp.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
 				dp.SetDoubleValue(numericValue)
 				
 				// Add attributes
@@ -221,7 +221,7 @@ func (r *Receiver) processMetrics(ctx context.Context, rows *sql.Rows, columns [
 				
 			case pmetric.MetricTypeSum:
 				dp := metric.Sum().DataPoints().AppendEmpty()
-				dp.SetTimestamp(pmetric.NewTimestampFromTime(timestamp))
+				dp.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
 				dp.SetDoubleValue(numericValue)
 				
 				// Add attributes

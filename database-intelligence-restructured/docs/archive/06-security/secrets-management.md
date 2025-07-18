@@ -114,7 +114,7 @@ NEW_RELIC_API_KEY=NRAK-XXXXXXXXXX
 EOF
 
 # Run the collector
-./scripts/run-with-secrets.sh enterprise configs/collector-with-secrets.yaml
+./scripts/run-with-secrets.sh enterprise configs/postgresql-maximum-extraction.yaml
 ```
 
 ### Manual Execution
@@ -125,7 +125,7 @@ export POSTGRES_PASSWORD=my-password
 export NEW_RELIC_API_KEY=NRAK-XXXXXXXXXX
 
 # Run collector
-./database-intelligence-collector --config configs/collector-with-secrets.yaml
+./database-intelligence-collector --config configs/postgresql-maximum-extraction.yaml
 ```
 
 ## Best Practices

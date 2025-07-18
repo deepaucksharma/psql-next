@@ -1,350 +1,645 @@
-# PostgreSQL Metrics Collection Troubleshooting Guide
+# Troubleshooting Guide
 
-## Overview
-This guide helps troubleshoot common issues when PostgreSQL metrics are not appearing in New Relic or are incomplete.
+This comprehensive guide helps you diagnose and resolve issues with Database Intelligence collectors.
 
-## Quick Diagnostics Checklist
+## Table of Contents
+- [Quick Diagnostics](#quick-diagnostics)
+- [General Issues](#general-issues)
+- [PostgreSQL Issues](#postgresql-issues)
+- [MySQL Issues](#mysql-issues)
+- [MongoDB Issues](#mongodb-issues)
+- [MSSQL Issues](#mssql-issues)
+- [Oracle Issues](#oracle-issues)
+- [Performance Issues](#performance-issues)
+- [New Relic Integration](#new-relic-integration)
+- [Deployment Issues](#deployment-issues)
+- [Advanced Debugging](#advanced-debugging)
 
-### 1. Service Health Check
+## Quick Diagnostics
+
+### 1. Run Health Check
 ```bash
-# Check if all containers are running
-docker ps | grep db-intel
+# Full system validation
+./scripts/validate-e2e.sh
 
-# Check PostgreSQL connectivity
-docker exec db-intel-postgres pg_isready -U postgres
+# Specific database test
+./scripts/test-database-config.sh postgresql 60
 
-# Check collector health
-curl -s http://localhost:4318/v1/metrics | grep -c postgresql  # Config-Only
-curl -s http://localhost:5318/v1/metrics | grep -c postgresql  # Custom
+# Integration test
+./scripts/test-integration.sh all
 ```
 
-### 2. Verify Environment Variables
+### 2. Check Common Issues
 ```bash
-# Check collector environment
-docker exec db-intel-collector-config-only env | grep -E "(POSTGRES|NEW_RELIC|DEPLOYMENT)"
+# View collector logs
+docker logs otel-collector-postgresql
 
-# Verify New Relic credentials
-echo "License Key: ${NEW_RELIC_LICENSE_KEY:0:10}..."
-echo "Account ID: $NEW_RELIC_ACCOUNT_ID"
+# Check metrics endpoint
+curl -s http://localhost:8888/metrics | grep -E "(accepted|refused|failed)"
+
+# Validate configuration
+./scripts/validate-config.sh postgresql
 ```
 
-### 3. Quick Metric Check in New Relic
+## General Issues
+
+### No Metrics Appearing
+
+1. **Check collector status**:
+   ```bash
+   docker logs otel-collector
+   ```
+
+2. **Verify configuration**:
+   ```bash
+   ./scripts/validate-config.sh configs/postgresql-maximum-extraction.yaml
+   ```
+
+3. **Test connectivity**:
+   ```bash
+   ./scripts/test-database-config.sh postgresql 60
+   ```
+
+4. **Check New Relic**:
+   ```sql
+   SELECT count(*) FROM Metric 
+   WHERE collector.name = 'database-intelligence-*' 
+   SINCE 5 minutes ago
+   ```
+
+### Authentication Errors
+
+1. **Verify credentials**:
+   ```bash
+   # Test database connection directly
+   psql -h localhost -U postgres -d postgres
+   mysql -h localhost -u root -p
+   mongosh mongodb://localhost:27017
+   sqlcmd -S localhost -U sa -P password
+   sqlplus user/pass@localhost:1521/ORCLPDB1
+   ```
+
+2. **Check environment variables**:
+   ```bash
+   env | grep -E "(POSTGRES|MYSQL|MONGODB|MSSQL|ORACLE)"
+   ```
+
+### High Memory Usage
+
+1. **Adjust memory limits**:
+   ```yaml
+   processors:
+     memory_limiter:
+       limit_mib: 512  # Reduce limit
+       spike_limit_mib: 128
+   ```
+
+2. **Reduce cardinality**:
+   ```yaml
+   processors:
+     filter/reduce_cardinality:
+       metrics:
+         exclude:
+           metric_names:
+             - "*.query.*"  # Exclude per-query metrics
+   ```
+
+## PostgreSQL Issues
+
+### pg_stat_statements Not Available
+
 ```sql
--- Check if any metrics are arriving
-SELECT count(*) FROM Metric 
-WHERE deployment.mode IN ('config-only', 'custom') 
-SINCE 5 minutes ago
-
--- List all PostgreSQL metrics
-SELECT uniques(metricName) FROM Metric 
-WHERE metricName LIKE 'postgresql%' 
-SINCE 30 minutes ago
-```
-
-## Common Issues and Solutions
-
-### Issue 1: No Metrics Appearing in New Relic
-
-**Symptoms:**
-- No data in dashboards
-- NRQL queries return no results
-- Collectors appear to be running
-
-**Troubleshooting Steps:**
-
-1. **Check collector logs for errors:**
-```bash
-docker logs --tail 100 db-intel-collector-config-only 2>&1 | grep -E "(error|ERROR|failed)"
-```
-
-2. **Verify OTLP endpoint connectivity:**
-```bash
-docker exec db-intel-collector-config-only curl -s https://otlp.nr-data.net:4317
-# Should return: Client sent an HTTP request to an HTTPS server
-```
-
-3. **Check for authentication errors:**
-```bash
-docker logs db-intel-collector-config-only 2>&1 | grep -i "unauthorized\|401\|403"
-```
-
-**Solutions:**
-- Verify NEW_RELIC_LICENSE_KEY is correct
-- Ensure NEW_RELIC_OTLP_ENDPOINT is set correctly (default: https://otlp.nr-data.net:4317)
-- Check if your account has OTLP ingestion enabled
-
-### Issue 2: Missing Specific PostgreSQL Metrics
-
-**Symptoms:**
-- Some metrics appear but others are missing
-- Expected metrics like `postgresql.deadlocks` not showing
-
-**Troubleshooting Steps:**
-
-1. **Check PostgreSQL permissions:**
-```bash
-docker exec db-intel-postgres psql -U postgres -c "
-SELECT has_database_privilege('postgres', 'testdb', 'CONNECT');
-SELECT has_table_privilege('postgres', 'pg_stat_database', 'SELECT');
-SELECT has_table_privilege('postgres', 'pg_stat_activity', 'SELECT');
-"
-```
-
-2. **Verify metrics are enabled in config:**
-```bash
-docker exec db-intel-collector-config-only cat /etc/otel-collector-config.yaml | grep -A 2 "postgresql.deadlocks"
-```
-
-3. **Check if PostgreSQL extensions are enabled:**
-```bash
-docker exec db-intel-postgres psql -U postgres -d testdb -c "
-SELECT * FROM pg_available_extensions WHERE name = 'pg_stat_statements';
-"
-```
-
-**Solutions:**
-- Grant necessary permissions to PostgreSQL user
-- Enable missing metrics in config-only-mode.yaml
-- Install required PostgreSQL extensions:
-```sql
+-- Enable extension
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+-- Verify it's loaded
+SELECT * FROM pg_extension WHERE extname = 'pg_stat_statements';
+
+-- Check postgresql.conf
+SHOW shared_preload_libraries;
 ```
 
-### Issue 3: PostgreSQL Connection Errors
+### Connection Pool Exhausted
 
-**Symptoms:**
-- Collector logs show connection refused or timeout
-- No PostgreSQL metrics but host metrics work
-
-**Troubleshooting Steps:**
-
-1. **Test PostgreSQL connectivity from collector:**
-```bash
-docker exec db-intel-collector-config-only sh -c "
-  apt-get update && apt-get install -y postgresql-client
-  psql -h postgres -U postgres -d testdb -c 'SELECT 1'
-"
+```yaml
+# Reduce collection frequency
+sqlquery/ash:
+  collection_interval: 10s  # Increase from 1s
 ```
 
-2. **Check PostgreSQL configuration:**
-```bash
-docker exec db-intel-postgres cat /var/lib/postgresql/data/postgresql.conf | grep -E "listen_addresses|port"
-docker exec db-intel-postgres cat /var/lib/postgresql/data/pg_hba.conf | tail -10
-```
+### Replication Metrics Missing
 
-**Solutions:**
-- Ensure PostgreSQL is listening on correct interface
-- Update pg_hba.conf to allow collector connections
-- Verify network connectivity between containers
-
-### Issue 4: High Cardinality or Missing Attributes
-
-**Symptoms:**
-- Metrics appear but without expected attributes
-- Can't filter by database name or table name
-
-**Troubleshooting Steps:**
-
-1. **Check available attributes:**
 ```sql
-SELECT keyset() FROM Metric 
-WHERE metricName = 'postgresql.backends' 
-SINCE 1 hour ago 
-LIMIT 1
+-- Check if replica
+SELECT pg_is_in_recovery();
+
+-- Verify replication slots
+SELECT * FROM pg_replication_slots;
 ```
 
-2. **Verify resource detection:**
-```bash
-docker logs db-intel-collector-config-only 2>&1 | grep -i "resource"
-```
+## MySQL Issues
 
-**Solutions:**
-- Ensure resourcedetection processor is configured
-- Add missing attributes via attributes processor
-- Check if attributes are being dropped by any processor
+### Performance Schema Disabled
 
-### Issue 5: Collector Performance Issues
-
-**Symptoms:**
-- High CPU/memory usage
-- Metrics lag or arrive late
-- Collector restarts frequently
-
-**Troubleshooting Steps:**
-
-1. **Check collector metrics:**
-```bash
-# Memory usage
-docker stats db-intel-collector-config-only --no-stream
-
-# Check for memory pressure
-docker logs db-intel-collector-config-only 2>&1 | grep -i "memory"
-```
-
-2. **Review batch settings:**
-```yaml
-batch:
-  timeout: 10s
-  send_batch_size: 1000  # Reduce if seeing memory issues
-```
-
-**Solutions:**
-- Increase memory_limiter limits
-- Reduce collection_interval for receivers
-- Enable sampling in custom mode
-- Reduce batch size
-
-### Issue 6: SQL Query Receiver Not Working
-
-**Symptoms:**
-- Custom metrics from sqlquery receiver missing
-- Standard metrics work but pg.* metrics don't appear
-
-**Troubleshooting Steps:**
-
-1. **Test SQL queries manually:**
-```bash
-docker exec db-intel-postgres psql -U postgres -d testdb -c "
-SELECT state, COUNT(*) as connection_count 
-FROM pg_stat_activity 
-WHERE pid != pg_backend_pid() 
-GROUP BY state;
-"
-```
-
-2. **Check for SQL errors in logs:**
-```bash
-docker logs db-intel-collector-config-only 2>&1 | grep -A 5 -B 5 "sqlquery"
-```
-
-**Solutions:**
-- Verify SQL syntax is PostgreSQL-compatible
-- Ensure queries don't take too long (timeout)
-- Check column names match metric configuration
-
-## Performance Optimization
-
-### Reduce Metric Volume
-```yaml
-# Increase collection intervals
-postgresql:
-  collection_interval: 30s  # Instead of 10s
-
-# Disable less critical metrics
-postgresql.bgwriter.buffers.writes:
-  enabled: false
-```
-
-### Enable Sampling (Custom Mode)
-```yaml
-adaptivesampler:
-  sampling_percentage: 50  # Sample 50% of metrics
-```
-
-### Optimize SQL Queries
-```yaml
-sqlquery/postgresql:
-  collection_interval: 60s  # Reduce frequency
-  queries:
-    - sql: "SELECT ... LIMIT 100"  # Add limits
-```
-
-## Verification Commands
-
-### Generate Test Load
-```bash
-# Run PostgreSQL-specific load generator
-cd tools/load-generator
-go run main.go -pattern=mixed -qps=50
-
-# Or use the comprehensive test generator
-cd tools/postgres-test-generator
-go run main.go -workers=10
-```
-
-### Monitor Metric Flow
-```bash
-# Watch metrics in real-time
-watch -n 5 'docker logs --tail 20 db-intel-collector-config-only 2>&1 | grep postgresql'
-
-# Check metric count growth
-while true; do
-  curl -s http://localhost:4318/v1/metrics | grep -c "postgresql" | ts
-  sleep 10
-done
-```
-
-### Validate in New Relic
 ```sql
--- Metric freshness check
-SELECT 
-  deployment.mode,
-  latest(timestamp) as 'Last Data',
-  now() - latest(timestamp) as 'Age (ms)'
-FROM Metric 
-WHERE metricName LIKE 'postgresql%' 
-FACET deployment.mode 
-SINCE 10 minutes ago
+-- Check if enabled
+SHOW VARIABLES LIKE 'performance_schema';
 
--- Metric coverage by mode
-SELECT 
-  uniqueCount(metricName) as 'Unique Metrics',
-  rate(count(*), 1 minute) as 'DPM'
-FROM Metric 
-WHERE metricName LIKE 'postgresql%' 
-FACET deployment.mode 
-SINCE 1 hour ago
+-- Enable in my.cnf
+[mysqld]
+performance_schema=ON
+
+-- Restart MySQL
+systemctl restart mysql
 ```
 
-## Getting Help
+### Access Denied Errors
 
-1. **Collect Diagnostic Information:**
+```sql
+-- Grant required permissions
+GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'otel_monitor'@'%';
+GRANT SELECT ON performance_schema.* TO 'otel_monitor'@'%';
+FLUSH PRIVILEGES;
+```
+
+### Slow Query Metrics Missing
+
+```sql
+-- Check slow query log
+SHOW VARIABLES LIKE 'slow_query_log%';
+
+-- Enable if needed
+SET GLOBAL slow_query_log = 'ON';
+SET GLOBAL long_query_time = 1;
+```
+
+## MongoDB Issues
+
+### Authentication Failed
+
+```javascript
+// Verify user exists
+use admin
+db.getUsers()
+
+// Create monitoring user
+db.createUser({
+  user: "otel_monitor",
+  pwd: "password",
+  roles: [
+    { role: "clusterMonitor", db: "admin" },
+    { role: "read", db: "local" }
+  ]
+})
+```
+
+### currentOp Permission Denied
+
+```javascript
+// Grant required role
+db.grantRolesToUser("otel_monitor", [
+  { role: "clusterMonitor", db: "admin" }
+])
+```
+
+### Atlas Metrics Not Working
+
+1. Verify API keys are set
+2. Check project name matches exactly
+3. Ensure IP whitelist includes collector
+
+## MSSQL Issues
+
+### Connection Timeout
+
+```yaml
+# Increase timeout in connection string
+datasource: "sqlserver://user:pass@host:1433?connection+timeout=30"
+```
+
+### Permission Errors
+
+```sql
+-- Grant required permissions
+GRANT VIEW SERVER STATE TO otel_monitor;
+GRANT VIEW ANY DEFINITION TO otel_monitor;
+
+-- For each database
+USE [YourDatabase];
+GRANT VIEW DATABASE STATE TO otel_monitor;
+```
+
+### Always On AG Metrics Missing
+
+```sql
+-- Check if AG is configured
+SELECT * FROM sys.availability_groups;
+
+-- Verify permissions
+SELECT * FROM fn_my_permissions(NULL, 'SERVER')
+WHERE permission_name LIKE '%VIEW%';
+```
+
+## Oracle Issues
+
+### ORA-12154: TNS Error
+
+```yaml
+# Use full connection string
+datasource: "oracle://user:pass@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=localhost)(PORT=1521))(CONNECT_DATA=(SERVICE_NAME=ORCLPDB1)))"
+```
+
+### Missing V$ Views
+
+```sql
+-- Grant access
+GRANT SELECT ANY DICTIONARY TO otel_monitor;
+GRANT SELECT ON V_$SESSION TO otel_monitor;
+GRANT SELECT ON V_$SYSSTAT TO otel_monitor;
+```
+
+### Character Set Issues
+
 ```bash
-./scripts/verify-metrics.sh > diagnostics.txt
-docker logs db-intel-collector-config-only > collector.log 2>&1
-docker exec db-intel-postgres pg_dump -s testdb > schema.sql
+# Set NLS_LANG
+export NLS_LANG=AMERICAN_AMERICA.AL32UTF8
 ```
 
-2. **Check Documentation:**
-- [OpenTelemetry PostgreSQL Receiver](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/postgresqlreceiver)
-- [New Relic OTLP Documentation](https://docs.newrelic.com/docs/apis/otlp/)
+## Performance Issues
 
-3. **Enable Debug Logging:**
+### Collector Using Too Much CPU
+
+1. **Reduce collection frequency**:
+   ```yaml
+   collection_interval: 60s  # Increase intervals
+   ```
+
+2. **Enable sampling**:
+   ```yaml
+   processors:
+     probabilistic_sampler:
+       sampling_percentage: 10
+   ```
+
+### Metrics Delayed
+
+1. **Adjust batch settings**:
+   ```yaml
+   processors:
+     batch:
+       timeout: 5s  # Reduce timeout
+       send_batch_size: 500  # Smaller batches
+   ```
+
+### Network Timeouts
+
+```yaml
+exporters:
+  otlp/newrelic:
+    timeout: 60s  # Increase timeout
+    retry_on_failure:
+      max_elapsed_time: 600s
+```
+
+## New Relic Integration
+
+### Invalid License Key
+
+```bash
+# Verify key format
+echo $NEW_RELIC_LICENSE_KEY | wc -c  # Should be 40 characters
+
+# Test with curl
+curl -X POST https://metric-api.newrelic.com/metric/v1 \
+  -H "Api-Key: $NEW_RELIC_LICENSE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '[{"metrics":[]}]'
+```
+
+### Wrong Region
+
+```yaml
+# For EU region
+exporters:
+  otlp/newrelic:
+    endpoint: otlp.eu01.nr-data.net:4317
+```
+
+### Metrics Not Appearing
+
+1. **Check account ID**:
+   ```sql
+   SELECT count(*) FROM Metric 
+   WHERE true 
+   SINCE 1 hour ago
+   ```
+
+2. **Verify metric names**:
+   ```sql
+   SELECT uniques(metricName) FROM Metric 
+   WHERE metricName LIKE 'postgresql%' 
+   SINCE 1 hour ago
+   ```
+
+## Debug Mode
+
+Enable debug logging:
+
 ```yaml
 service:
   telemetry:
     logs:
-      level: debug  # Change from info to debug
+      level: debug
+      
+exporters:
+  debug:
+    verbosity: detailed
 ```
 
-4. **Test with Debug Exporter:**
+## Getting Help
+
+1. **Check logs**: Always start with collector logs
+2. **Validate config**: Use provided validation scripts
+3. **Test connectivity**: Ensure database is reachable
+4. **Review permissions**: Database user needs specific grants
+5. **Open an issue**: https://github.com/newrelic/database-intelligence/issues
+
+## Deployment Issues
+
+### Docker Issues
+
+#### Container Exits Immediately
+```bash
+# Check exit code and logs
+docker ps -a | grep otel
+docker logs otel-collector-postgresql
+
+# Common fixes
+# 1. Fix config syntax errors
+./scripts/validate-config.sh postgresql
+
+# 2. Ensure config file is mounted correctly
+docker run --rm -v $(pwd)/configs/postgresql-maximum-extraction.yaml:/etc/otelcol/config.yaml \
+  otel/opentelemetry-collector-contrib:latest --dry-run
+```
+
+#### Permission Denied Errors
+```bash
+# Fix file permissions
+chmod 644 configs/*.yaml
+chmod 755 scripts/*.sh
+
+# For SELinux systems
+chcon -Rt svirt_sandbox_file_t configs/
+```
+
+### Kubernetes Issues
+
+#### ConfigMap Not Found
+```bash
+# Verify ConfigMap exists
+kubectl get configmap -n database-intelligence
+
+# Recreate if missing
+kubectl create configmap otel-config \
+  --from-file=configs/postgresql-maximum-extraction.yaml \
+  -n database-intelligence
+```
+
+#### Pod CrashLoopBackOff
+```bash
+# Check pod logs
+kubectl logs -n database-intelligence otel-postgresql-xxxxx
+
+# Check events
+kubectl describe pod -n database-intelligence otel-postgresql-xxxxx
+
+# Common fixes
+# 1. Increase memory limits
+# 2. Fix configuration errors
+# 3. Verify secrets are mounted
+```
+
+## Advanced Debugging
+
+### Enable Detailed Logging
+```yaml
+service:
+  telemetry:
+    logs:
+      level: debug
+      development: true
+      encoding: console
+      disable_caller: false
+      disable_stacktrace: false
+      output_paths:
+        - stdout
+        - /var/log/otel-debug.log
+```
+
+### Trace Pipeline Processing
+```yaml
+service:
+  telemetry:
+    traces:
+      level: detailed
+      propagators: [tracecontext, baggage]
+```
+
+### Export to Debug Endpoint
 ```yaml
 exporters:
   debug:
     verbosity: detailed
-    sampling_initial: 10  # Show first 10 data points
+    sampling_initial: 2
+    sampling_thereafter: 1
+
+service:
+  pipelines:
+    metrics/debug:
+      receivers: [postgresql]
+      exporters: [debug]
+```
+
+### Performance Profiling
+```bash
+# Run performance benchmark
+./scripts/benchmark-performance.sh postgresql 300
+
+# Check metric cardinality
+./scripts/check-metric-cardinality.sh postgresql 60
+
+# Monitor resource usage
+docker stats otel-collector-postgresql
+```
+
+### Network Debugging
+```bash
+# Test database connectivity
+docker exec otel-collector-postgresql nc -zv ${POSTGRESQL_HOST} ${POSTGRESQL_PORT}
+
+# Check DNS resolution
+docker exec otel-collector-postgresql nslookup ${POSTGRESQL_HOST}
+
+# Trace network path
+docker exec otel-collector-postgresql traceroute ${POSTGRESQL_HOST}
+```
+
+## Configuration Issues
+
+### Environment Variable Not Expanding
+```yaml
+# Wrong - missing env: prefix
+endpoint: ${NEW_RELIC_OTLP_ENDPOINT}
+
+# Correct
+endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+
+# With default value
+endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+```
+
+### Pipeline Not Processing Metrics
+```yaml
+# Check pipeline is defined in service
+service:
+  pipelines:
+    metrics:
+      receivers: [postgresql]  # Must match receiver name
+      processors: [batch]      # Optional
+      exporters: [otlp/newrelic]  # Must match exporter name
+```
+
+### Receiver Configuration Errors
+```yaml
+# Common mistakes
+receivers:
+  postgresql:
+    # Wrong - using connection_string
+    connection_string: "postgresql://..."
+    
+    # Correct - use endpoint format
+    endpoint: localhost:5432
+    username: postgres
+    password: ${env:POSTGRES_PASSWORD}
+```
+
+## Metric Cardinality Issues
+
+### Identifying High Cardinality
+```bash
+# Run cardinality analysis
+./scripts/check-metric-cardinality.sh postgresql
+
+# Check specific metrics
+curl -s http://localhost:8888/metrics | \
+  grep -E "^postgresql" | \
+  cut -d'{' -f1 | \
+  sort | uniq -c | \
+  sort -nr | head -20
+```
+
+### Reducing Cardinality
+```yaml
+processors:
+  # Drop high-cardinality attributes
+  attributes/drop_query_id:
+    actions:
+      - key: query_id
+        action: delete
+      - key: session_id
+        action: delete
+        
+  # Filter out detailed metrics
+  filter/reduce:
+    metrics:
+      exclude:
+        match_type: regexp
+        metric_names:
+          - ".*\\.query\\..*"
+          - ".*\\.session\\..*"
+```
+
+## Common Error Messages
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `connection refused` | Database not running or wrong host/port | Verify database is running and accessible |
+| `authentication failed` | Wrong credentials | Check username/password |
+| `permission denied` | Missing grants | Grant required permissions |
+| `context deadline exceeded` | Timeout | Increase timeout values |
+| `no such host` | DNS resolution failed | Verify hostname |
+| `SSL/TLS required` | Security enforcement | Enable TLS in configuration |
+| `out of memory` | Memory limit exceeded | Increase memory_limiter |
+| `invalid configuration` | YAML syntax error | Validate with `yq` or online validator |
+| `duplicate key` | Same key defined twice | Remove duplicate configuration |
+| `unknown field` | Typo in configuration | Check spelling and indentation |
+| `pipeline not used` | Pipeline defined but not in service | Add to service.pipelines section |
+
+## Emergency Recovery
+
+### Collector Consuming All Resources
+```bash
+# Stop immediately
+docker stop otel-collector-postgresql
+
+# Start with minimal config
+cat > /tmp/minimal.yaml << EOF
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+exporters:
+  debug:
+    verbosity: basic
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      exporters: [debug]
+EOF
+
+docker run --rm -v /tmp/minimal.yaml:/etc/otelcol/config.yaml \
+  otel/opentelemetry-collector-contrib:latest
+```
+
+### Rollback to Previous Version
+```bash
+# Tag current config
+git tag -a "broken-$(date +%Y%m%d)" -m "Broken configuration"
+
+# Revert to last known good
+git checkout <last-good-commit> -- configs/
+
+# Or use specific collector version
+docker pull otel/opentelemetry-collector-contrib:0.88.0
 ```
 
 ## Prevention Best Practices
 
-1. **Always verify configuration before deployment:**
-```bash
-docker run --rm -v $(pwd)/config-only-mode.yaml:/config.yaml \
-  otel/opentelemetry-collector-contrib:0.105.0 \
-  --config=/config.yaml --dry-run
-```
+1. **Always validate before deploying**
+   ```bash
+   ./scripts/validate-config.sh postgresql
+   ./scripts/test-integration.sh postgresql
+   ```
 
-2. **Monitor collector health:**
-- Set up alerts for collector restarts
-- Monitor collector memory/CPU usage
-- Track metric ingestion rates
+2. **Start with minimal configuration**
+   - Test basic connectivity first
+   - Add metrics incrementally
+   - Monitor resource usage
 
-3. **Use incremental rollout:**
-- Test with a single database first
-- Gradually increase collection scope
-- Monitor impact on PostgreSQL performance
+3. **Use staging environment**
+   - Test all changes in non-production
+   - Run performance benchmarks
+   - Verify metric appearance in New Relic
 
-4. **Regular validation:**
-- Run verification scripts daily
-- Compare expected vs actual metrics
-- Review collector logs for warnings
+4. **Monitor collector health**
+   - Set up alerts for collector metrics
+   - Track memory and CPU usage
+   - Monitor error rates
+
+5. **Regular maintenance**
+   - Update collectors quarterly
+   - Review and optimize configurations
+   - Clean up unused metrics

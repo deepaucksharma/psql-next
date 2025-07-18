@@ -1,0 +1,81 @@
+# Light Load Configuration - For development and low-traffic systems
+# Resource usage: <200MB RAM, <0.3% CPU
+
+receivers:
+  # Reduce collection frequency for light load
+  mysql/waits:
+    endpoint: ${env:MYSQL_PRIMARY_HOST}:3306
+    username: ${env:MYSQL_MONITOR_USER}
+    password: ${env:MYSQL_MONITOR_PASS}
+    collection_interval: 60s  # Increased from 10s
+    
+  sqlquery/waits:
+    driver: mysql
+    datasource: "${env:MYSQL_MONITOR_USER}:${env:MYSQL_MONITOR_PASS}@tcp(${env:MYSQL_PRIMARY_HOST}:3306)/"
+    collection_interval: 60s  # Increased from 10s
+    queries:
+      # Limit to top 50 queries
+      - sql: |
+          SELECT 
+            DIGEST as query_hash,
+            LEFT(DIGEST_TEXT, 100) as query_text,
+            COUNT_STAR as exec_count,
+            AVG_TIMER_WAIT/1000000 as avg_time_ms,
+            SUM_ROWS_EXAMINED as total_rows_examined
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE COUNT_STAR > 5  # Higher threshold
+            AND AVG_TIMER_WAIT > 10000000  # >10ms avg
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 50  # Reduced from 100
+        metrics:
+          - metric_name: mysql.query.profile.light
+            value_column: avg_time_ms
+            attribute_columns: [query_hash, exec_count]
+
+  # Less frequent prometheus scraping
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'mysql_exporter'
+          scrape_interval: 120s  # Increased from 30s
+          static_configs:
+            - targets: ['mysql-exporter-primary:9104']
+
+processors:
+  # Lower memory limit
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256  # Reduced from 384
+    spike_limit_mib: 32
+    
+  # Keep only critical metrics
+  filter/light:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        # Only critical and high severity
+        - 'attributes["wait.severity"] in ["critical", "high"]'
+        # Only P0/P1 advisories
+        - 'attributes["advisor.priority"] in ["P0", "P1"]'
+        # Skip low-impact queries
+        - 'attributes["exec_count"] > 10'
+  
+  # Larger batches, less frequent
+  batch:
+    timeout: 30s  # Increased from 10s
+    send_batch_size: 1000  # Reduced from 2000
+
+exporters:
+  otlp/gateway:
+    endpoint: ${GATEWAY_ENDPOINT}
+    sending_queue:
+      enabled: true
+      num_consumers: 1  # Reduced from 2
+      queue_size: 2500  # Reduced from 5000
+
+service:
+  pipelines:
+    metrics:
+      receivers: [mysql/waits, sqlquery/waits, prometheus]
+      processors: [memory_limiter, filter/light, batch]
+      exporters: [otlp/gateway]

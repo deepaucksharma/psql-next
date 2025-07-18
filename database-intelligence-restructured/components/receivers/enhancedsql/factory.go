@@ -19,7 +19,7 @@ const (
 // NewFactory creates a new receiver factory
 func NewFactory() receiver.Factory {
 	return receiver.NewFactory(
-		Type,
+		component.MustNewType(Type),
 		createDefaultConfig,
 		receiver.WithMetrics(createMetricsReceiver, stability),
 		receiver.WithLogs(createLogsReceiver, stability),

@@ -1,3 +1,3 @@
-module github.com/deepaksharma/db-otel/components/internal/boundedmap
+module github.com/database-intelligence/db-intel/components/internal/boundedmap
 
-go 1.22
+go 1.23.0

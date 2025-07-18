@@ -1,6 +1,6 @@
-module github.com/deepaksharma/db-otel/tests/e2e
+module github.com/database-intelligence/db-intel/tests/e2e
 
-go 1.22
+go 1.23.0
 
 require (
 	github.com/go-sql-driver/mysql v1.9.3
@@ -20,8 +20,8 @@ require (
 )
 
 replace (
-	github.com/deepaksharma/db-otel/components/common => ../../common
-	github.com/deepaksharma/db-otel/components/processors/adaptivesampler => ../../processors/adaptivesampler
-	github.com/deepaksharma/db-otel/components/processors/circuitbreaker => ../../processors/circuitbreaker
-	github.com/deepaksharma/db-otel/components/processors/verification => ../../processors/verification
+	github.com/database-intelligence/db-intel/components/common => ../../common
+	github.com/database-intelligence/db-intel/components/processors/adaptivesampler => ../../processors/adaptivesampler
+	github.com/database-intelligence/db-intel/components/processors/circuitbreaker => ../../processors/circuitbreaker
+	github.com/database-intelligence/db-intel/components/processors/verification => ../../processors/verification
 )

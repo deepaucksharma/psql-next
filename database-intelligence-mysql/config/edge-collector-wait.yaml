@@ -1,0 +1,455 @@
+receivers:
+  # Prometheus receiver for MySQL Exporter metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'mysql_exporter_primary'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['mysql-exporter-primary:9104']
+              labels:
+                mysql_instance: 'primary'
+                service_name: 'mysql-${HOSTNAME}'
+          metric_relabel_configs:
+            # Keep only essential metrics
+            - source_labels: [__name__]
+              regex: 'mysql_(global_status_.*|info_schema_.*|perf_schema_.*)'
+              action: keep
+        
+        - job_name: 'mysql_exporter_replica'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['mysql-exporter-replica:9104']
+              labels:
+                mysql_instance: 'replica'
+                service_name: 'mysql-${HOSTNAME}-replica'
+
+  # Slow query log parsing (JSON format)
+  filelog/slowlog:
+    include: 
+      - /var/lib/mysql/slow-query.log
+      - /var/log/mysql/slow-query.log
+    include_file_path: false
+    start_at: end
+    multiline:
+      line_start_pattern: '^# Time:'
+    operators:
+      - type: regex_parser
+        regex: '^# Time: (?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)'
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: '%Y-%m-%dT%H:%M:%S.%fZ'
+      - type: regex_parser
+        regex: '# Query_time: (?P<query_time>[\d.]+)\s+Lock_time: (?P<lock_time>[\d.]+)\s+Rows_sent: (?P<rows_sent>\d+)\s+Rows_examined: (?P<rows_examined>\d+)'
+      - type: regex_parser
+        regex: '# User@Host: (?P<user>\S+)\s*\[\S*\]\s*@\s*(?P<host>\S+)'
+        parse_from: body
+      - type: filter
+        expr: 'body matches "^(SELECT|INSERT|UPDATE|DELETE)"'
+      - type: add
+        field: attributes.log_type
+        value: slow_query
+      - type: add
+        field: attributes.service_name
+        value: mysql-${HOSTNAME}
+
+  # Enhanced MySQL receiver for wait analysis
+  mysql/waits:
+    endpoint: ${env:MYSQL_PRIMARY_HOST}:3306
+    username: ${env:MYSQL_MONITOR_USER}
+    password: ${env:MYSQL_MONITOR_PASS}
+    collection_interval: 10s
+    transport: tcp
+    
+  # Custom SQL queries for wait analysis
+  sqlquery/waits:
+    driver: mysql
+    datasource: "${env:MYSQL_MONITOR_USER}:${env:MYSQL_MONITOR_PASS}@tcp(${env:MYSQL_PRIMARY_HOST}:3306)/"
+    collection_interval: 10s
+    queries:
+      # Core wait profile query
+      - sql: |
+          WITH wait_summary AS (
+            SELECT 
+              ews.THREAD_ID,
+              ews.EVENT_NAME as wait_type,
+              COUNT(*) as wait_count,
+              SUM(ews.TIMER_WAIT) as total_wait,
+              AVG(ews.TIMER_WAIT) as avg_wait,
+              MAX(ews.TIMER_WAIT) as max_wait
+            FROM performance_schema.events_waits_history_long ews
+            WHERE ews.TIMER_WAIT > 0
+              AND ews.EVENT_NAME NOT LIKE 'idle%'
+              AND ews.END_EVENT_ID IS NOT NULL
+            GROUP BY ews.THREAD_ID, ews.EVENT_NAME
+          ),
+          statement_waits AS (
+            SELECT 
+              esh.THREAD_ID,
+              esh.DIGEST,
+              esh.DIGEST_TEXT,
+              esh.CURRENT_SCHEMA,
+              esh.TIMER_WAIT as statement_time,
+              esh.LOCK_TIME,
+              esh.ROWS_EXAMINED,
+              esh.ROWS_SENT,
+              esh.NO_INDEX_USED,
+              esh.NO_GOOD_INDEX_USED,
+              esh.CREATED_TMP_TABLES,
+              esh.CREATED_TMP_DISK_TABLES,
+              esh.SELECT_FULL_JOIN,
+              esh.SELECT_SCAN
+            FROM performance_schema.events_statements_history_long esh
+            WHERE esh.DIGEST IS NOT NULL
+              AND esh.TIMER_WAIT > 1000000
+          )
+          SELECT 
+            sw.DIGEST as query_hash,
+            LEFT(sw.DIGEST_TEXT, 100) as query_text,
+            sw.CURRENT_SCHEMA as db_schema,
+            ws.wait_type,
+            ws.wait_count,
+            ws.total_wait/1000000 as total_wait_ms,
+            ws.avg_wait/1000000 as avg_wait_ms,
+            ws.max_wait/1000000 as max_wait_ms,
+            sw.statement_time/1000000 as statement_time_ms,
+            sw.LOCK_TIME/1000000 as lock_time_ms,
+            sw.ROWS_EXAMINED,
+            sw.NO_INDEX_USED,
+            sw.NO_GOOD_INDEX_USED,
+            sw.CREATED_TMP_DISK_TABLES as tmp_disk_tables,
+            sw.SELECT_FULL_JOIN as full_joins,
+            sw.SELECT_SCAN as full_scans,
+            COALESCE((ws.total_wait / NULLIF(sw.statement_time, 0)) * 100, 0) as wait_percentage
+          FROM statement_waits sw
+          LEFT JOIN wait_summary ws ON sw.THREAD_ID = ws.THREAD_ID
+          WHERE ws.total_wait > 0
+          ORDER BY ws.total_wait DESC
+          LIMIT 100
+        metrics:
+          - metric_name: mysql.query.wait_profile
+            value_column: total_wait_ms
+            attribute_columns: 
+              - query_hash
+              - db_schema
+              - wait_type
+              - wait_percentage
+              - NO_INDEX_USED
+              - NO_GOOD_INDEX_USED
+              - tmp_disk_tables
+              - full_joins
+              - full_scans
+              - ROWS_EXAMINED
+              - avg_wait_ms
+              - statement_time_ms
+            data_point_type: gauge
+      
+      # Active blocking analysis
+      - sql: |
+          SELECT 
+            bt.trx_id,
+            bt.trx_state,
+            bt.trx_started,
+            bt.trx_wait_started,
+            TIMESTAMPDIFF(SECOND, bt.trx_wait_started, NOW()) as wait_duration,
+            bt.trx_mysql_thread_id as waiting_thread,
+            SUBSTRING(bt.trx_query, 1, 100) as waiting_query,
+            blt.trx_mysql_thread_id as blocking_thread,
+            SUBSTRING(blt.trx_query, 1, 100) as blocking_query,
+            l.lock_mode,
+            l.lock_type,
+            l.object_schema,
+            l.object_name as lock_table,
+            l.index_name as lock_index
+          FROM information_schema.innodb_trx bt
+          JOIN performance_schema.data_lock_waits dlw 
+            ON bt.trx_mysql_thread_id = dlw.REQUESTING_THREAD_ID
+          JOIN information_schema.innodb_trx blt 
+            ON dlw.BLOCKING_THREAD_ID = blt.trx_mysql_thread_id
+          JOIN performance_schema.data_locks l
+            ON dlw.REQUESTING_ENGINE_LOCK_ID = l.ENGINE_LOCK_ID
+          WHERE bt.trx_wait_started IS NOT NULL
+        metrics:
+          - metric_name: mysql.blocking.active
+            value_column: wait_duration
+            attribute_columns: 
+              - waiting_thread
+              - blocking_thread
+              - lock_type
+              - object_schema
+              - lock_table
+              - lock_index
+              - lock_mode
+      
+      # Statement execution stages
+      - sql: |
+          SELECT 
+            DIGEST,
+            SUBSTRING(DIGEST_TEXT, 1, 100) as query_text,
+            COUNT_STAR as exec_count,
+            SUM_TIMER_WAIT/1000000/COUNT_STAR as avg_time_ms,
+            SUM_ROWS_EXAMINED/COUNT_STAR as avg_rows_examined,
+            SUM_ROWS_SENT/COUNT_STAR as avg_rows_sent,
+            SUM_SELECT_SCAN as full_scans,
+            SUM_SELECT_FULL_JOIN as full_joins,
+            SUM_CREATED_TMP_TABLES as tmp_tables,
+            SUM_CREATED_TMP_DISK_TABLES as tmp_disk_tables,
+            SUM_SORT_SCAN as sort_scans,
+            FIRST_SEEN,
+            LAST_SEEN
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE COUNT_STAR > 10
+            AND SUM_TIMER_WAIT/COUNT_STAR > 100000000
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 50
+        metrics:
+          - metric_name: mysql.query.execution_stats
+            value_column: avg_rows_examined
+            attribute_columns: 
+              - DIGEST
+              - full_scans
+              - full_joins
+              - tmp_disk_tables
+              - avg_time_ms
+              - exec_count
+
+  # Collect metrics for replica lag
+  sqlquery/replica:
+    driver: mysql
+    datasource: "${env:MYSQL_MONITOR_USER}:${env:MYSQL_MONITOR_PASS}@tcp(${env:MYSQL_REPLICA_HOST}:3306)/"
+    collection_interval: 30s
+    queries:
+      - sql: |
+          SELECT 
+            CHANNEL_NAME,
+            LAST_ERROR_NUMBER,
+            LAST_ERROR_MESSAGE,
+            SERVICE_STATE as replica_state,
+            LAST_QUEUED_TRANSACTION_START_QUEUE_TIMESTAMP,
+            LAST_APPLIED_TRANSACTION_END_APPLY_TIMESTAMP,
+            PROCESSING_TRANSACTION_RETRIES_COUNT,
+            COUNT_TRANSACTIONS_REMOTE_IN_APPLIER_QUEUE as queue_size,
+            COUNT_TRANSACTIONS_RETRIES as total_retries,
+            TIMESTAMPDIFF(SECOND, 
+              LAST_APPLIED_TRANSACTION_END_APPLY_TIMESTAMP,
+              NOW()) as seconds_behind_master
+          FROM performance_schema.replication_applier_status_by_worker
+          WHERE SERVICE_STATE != 'OFF'
+        metrics:
+          - metric_name: mysql.replica.lag
+            value_column: seconds_behind_master
+            attribute_columns:
+              - CHANNEL_NAME
+              - replica_state
+              - queue_size
+
+processors:
+  # Enhanced wait analysis processor
+  transform/wait_analysis:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Categorize wait types
+          - set(attributes["wait.category"], "io") 
+            where IsMatch(attributes["wait_type"], "wait/io/.*")
+          
+          - set(attributes["wait.category"], "lock") 
+            where IsMatch(attributes["wait_type"], "wait/lock/.*")
+          
+          - set(attributes["wait.category"], "cpu") 
+            where IsMatch(attributes["wait_type"], "wait/synch/.*")
+          
+          - set(attributes["wait.category"], "network") 
+            where IsMatch(attributes["wait_type"], "wait/io/socket.*")
+          
+          # Calculate wait severity
+          - set(attributes["wait.severity"], "critical")
+            where attributes["wait_percentage"] > 90
+          
+          - set(attributes["wait.severity"], "high")
+            where attributes["wait_percentage"] > 70 and attributes["wait_percentage"] <= 90
+          
+          - set(attributes["wait.severity"], "medium")
+            where attributes["wait_percentage"] > 50 and attributes["wait_percentage"] <= 70
+          
+          - set(attributes["wait.severity"], "low")
+            where attributes["wait_percentage"] <= 50
+
+  # Query advisor processor
+  transform/advisors:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Missing index detection
+          - set(attributes["advisor.type"], "missing_index")
+            where attributes["NO_INDEX_USED"] == 1 
+              and attributes["wait.category"] == "io"
+              and attributes["ROWS_EXAMINED"] > 1000
+          
+          - set(attributes["advisor.recommendation"], 
+                "Query performs full table scan. Analyze WHERE clause and add appropriate index.")
+            where attributes["advisor.type"] == "missing_index"
+          
+          # Lock contention advisory
+          - set(attributes["advisor.type"], "lock_contention")
+            where attributes["wait.category"] == "lock" 
+              and metric.value > 1000
+          
+          - set(attributes["advisor.recommendation"], 
+                "High lock waits detected. Review transaction isolation level and query order.")
+            where attributes["advisor.type"] == "lock_contention"
+          
+          # Inefficient join detection
+          - set(attributes["advisor.type"], "inefficient_join")
+            where attributes["full_joins"] > 0
+              or attributes["NO_GOOD_INDEX_USED"] == 1
+          
+          - set(attributes["advisor.recommendation"], 
+                "Query uses inefficient join. Review join conditions and ensure proper indexes on join columns.")
+            where attributes["advisor.type"] == "inefficient_join"
+          
+          # Temporary table advisory
+          - set(attributes["advisor.type"], "temp_table_to_disk")
+            where attributes["tmp_disk_tables"] > 0
+          
+          - set(attributes["advisor.recommendation"], 
+                "Query creates on-disk temporary tables. Increase tmp_table_size or optimize GROUP BY/ORDER BY.")
+            where attributes["advisor.type"] == "temp_table_to_disk"
+          
+          # Calculate advisory priority
+          - set(attributes["advisor.priority"], "P1")
+            where attributes["wait.severity"] == "critical" 
+              and attributes["advisor.type"] != ""
+          
+          - set(attributes["advisor.priority"], "P2")
+            where attributes["wait.severity"] == "high" 
+              and attributes["advisor.type"] != ""
+          
+          - set(attributes["advisor.priority"], "P3")
+            where attributes["wait.severity"] == "medium" 
+              and attributes["advisor.type"] != ""
+
+  # Plan change detection
+  transform/plan_detection:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Create plan fingerprint
+          - set(attributes["plan.fingerprint"], 
+                Concat(
+                  Str(attributes["full_scans"]), "-",
+                  Str(attributes["full_joins"]), "-", 
+                  Str(attributes["tmp_disk_tables"]), "-",
+                  Str(Int(attributes["avg_rows_examined"] / 1000))
+                ))
+            where attributes["DIGEST"] != nil
+
+  # Memory limiter - ultra-low overhead
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 64
+    
+  batch:
+    timeout: 10s
+    send_batch_size: 2000
+    send_batch_max_size: 3000
+
+  # Resource metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: mysql-${HOSTNAME}
+        action: upsert
+      - key: deployment.environment
+        value: ${ENVIRONMENT}
+        action: upsert
+      - key: mysql.endpoint
+        value: ${MYSQL_PRIMARY_HOST}:3306
+        action: insert
+
+exporters:
+  otlp/gateway:
+    endpoint: ${GATEWAY_ENDPOINT}
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+
+  # Local debug exporter
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 20
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+service:
+  extensions: [health_check, pprof]
+  
+  pipelines:
+    metrics/waits:
+      receivers: [mysql/waits, sqlquery/waits]
+      processors: 
+        - memory_limiter
+        - transform/wait_analysis
+        - transform/advisors
+        - resource
+        - batch
+      exporters: [otlp/gateway, debug]
+    
+    metrics/prometheus:
+      receivers: [prometheus]
+      processors:
+        - memory_limiter
+        - resource
+        - batch
+      exporters: [otlp/gateway]
+    
+    metrics/stats:
+      receivers: [sqlquery/waits]
+      processors:
+        - memory_limiter
+        - transform/plan_detection
+        - resource
+        - batch
+      exporters: [otlp/gateway]
+      
+    metrics/replica:
+      receivers: [sqlquery/replica]
+      processors:
+        - memory_limiter
+        - resource
+        - batch
+      exporters: [otlp/gateway]
+    
+    logs/slowquery:
+      receivers: [filelog/slowlog]
+      processors:
+        - memory_limiter
+        - resource
+        - batch
+      exporters: [otlp/gateway]
+
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["/var/log/otel/collector.log", "stdout"]
+      error_output_paths: ["stderr"]
+    metrics:
+      level: basic
+      address: 0.0.0.0:8888

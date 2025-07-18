@@ -1,0 +1,37 @@
+# Production environment overrides
+version: '3.8'
+
+services:
+  collector:
+    environment:
+      - LOG_LEVEL=info
+      - GOMAXPROCS=4
+    volumes:
+      - ${CONFIG_FILE:-../../configs/profiles/standard.yaml}:/etc/otel-collector/config.yaml:ro
+      - ../../configs/environments/production.yaml:/etc/otel-collector/overrides.yaml:ro
+    command: ["--profile=standard", "--config=/etc/otel-collector/config.yaml", "--config=/etc/otel-collector/overrides.yaml"]
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 2G
+        reservations:
+          cpus: '2'
+          memory: 1G
+    restart: unless-stopped
+
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+    restart: unless-stopped
+
+  mysql:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+    restart: unless-stopped

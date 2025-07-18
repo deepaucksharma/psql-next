@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dbintel-collector
+  namespace: database-intelligence
+  labels:
+    app: dbintel-collector
+spec:
+  type: ClusterIP
+  ports:
+  - name: prometheus
+    port: 8889
+    targetPort: 8889
+  - name: health
+    port: 13133
+    targetPort: 13133
+  selector:
+    app: dbintel-collector
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dbintel-collector
+  namespace: database-intelligence
+  labels:
+    app: dbintel-collector
+spec:
+  replicas: 3  # Scale horizontally
+  selector:
+    matchLabels:
+      app: dbintel-collector
+  template:
+    metadata:
+      labels:
+        app: dbintel-collector
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8889"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: dbintel-collector
+      containers:
+      - name: collector
+        image: database-intelligence/db-intel:latest
+        imagePullPolicy: Always
+        command: ["/dbintelcol"]
+        args: ["--config", "/etc/collector/collector-config.yaml"]
+        env:
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: GOMAXPROCS
+          value: "2"
+        ports:
+        - containerPort: 8889
+          name: prometheus
+        - containerPort: 13133
+          name: health
+        - containerPort: 1777
+          name: pprof
+        - containerPort: 55679
+          name: zpages
+        volumeMounts:
+        - name: config
+          mountPath: /etc/collector
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: dbintel-config
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dbintel-collector
+  namespace: database-intelligence
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dbintel-collector
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/stats", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dbintel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dbintel-collector
+subjects:
+- kind: ServiceAccount
+  name: dbintel-collector
+  namespace: database-intelligence

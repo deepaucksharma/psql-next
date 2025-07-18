@@ -1,0 +1,249 @@
+version: '3.8'
+
+# High Availability Docker Compose setup for MySQL Wait-Based Monitoring
+# This configuration demonstrates HA concepts in a local environment
+
+services:
+  # MySQL Primary Database
+  mysql-primary:
+    image: mysql:8.0
+    container_name: mysql-primary
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_USER: ${MYSQL_USER:-testuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-testpass}
+    volumes:
+      - mysql-primary-data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+      - ./mysql/conf/primary.cnf:/etc/mysql/conf.d/custom.cnf:ro
+    ports:
+      - "3306:3306"
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+      interval: 5s
+
+  # Edge Collector 1
+  edge-collector-1:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: edge-collector-1
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./config/edge-collector-wait.yaml:/etc/otel/config.yaml:ro
+    environment:
+      - MYSQL_MONITOR_USER=${MYSQL_MONITOR_USER:-monitor}
+      - MYSQL_MONITOR_PASS=${MYSQL_MONITOR_PASS:-monitorpass}
+      - MYSQL_PRIMARY_HOST=mysql-primary
+      - GATEWAY_ENDPOINT=gateway-lb:4317
+      - HOSTNAME=edge-collector-1
+    ports:
+      - "8888:8888"   # Metrics
+      - "13133:13133" # Health check
+      - "9091:9091"   # Prometheus exporter
+    networks:
+      - monitoring
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Edge Collector 2 (Simulating redundancy)
+  edge-collector-2:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: edge-collector-2
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./config/edge-collector-wait.yaml:/etc/otel/config.yaml:ro
+    environment:
+      - MYSQL_MONITOR_USER=${MYSQL_MONITOR_USER:-monitor}
+      - MYSQL_MONITOR_PASS=${MYSQL_MONITOR_PASS:-monitorpass}
+      - MYSQL_PRIMARY_HOST=mysql-primary
+      - GATEWAY_ENDPOINT=gateway-lb:4317
+      - HOSTNAME=edge-collector-2
+    ports:
+      - "8889:8888"   # Metrics
+      - "13134:13133" # Health check
+      - "9092:9091"   # Prometheus exporter
+    networks:
+      - monitoring
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # HA Gateway 1
+  gateway-ha-1:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: gateway-ha-1
+    command: ["--config=/etc/otel/gateway-ha.yaml"]
+    volumes:
+      - ./config/gateway-ha.yaml:/etc/otel/gateway-ha.yaml:ro
+      - gateway-1-queue:/var/lib/otel/gateway/queue
+    environment:
+      - HOSTNAME=gateway-ha-1
+      - GATEWAY_REGION=us-east-1
+      - GATEWAY_AZ=us-east-1a
+      - GATEWAY_CLUSTER=local
+      - PRIMARY_BACKEND_ENDPOINT=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - SECONDARY_BACKEND_ENDPOINT=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - CROSS_REGION_ENDPOINT=gateway-ha-3:4317
+      - BACKEND_ENDPOINT_1=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - BACKEND_ENDPOINT_2=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - BACKEND_ENDPOINT_3=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8890:8888"   # Metrics
+      - "13135:13133" # Health check
+      - "9093:9091"   # Prometheus
+    networks:
+      - monitoring
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  # HA Gateway 2
+  gateway-ha-2:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: gateway-ha-2
+    command: ["--config=/etc/otel/gateway-ha.yaml"]
+    volumes:
+      - ./config/gateway-ha.yaml:/etc/otel/gateway-ha.yaml:ro
+      - gateway-2-queue:/var/lib/otel/gateway/queue
+    environment:
+      - HOSTNAME=gateway-ha-2
+      - GATEWAY_REGION=us-east-1
+      - GATEWAY_AZ=us-east-1b
+      - GATEWAY_CLUSTER=local
+      - PRIMARY_BACKEND_ENDPOINT=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - SECONDARY_BACKEND_ENDPOINT=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - CROSS_REGION_ENDPOINT=gateway-ha-3:4317
+      - BACKEND_ENDPOINT_1=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - BACKEND_ENDPOINT_2=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - BACKEND_ENDPOINT_3=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+    ports:
+      - "4327:4317"   # OTLP gRPC
+      - "4328:4318"   # OTLP HTTP
+      - "8891:8888"   # Metrics
+      - "13136:13133" # Health check
+      - "9094:9091"   # Prometheus
+    networks:
+      - monitoring
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  # HA Gateway 3 (Cross-region simulation)
+  gateway-ha-3:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: gateway-ha-3
+    command: ["--config=/etc/otel/gateway-ha.yaml"]
+    volumes:
+      - ./config/gateway-ha.yaml:/etc/otel/gateway-ha.yaml:ro
+      - gateway-3-queue:/var/lib/otel/gateway/queue
+    environment:
+      - HOSTNAME=gateway-ha-3
+      - GATEWAY_REGION=us-west-2
+      - GATEWAY_AZ=us-west-2a
+      - GATEWAY_CLUSTER=local-dr
+      - PRIMARY_BACKEND_ENDPOINT=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - SECONDARY_BACKEND_ENDPOINT=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - CROSS_REGION_ENDPOINT=gateway-ha-1:4317
+      - BACKEND_ENDPOINT_1=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - BACKEND_ENDPOINT_2=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - BACKEND_ENDPOINT_3=${OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+    ports:
+      - "4337:4317"   # OTLP gRPC
+      - "4338:4318"   # OTLP HTTP
+      - "8892:8888"   # Metrics
+      - "13137:13133" # Health check
+      - "9095:9091"   # Prometheus
+    networks:
+      - monitoring
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  # HAProxy Load Balancer for Gateways
+  gateway-lb:
+    image: haproxy:2.8-alpine
+    container_name: gateway-lb
+    volumes:
+      - ./config/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "4319:4317"   # OTLP gRPC (load balanced)
+      - "4320:4318"   # OTLP HTTP (load balanced)
+      - "8404:8404"   # HAProxy stats
+    networks:
+      - monitoring
+    depends_on:
+      - gateway-ha-1
+      - gateway-ha-2
+    restart: unless-stopped
+
+  # Prometheus for monitoring the monitoring system
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-ha
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./config/prometheus-ha.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-ha
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  mysql-primary-data:
+  gateway-1-queue:
+  gateway-2-queue:
+  gateway-3-queue:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  monitoring:
+    driver: bridge

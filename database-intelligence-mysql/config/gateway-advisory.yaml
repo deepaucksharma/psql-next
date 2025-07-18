@@ -1,0 +1,280 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 4
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Group metrics for wait analysis
+  groupbyattrs/waits:
+    keys:
+      - service.name
+      - query_hash
+      - wait.category
+      - advisor.type
+      - advisor.priority
+      - db_schema
+
+  # Enhanced advisory generation with critical composite advisories
+  transform/composite_advisors:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Composite advisory: Lock + Missing Index
+          - set(attributes["advisor.composite"], "lock_escalation_missing_index")
+            where attributes["advisor.type"] == "lock_contention"
+              and IsMatch(attributes["wait_type"], ".*table.*lock.*")
+              and attributes["NO_INDEX_USED"] == 1
+          
+          - set(attributes["advisor.recommendation"], 
+                "Table lock escalation due to missing index. Add index to enable row-level locking.")
+            where attributes["advisor.composite"] == "lock_escalation_missing_index"
+          
+          - set(attributes["advisor.priority"], "P1")
+            where attributes["advisor.composite"] == "lock_escalation_missing_index"
+          
+          # Critical Missing Index (P0 priority)
+          - set(attributes["advisor.composite"], "critical_missing_index")
+            where attributes["advisor.type"] == "missing_index"
+              and attributes["wait.category"] == "io"
+              and attributes["wait_percentage"] > 80
+              and attributes["exec_count"] > 1000
+          
+          - set(attributes["advisor.priority"], "P0")
+            where attributes["advisor.composite"] == "critical_missing_index"
+          
+          - set(attributes["advisor.recommendation"], 
+                "CRITICAL: Query has 80%+ I/O wait with high execution count. Missing index severely impacting performance.")
+            where attributes["advisor.composite"] == "critical_missing_index"
+          
+          # Composite advisory: I/O + temp tables
+          - set(attributes["advisor.composite"], "io_saturation_temp_tables")
+            where attributes["wait.category"] == "io"
+              and attributes["tmp_disk_tables"] > 0
+          
+          - set(attributes["advisor.recommendation"], 
+                "I/O saturation worsened by on-disk temp tables. Optimize query or increase memory buffers.")
+            where attributes["advisor.composite"] == "io_saturation_temp_tables"
+          
+          # Wait trend analysis
+          - set(attributes["wait.trend"], "regression")
+            where attributes["wait_percentage"] > 80
+              and attributes["statement_time_ms"] > 1000
+          
+          - set(attributes["wait.trend"], "improving")
+            where attributes["wait_percentage"] < 20
+          
+          # Add impact score
+          - set(attributes["impact.score"], 
+                attributes["wait_percentage"] * attributes["exec_count"] / 100)
+            where attributes["exec_count"] != nil
+
+  # Baseline enrichment
+  transform/baseline_enrichment:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Simple baseline markers
+          - set(attributes["baseline.period"], "7d_rolling")
+          
+          # Mark anomalies
+          - set(attributes["anomaly.detected"], true)
+            where attributes["wait_percentage"] > 90
+              and attributes["wait.severity"] == "critical"
+          
+          # Service level indicators
+          - set(attributes["sli.impacting"], true)
+            where attributes["statement_time_ms"] > 1000
+              and attributes["wait_percentage"] > 50
+
+  # Advanced cardinality control with intelligent sampling
+  filter/cardinality:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        # Keep all P0/P1 advisories (critical issues)
+        - 'attributes["advisor.priority"] == "P0" or attributes["advisor.priority"] == "P1"'
+        # Keep P2 advisories with sampling
+        - 'attributes["advisor.priority"] == "P2" and (Hash(attributes["query_hash"]) % 2) == 0'
+        # Keep P3 advisories with heavy sampling
+        - 'attributes["advisor.priority"] == "P3" and (Hash(attributes["query_hash"]) % 10) == 0'
+        # Keep critical and high severity waits
+        - 'attributes["wait.severity"] == "critical" or attributes["wait.severity"] == "high"'
+        # Keep all composite advisories
+        - 'attributes["advisor.composite"] != ""'
+        # Keep anomalies
+        - 'attributes["anomaly.detected"] == true'
+        # Keep SLI impacting queries
+        - 'attributes["sli.impacting"] == true'
+        # Keep queries with extreme wait percentage
+        - 'attributes["wait_percentage"] > 90'
+        # Sample medium severity (33%)
+        - 'attributes["wait.severity"] == "medium" and (Hash(attributes["query_hash"]) % 3) == 0'
+        # Sample low severity (5%)
+        - 'attributes["wait.severity"] == "low" and (Hash(attributes["query_hash"]) % 20) == 0'
+        # Keep queries with plan changes
+        - 'attributes["plan.changed"] == true'
+
+  # Aggregate metrics
+  metricstransform:
+    transforms:
+      # Aggregate wait profiles
+      - include: mysql.query.wait_profile
+        match_type: strict
+        action: update
+        operations:
+          - action: aggregate_labels
+            label_set: ["query_hash", "wait.category", "service.name"]
+            aggregation_type: sum
+      
+      # Aggregate execution stats
+      - include: mysql.query.execution_stats
+        match_type: strict
+        action: update
+        operations:
+          - action: aggregate_labels
+            label_set: ["DIGEST", "service.name"]
+            aggregation_type: max
+
+  # Add New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      
+      - key: collector.name
+        value: mysql-wait-gateway
+        action: insert
+      
+      # Convert MySQL specific attributes to New Relic conventions
+      - key: db.system
+        value: mysql
+        action: insert
+      
+      - key: db.name
+        from_attribute: db_schema
+        action: insert
+      
+      - key: db.statement
+        from_attribute: query_text
+        action: insert
+
+  # Memory limiter for gateway
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  # Batch for New Relic
+  batch/newrelic:
+    timeout: 10s
+    send_batch_size: 5000
+    send_batch_max_size: 8000
+
+exporters:
+  # New Relic OTLP exporter
+  otlphttp/newrelic:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+
+  # Local file exporter for backup
+  file:
+    path: /var/log/otel/metrics.json
+    rotation:
+      max_megabytes: 100
+      max_days: 3
+      max_backups: 3
+
+  # Debug exporter
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # Prometheus for local monitoring
+  prometheus:
+    endpoint: 0.0.0.0:9091
+    namespace: mysql_gateway
+    const_labels:
+      gateway: advisory
+    resource_to_telemetry_conversion:
+      enabled: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  pprof:
+    endpoint: 0.0.0.0:1778
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    # Main metrics pipeline
+    metrics:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - groupbyattrs/waits
+        - transform/composite_advisors
+        - transform/baseline_enrichment
+        - filter/cardinality
+        - metricstransform
+        - attributes/newrelic
+        - batch/newrelic
+      exporters: [otlphttp/newrelic, prometheus, debug]
+    
+    # High-priority pipeline for critical alerts
+    metrics/critical:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - filter/cardinality
+        - attributes/newrelic
+        - batch/newrelic
+      exporters: [otlphttp/newrelic, file]
+
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+      output_paths: ["stdout", "/var/log/otel/gateway.log"]
+      error_output_paths: ["stderr"]
+      initial_fields:
+        service: gateway
+        component: mysql-advisory
+    
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      readers:
+        - pull:
+            interval: 10000
+            timeout: 5000
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888

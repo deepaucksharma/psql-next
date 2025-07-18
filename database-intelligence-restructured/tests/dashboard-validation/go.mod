@@ -1,4 +1,4 @@
-module github.com/deepaksharma/db-otel/tests/dashboard-validation
+module github.com/database-intelligence/db-intel/tests/dashboard-validation
 
 go 1.22
 

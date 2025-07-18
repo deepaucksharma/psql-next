@@ -1,0 +1,577 @@
+# MSSQL/SQL Server Maximum Metrics Extraction - Config Only Approach
+# This configuration extracts the maximum possible metrics using only stock OpenTelemetry components
+# Leverages sqlserver receiver and SQL queries for deep insights
+
+receivers:
+  # ============================================
+  # CORE SQL SERVER RECEIVER
+  # ============================================
+  sqlserver:
+    collection_interval: 10s
+    computer_name: ${env:MSSQL_COMPUTER_NAME:}
+    instance_name: ${env:MSSQL_INSTANCE_NAME:MSSQLSERVER}
+    connection_string: "Server=${env:MSSQL_HOST:localhost},${env:MSSQL_PORT:1433};Database=master;User Id=${env:MSSQL_USER:sa};Password=${env:MSSQL_PASSWORD};TrustServerCertificate=true"
+    # Enable all available metrics
+    metrics:
+      sqlserver.database.io.read_latency:
+        enabled: true
+      sqlserver.database.io.write_latency:
+        enabled: true
+      sqlserver.database.log.flushes:
+        enabled: true
+      sqlserver.database.operations:
+        enabled: true
+      sqlserver.database.size:
+        enabled: true
+      sqlserver.database.transactions:
+        enabled: true
+      sqlserver.batch.requests:
+        enabled: true
+      sqlserver.batch.sql_compilations:
+        enabled: true
+      sqlserver.batch.sql_recompilations:
+        enabled: true
+      sqlserver.buffer.cache_hit_ratio:
+        enabled: true
+      sqlserver.buffer.checkpoint_pages:
+        enabled: true
+      sqlserver.buffer.page_life_expectancy:
+        enabled: true
+      sqlserver.buffer.page_operations:
+        enabled: true
+      sqlserver.connection.count:
+        enabled: true
+      sqlserver.cpu.sql_process_utilization:
+        enabled: true
+      sqlserver.cpu.system_idle_process:
+        enabled: true
+      sqlserver.lock.wait_time:
+        enabled: true
+      sqlserver.lock.waits:
+        enabled: true
+      sqlserver.memory.total_server_memory:
+        enabled: true
+      sqlserver.memory.target_server_memory:
+        enabled: true
+      sqlserver.page.splits:
+        enabled: true
+      sqlserver.process.blocked:
+        enabled: true
+      sqlserver.resource_pool.cpu.usage:
+        enabled: true
+      sqlserver.resource_pool.memory.used:
+        enabled: true
+      sqlserver.transaction_log.growth:
+        enabled: true
+      sqlserver.transaction_log.shrink:
+        enabled: true
+      sqlserver.transaction_log.usage:
+        enabled: true
+      sqlserver.user.connection.count:
+        enabled: true
+
+  # ============================================
+  # QUERY PERFORMANCE MONITORING
+  # ============================================
+  sqlquery/query_stats:
+    driver: sqlserver
+    datasource: "sqlserver://${env:MSSQL_USER:sa}:${env:MSSQL_PASSWORD}@${env:MSSQL_HOST:localhost}:${env:MSSQL_PORT:1433}?database=master&connection+timeout=30&TrustServerCertificate=true"
+    collection_interval: 30s
+    queries:
+      # Top expensive queries
+      - sql: |
+          SELECT TOP 50
+            DB_NAME(qt.dbid) as database_name,
+            SUBSTRING(qt.text, (qs.statement_start_offset/2)+1,
+              ((CASE qs.statement_end_offset
+                WHEN -1 THEN DATALENGTH(qt.text)
+                ELSE qs.statement_end_offset
+              END - qs.statement_start_offset)/2)+1) as query_text,
+            qs.execution_count,
+            qs.total_logical_reads,
+            qs.total_logical_writes,
+            qs.total_worker_time,
+            qs.total_elapsed_time,
+            qs.total_logical_reads/qs.execution_count as avg_logical_reads,
+            qs.total_logical_writes/qs.execution_count as avg_logical_writes,
+            qs.total_worker_time/qs.execution_count as avg_worker_time,
+            qs.total_elapsed_time/qs.execution_count as avg_elapsed_time
+          FROM sys.dm_exec_query_stats qs
+          CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) qt
+          CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) qp
+          WHERE qs.execution_count > 5
+          ORDER BY qs.total_worker_time DESC
+        metrics:
+          - metric_name: mssql.query.execution_count
+            value_column: execution_count
+            value_type: gauge
+            unit: "{executions}"
+            attribute_columns: [database_name, query_text]
+          - metric_name: mssql.query.avg_logical_reads
+            value_column: avg_logical_reads
+            value_type: gauge
+            unit: "{pages}"
+            attribute_columns: [database_name, query_text]
+          - metric_name: mssql.query.avg_worker_time
+            value_column: avg_worker_time
+            value_type: gauge
+            unit: "us"
+            attribute_columns: [database_name, query_text]
+          - metric_name: mssql.query.avg_elapsed_time
+            value_column: avg_elapsed_time
+            value_type: gauge
+            unit: "us"
+            attribute_columns: [database_name, query_text]
+
+  # ============================================
+  # WAIT STATISTICS MONITORING
+  # ============================================
+  sqlquery/wait_stats:
+    driver: sqlserver
+    datasource: "sqlserver://${env:MSSQL_USER:sa}:${env:MSSQL_PASSWORD}@${env:MSSQL_HOST:localhost}:${env:MSSQL_PORT:1433}?database=master&connection+timeout=30&TrustServerCertificate=true"
+    collection_interval: 10s
+    queries:
+      # Wait statistics
+      - sql: |
+          SELECT 
+            wait_type,
+            wait_time_ms,
+            waiting_tasks_count,
+            signal_wait_time_ms,
+            max_wait_time_ms,
+            CAST(100.0 * wait_time_ms / SUM(wait_time_ms) OVER() AS DECIMAL(5,2)) as wait_percentage
+          FROM sys.dm_os_wait_stats
+          WHERE wait_type NOT IN (
+            N'BROKER_EVENTHANDLER', N'BROKER_RECEIVE_WAITFOR',
+            N'BROKER_TASK_STOP', N'BROKER_TO_FLUSH',
+            N'BROKER_TRANSMITTER', N'CHECKPOINT_QUEUE',
+            N'CHKPT', N'CLR_AUTO_EVENT',
+            N'CLR_MANUAL_EVENT', N'CLR_SEMAPHORE',
+            N'DBMIRROR_DBM_EVENT', N'DBMIRROR_EVENTS_QUEUE',
+            N'DBMIRROR_WORKER_QUEUE', N'DBMIRRORING_CMD',
+            N'DIRTY_PAGE_POLL', N'DISPATCHER_QUEUE_SEMAPHORE',
+            N'EXECSYNC', N'FSAGENT',
+            N'FT_IFTS_SCHEDULER_IDLE_WAIT', N'FT_IFTSHC_MUTEX',
+            N'HADR_CLUSAPI_CALL', N'HADR_FILESTREAM_IOMGR_IOCOMPLETION',
+            N'HADR_LOGCAPTURE_WAIT', N'HADR_NOTIFICATION_DEQUEUE',
+            N'HADR_TIMER_TASK', N'HADR_WORK_QUEUE',
+            N'KSOURCE_WAKEUP', N'LAZYWRITER_SLEEP',
+            N'LOGMGR_QUEUE', N'MEMORY_ALLOCATION_EXT',
+            N'ONDEMAND_TASK_QUEUE', N'PREEMPTIVE_XE_GETTARGETSTATE',
+            N'PWAIT_ALL_COMPONENTS_INITIALIZED', N'PWAIT_DIRECTLOGCONSUMER_GETNEXT',
+            N'QDS_PERSIST_TASK_MAIN_LOOP_SLEEP', N'QDS_ASYNC_QUEUE',
+            N'QDS_CLEANUP_STALE_QUERIES_TASK_MAIN_LOOP_SLEEP',
+            N'QDS_SHUTDOWN_QUEUE', N'REDO_THREAD_PENDING_WORK',
+            N'REQUEST_FOR_DEADLOCK_SEARCH', N'RESOURCE_QUEUE',
+            N'SERVER_IDLE_CHECK', N'SLEEP_BPOOL_FLUSH',
+            N'SLEEP_DBSTARTUP', N'SLEEP_DCOMSTARTUP',
+            N'SLEEP_MASTERDBREADY', N'SLEEP_MASTERMDREADY',
+            N'SLEEP_MASTERUPGRADED', N'SLEEP_MSDBSTARTUP',
+            N'SLEEP_SYSTEMTASK', N'SLEEP_TASK',
+            N'SLEEP_TEMPDBSTARTUP', N'SNI_HTTP_ACCEPT',
+            N'SP_SERVER_DIAGNOSTICS_SLEEP', N'SQLTRACE_BUFFER_FLUSH',
+            N'SQLTRACE_INCREMENTAL_FLUSH_SLEEP', N'SQLTRACE_WAIT_ENTRIES',
+            N'WAIT_FOR_RESULTS', N'WAITFOR',
+            N'WAITFOR_TASKSHUTDOWN', N'WAIT_XTP_RECOVERY',
+            N'WAIT_XTP_HOST_WAIT', N'WAIT_XTP_OFFLINE_CKPT_NEW_LOG',
+            N'WAIT_XTP_CKPT_CLOSE', N'XE_DISPATCHER_JOIN',
+            N'XE_DISPATCHER_WAIT', N'XE_TIMER_EVENT'
+          )
+          AND waiting_tasks_count > 0
+          ORDER BY wait_time_ms DESC
+        metrics:
+          - metric_name: mssql.wait.time_ms
+            value_column: wait_time_ms
+            value_type: gauge
+            unit: "ms"
+            attribute_columns: [wait_type]
+          - metric_name: mssql.wait.tasks_count
+            value_column: waiting_tasks_count
+            value_type: gauge
+            unit: "{tasks}"
+            attribute_columns: [wait_type]
+          - metric_name: mssql.wait.percentage
+            value_column: wait_percentage
+            value_type: gauge
+            unit: "%"
+            attribute_columns: [wait_type]
+
+  # ============================================
+  # ACTIVE SESSION MONITORING
+  # ============================================
+  sqlquery/active_sessions:
+    driver: sqlserver
+    datasource: "sqlserver://${env:MSSQL_USER:sa}:${env:MSSQL_PASSWORD}@${env:MSSQL_HOST:localhost}:${env:MSSQL_PORT:1433}?database=master&connection+timeout=30&TrustServerCertificate=true"
+    collection_interval: 5s
+    queries:
+      # Active requests and blocking
+      - sql: |
+          SELECT 
+            r.session_id,
+            r.status,
+            r.command,
+            r.wait_type,
+            r.wait_time,
+            r.wait_resource,
+            r.blocking_session_id,
+            r.cpu_time,
+            r.total_elapsed_time,
+            r.reads,
+            r.writes,
+            r.logical_reads,
+            DB_NAME(r.database_id) as database_name,
+            t.text as query_text,
+            p.query_plan
+          FROM sys.dm_exec_requests r
+          CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+          CROSS APPLY sys.dm_exec_query_plan(r.plan_handle) p
+          WHERE r.session_id != @@SPID
+            AND r.session_id > 50
+        metrics:
+          - metric_name: mssql.session.active_count
+            value_column: session_id
+            value_type: gauge
+            unit: "{sessions}"
+            attribute_columns: [status, command, wait_type, database_name]
+            aggregation: count
+          - metric_name: mssql.session.wait_time
+            value_column: wait_time
+            value_type: gauge
+            unit: "ms"
+            attribute_columns: [wait_type, database_name]
+          - metric_name: mssql.session.cpu_time
+            value_column: cpu_time
+            value_type: gauge
+            unit: "ms"
+            attribute_columns: [command, database_name]
+          - metric_name: mssql.session.blocked_count
+            value_column: blocking_session_id
+            value_type: gauge
+            unit: "{sessions}"
+            attribute_columns: [wait_type, database_name]
+            aggregation: count
+
+  # ============================================
+  # INDEX USAGE AND FRAGMENTATION
+  # ============================================
+  sqlquery/index_stats:
+    driver: sqlserver
+    datasource: "sqlserver://${env:MSSQL_USER:sa}:${env:MSSQL_PASSWORD}@${env:MSSQL_HOST:localhost}:${env:MSSQL_PORT:1433}?database=master&connection+timeout=30&TrustServerCertificate=true"
+    collection_interval: 300s
+    queries:
+      # Index usage stats
+      - sql: |
+          SELECT 
+            DB_NAME(database_id) as database_name,
+            OBJECT_NAME(s.object_id, s.database_id) as table_name,
+            i.name as index_name,
+            i.type_desc as index_type,
+            s.user_seeks,
+            s.user_scans,
+            s.user_lookups,
+            s.user_updates,
+            s.last_user_seek,
+            s.last_user_scan,
+            s.last_user_lookup,
+            s.last_user_update,
+            ps.avg_fragmentation_in_percent,
+            ps.page_count
+          FROM sys.dm_db_index_usage_stats s
+          INNER JOIN sys.indexes i ON s.object_id = i.object_id AND s.index_id = i.index_id
+          INNER JOIN sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, 'LIMITED') ps
+            ON s.object_id = ps.object_id AND s.index_id = ps.index_id
+          WHERE database_id > 4
+            AND s.object_id > 100
+            AND ps.page_count > 100
+          ORDER BY s.user_seeks + s.user_scans + s.user_lookups DESC
+        metrics:
+          - metric_name: mssql.index.seeks
+            value_column: user_seeks
+            value_type: gauge
+            unit: "{operations}"
+            attribute_columns: [database_name, table_name, index_name, index_type]
+          - metric_name: mssql.index.scans
+            value_column: user_scans
+            value_type: gauge
+            unit: "{operations}"
+            attribute_columns: [database_name, table_name, index_name, index_type]
+          - metric_name: mssql.index.updates
+            value_column: user_updates
+            value_type: gauge
+            unit: "{operations}"
+            attribute_columns: [database_name, table_name, index_name, index_type]
+          - metric_name: mssql.index.fragmentation
+            value_column: avg_fragmentation_in_percent
+            value_type: gauge
+            unit: "%"
+            attribute_columns: [database_name, table_name, index_name]
+
+  # ============================================
+  # ALWAYS ON AVAILABILITY GROUPS
+  # ============================================
+  sqlquery/alwayson:
+    driver: sqlserver
+    datasource: "sqlserver://${env:MSSQL_USER:sa}:${env:MSSQL_PASSWORD}@${env:MSSQL_HOST:localhost}:${env:MSSQL_PORT:1433}?database=master&connection+timeout=30&TrustServerCertificate=true"
+    collection_interval: 30s
+    queries:
+      # AG health and sync status
+      - sql: |
+          SELECT 
+            ag.name as ag_name,
+            ar.replica_server_name,
+            ar.availability_mode_desc,
+            ars.role_desc,
+            ars.operational_state_desc,
+            ars.connected_state_desc,
+            ars.synchronization_health_desc,
+            db.database_name,
+            drs.synchronization_state_desc,
+            drs.log_send_queue_size,
+            drs.log_send_rate,
+            drs.redo_queue_size,
+            drs.redo_rate,
+            drs.last_commit_time
+          FROM sys.availability_groups ag
+          JOIN sys.availability_replicas ar ON ag.group_id = ar.group_id
+          JOIN sys.dm_hadr_availability_replica_states ars ON ar.replica_id = ars.replica_id
+          JOIN sys.availability_databases_cluster db ON ag.group_id = db.group_id
+          LEFT JOIN sys.dm_hadr_database_replica_states drs 
+            ON db.group_id = drs.group_id AND db.group_database_id = drs.group_database_id
+        metrics:
+          - metric_name: mssql.alwayson.log_send_queue
+            value_column: log_send_queue_size
+            value_type: gauge
+            unit: "KB"
+            attribute_columns: [ag_name, replica_server_name, database_name]
+          - metric_name: mssql.alwayson.redo_queue
+            value_column: redo_queue_size
+            value_type: gauge
+            unit: "KB"
+            attribute_columns: [ag_name, replica_server_name, database_name]
+
+  # ============================================
+  # TEMPDB MONITORING
+  # ============================================
+  sqlquery/tempdb:
+    driver: sqlserver
+    datasource: "sqlserver://${env:MSSQL_USER:sa}:${env:MSSQL_PASSWORD}@${env:MSSQL_HOST:localhost}:${env:MSSQL_PORT:1433}?database=master&connection+timeout=30&TrustServerCertificate=true"
+    collection_interval: 60s
+    queries:
+      # TempDB usage
+      - sql: |
+          SELECT 
+            SUM(user_object_reserved_page_count) * 8 as user_objects_kb,
+            SUM(internal_object_reserved_page_count) * 8 as internal_objects_kb,
+            SUM(version_store_reserved_page_count) * 8 as version_store_kb,
+            SUM(unallocated_extent_page_count) * 8 as free_space_kb,
+            SUM(mixed_extent_page_count) * 8 as mixed_extent_kb
+          FROM sys.dm_db_file_space_usage
+          WHERE database_id = 2
+        metrics:
+          - metric_name: mssql.tempdb.user_objects
+            value_column: user_objects_kb
+            value_type: gauge
+            unit: "KB"
+          - metric_name: mssql.tempdb.internal_objects
+            value_column: internal_objects_kb
+            value_type: gauge
+            unit: "KB"
+          - metric_name: mssql.tempdb.version_store
+            value_column: version_store_kb
+            value_type: gauge
+            unit: "KB"
+          - metric_name: mssql.tempdb.free_space
+            value_column: free_space_kb
+            value_type: gauge
+            unit: "KB"
+
+  # ============================================
+  # HOST METRICS
+  # ============================================
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.connections:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      process:
+        metrics:
+          process.cpu.utilization:
+            enabled: true
+          process.memory.utilization:
+            enabled: true
+
+processors:
+  # ============================================
+  # MEMORY MANAGEMENT
+  # ============================================
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  # ============================================
+  # BATCH PROCESSING
+  # ============================================
+  batch:
+    send_batch_size: 10000
+    timeout: 10s
+    send_batch_max_size: 11000
+
+  # ============================================
+  # RESOURCE DETECTION
+  # ============================================
+  resource:
+    attributes:
+      - key: deployment.mode
+        value: config-only-maximum
+        action: upsert
+      - key: database.type
+        value: mssql
+        action: upsert
+      - key: collector.name
+        value: database-intelligence-mssql
+        action: upsert
+
+  # ============================================
+  # METRIC TRANSFORMATIONS
+  # ============================================
+  transform/add_metadata:
+    metric_statements:
+      # Classify wait types
+      - context: metric
+        statements:
+          - set(attributes["wait.category"], "cpu") where name == "mssql.wait.time_ms" and attributes["wait_type"] == "SOS_SCHEDULER_YIELD"
+          - set(attributes["wait.category"], "io") where name == "mssql.wait.time_ms" and IsMatch(attributes["wait_type"], "PAGEIO.*")
+          - set(attributes["wait.category"], "lock") where name == "mssql.wait.time_ms" and IsMatch(attributes["wait_type"], "LCK_.*")
+          - set(attributes["wait.category"], "memory") where name == "mssql.wait.time_ms" and IsMatch(attributes["wait_type"], "RESOURCE_SEM.*")
+          - set(attributes["wait.category"], "network") where name == "mssql.wait.time_ms" and IsMatch(attributes["wait_type"], "ASYNC_NETWORK_IO")
+      
+      # Classify query performance
+      - context: metric
+        statements:
+          - set(attributes["query.performance"], "fast") where name == "mssql.query.avg_elapsed_time" and value < 1000
+          - set(attributes["query.performance"], "normal") where name == "mssql.query.avg_elapsed_time" and value >= 1000 and value < 10000
+          - set(attributes["query.performance"], "slow") where name == "mssql.query.avg_elapsed_time" and value >= 10000
+
+  # ============================================
+  # FILTERING
+  # ============================================
+  filter/reduce_cardinality:
+    metrics:
+      metric:
+        # Filter out system databases if needed
+        - 'attributes["database_name"] == "tempdb" or attributes["database_name"] == "model" or attributes["database_name"] == "msdb"'
+
+exporters:
+  # ============================================
+  # NEW RELIC EXPORTER
+  # ============================================
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # ============================================
+  # LOCAL DEBUGGING
+  # ============================================
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # ============================================
+  # PROMETHEUS ENDPOINT
+  # ============================================
+  prometheus:
+    endpoint: "0.0.0.0:8893"
+    namespace: db_mssql
+    const_labels:
+      deployment.mode: config_only_maximum
+
+service:
+  pipelines:
+    # ============================================
+    # HIGH FREQUENCY METRICS (5s)
+    # ============================================
+    metrics/high_frequency:
+      receivers: [sqlquery/active_sessions]
+      processors: [memory_limiter, resource, transform/add_metadata, batch]
+      exporters: [otlp/newrelic]
+
+    # ============================================
+    # STANDARD METRICS (10s)
+    # ============================================
+    metrics/standard:
+      receivers: [sqlserver, sqlquery/wait_stats, hostmetrics]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/newrelic]
+
+    # ============================================
+    # PERFORMANCE METRICS (30s)
+    # ============================================
+    metrics/performance:
+      receivers: [sqlquery/query_stats, sqlquery/alwayson]
+      processors: [memory_limiter, resource, transform/add_metadata, filter/reduce_cardinality, batch]
+      exporters: [otlp/newrelic]
+
+    # ============================================
+    # ANALYTICS METRICS (60-300s)
+    # ============================================
+    metrics/analytics:
+      receivers: [sqlquery/tempdb, sqlquery/index_stats]
+      processors: [memory_limiter, resource, filter/reduce_cardinality, batch]
+      exporters: [otlp/newrelic]
+
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  extensions: [health_check, pprof, zpages]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679

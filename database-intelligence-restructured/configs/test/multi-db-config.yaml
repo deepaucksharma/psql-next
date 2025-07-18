@@ -1,0 +1,214 @@
+receivers:
+  # PostgreSQL receivers
+  postgresql/primary:
+    endpoint: postgres-primary:5432
+    username: postgres
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - testdb
+    collection_interval: 30s
+    resource_attributes:
+      db.deployment.environment: test
+      db.postgresql.role: primary
+
+  postgresql/replica:
+    endpoint: postgres-replica:5432
+    username: postgres
+    password: ${env:POSTGRES_PASSWORD}
+    databases:
+      - testdb
+    collection_interval: 30s
+    resource_attributes:
+      db.deployment.environment: test
+      db.postgresql.role: replica
+
+  enhancedsql/postgres:
+    driver: postgres
+    datasource: "host=postgres-primary port=5432 user=postgres password=${env:POSTGRES_PASSWORD} dbname=testdb sslmode=disable"
+    collection_interval: 60s
+    feature_detection:
+      enabled: true
+
+  ash:
+    driver: postgres
+    datasource: "host=postgres-primary port=5432 user=postgres password=${env:POSTGRES_PASSWORD} dbname=testdb sslmode=disable"
+    buffer_size: 10000
+    collection_interval: 10s
+
+  # MySQL receivers
+  mysql/primary:
+    endpoint: mysql-primary:3306
+    username: root
+    password: ${env:MYSQL_PASSWORD}
+    database: testdb
+    collection_interval: 30s
+    resource_attributes:
+      db.deployment.environment: test
+      db.mysql.role: primary
+
+  mysql/replica:
+    endpoint: mysql-replica:3306
+    username: root
+    password: ${env:MYSQL_PASSWORD}
+    database: testdb
+    collection_interval: 30s
+    resource_attributes:
+      db.deployment.environment: test
+      db.mysql.role: replica
+
+  enhancedsql/mysql:
+    driver: mysql
+    datasource: "root:${env:MYSQL_PASSWORD}@tcp(mysql-primary:3306)/testdb"
+    collection_interval: 60s
+
+  # MongoDB receiver
+  mongodb:
+    uri: mongodb://admin:${env:MONGODB_PASSWORD}@mongodb-primary:27017,mongodb-secondary:27017,mongodb-arbiter:27017/?replicaSet=rs0
+    collection_interval: 30s
+    replica_set:
+      enabled: true
+      collect_oplog_metrics: true
+      collect_repl_lag_metrics: true
+    metrics:
+      server_status: true
+      database_stats: true
+      collection_stats: true
+      index_stats: true
+      wired_tiger: true
+    resource_attributes:
+      db.deployment.environment: test
+
+  # Redis receivers
+  redis/master:
+    endpoint: redis-master:6379
+    password: ${env:REDIS_PASSWORD}
+    collection_interval: 30s
+    metrics:
+      server_info:
+        server: true
+        clients: true
+        memory: true
+        persistence: true
+        stats: true
+        replication: true
+        cpu: true
+      command_stats: true
+      latency_stats: true
+      memory_stats: true
+    resource_attributes:
+      db.deployment.environment: test
+      db.redis.role: master
+
+  redis/slave:
+    endpoint: redis-slave:6379
+    password: ${env:REDIS_PASSWORD}
+    collection_interval: 30s
+    resource_attributes:
+      db.deployment.environment: test
+      db.redis.role: slave
+
+  redis/sentinel:
+    endpoint: redis-master:6379
+    password: ${env:REDIS_PASSWORD}
+    sentinel:
+      enabled: true
+      master_name: mymaster
+      sentinel_addrs:
+        - redis-sentinel:26379
+      collect_sentinel_metrics: true
+    collection_interval: 60s
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  querycorrelator:
+    retention_period: 24h
+    max_queries_tracked: 10000
+
+  adaptivesampler:
+    mode: adaptive
+    initial_sampling_rate: 1.0
+    target_records_per_second: 1000
+
+  circuitbreaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 30s
+    max_requests: 100
+
+exporters:
+  # Prometheus for local monitoring
+  prometheus:
+    endpoint: "0.0.0.0:8888"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # New Relic export (if license key provided)
+  otlp/newrelic:
+    endpoint: otlp.nr-data.net:4317
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["stdout", "/var/log/db-intel/collector.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8889
+
+  extensions: [health_check, pprof, zpages]
+
+  pipelines:
+    # PostgreSQL pipelines
+    metrics/postgresql:
+      receivers: [postgresql/primary, postgresql/replica, enhancedsql/postgres, ash]
+      processors: [querycorrelator, batch]
+      exporters: [prometheus, otlp/newrelic]
+
+    # MySQL pipelines  
+    metrics/mysql:
+      receivers: [mysql/primary, mysql/replica, enhancedsql/mysql]
+      processors: [batch]
+      exporters: [prometheus, otlp/newrelic]
+
+    # MongoDB pipeline
+    metrics/mongodb:
+      receivers: [mongodb]
+      processors: [adaptivesampler, batch]
+      exporters: [prometheus, otlp/newrelic]
+
+    # Redis pipelines
+    metrics/redis:
+      receivers: [redis/master, redis/slave]
+      processors: [batch]
+      exporters: [prometheus, otlp/newrelic]
+
+    metrics/redis-sentinel:
+      receivers: [redis/sentinel]
+      processors: [batch]
+      exporters: [prometheus, otlp/newrelic]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  zpages:
+    endpoint: 0.0.0.0:55679

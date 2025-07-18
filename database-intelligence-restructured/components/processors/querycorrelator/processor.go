@@ -15,7 +15,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
 	
-	"github.com/deepaksharma/db-otel/components/internal/boundedmap"
+	"github.com/database-intelligence/db-intel/components/internal/boundedmap"
 )
 
 // queryCorrelator correlates individual query metrics with database and table metrics
@@ -222,13 +222,16 @@ func (p *queryCorrelator) indexTableMetric(metric pmetric.Metric) {
 		}
 		
 		key := fmt.Sprintf("%s.%s", schema.Str(), table.Str())
-		tbl, exists := p.tableIndex[key]
+		tblVal, exists := p.tableIndex.Get(key)
+		var tbl *tableInfo
 		if !exists {
 			tbl = &tableInfo{
 				schema: schema.Str(),
 				table:  table.Str(),
 			}
-			p.tableIndex[key] = tbl
+			p.tableIndex.Put(key, tbl)
+		} else {
+			tbl = tblVal.(*tableInfo)
 		}
 		
 		// Update table info
@@ -266,12 +269,15 @@ func (p *queryCorrelator) indexDatabaseMetric(metric pmetric.Metric) {
 			continue
 		}
 		
-		db, exists := p.databaseIndex[dbName.Str()]
+		dbVal, exists := p.databaseIndex.Get(dbName.Str())
+		var db *databaseInfo
 		if !exists {
 			db = &databaseInfo{
 				name: dbName.Str(),
 			}
-			p.databaseIndex[dbName.Str()] = db
+			p.databaseIndex.Put(dbName.Str(), db)
+		} else {
+			db = dbVal.(*databaseInfo)
 		}
 		
 		// Update database info
@@ -412,7 +418,8 @@ func (p *queryCorrelator) addCorrelationAttributes(attrs pcommon.Map) {
 			attrs.PutStr("correlation.table", query.primaryTable)
 			
 			// Look up table info
-			if tbl, exists := p.tableIndex[query.primaryTable]; exists {
+			if tblVal, exists := p.tableIndex.Get(query.primaryTable); exists {
+				tbl := tblVal.(*tableInfo)
 				attrs.PutInt("table.modifications", tbl.modifications)
 				attrs.PutInt("table.dead_tuples", tbl.deadTuples)
 				
@@ -424,7 +431,8 @@ func (p *queryCorrelator) addCorrelationAttributes(attrs pcommon.Map) {
 		}
 		
 		// Add database correlation
-		if db, exists := p.databaseIndex[query.database]; exists {
+		if dbVal, exists := p.databaseIndex.Get(query.database); exists {
+			db := dbVal.(*databaseInfo)
 			attrs.PutInt("database.active_backends", db.activeBackends)
 			
 			// Calculate query's contribution to database load
@@ -496,7 +504,6 @@ func (p *queryCorrelator) cleanupOldData() {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	
-	cutoff := time.Now().Add(-p.config.RetentionPeriod)
 	
 	// Clean up old queries using the bounded map's cleanup method
 	removed := p.queryIndex.CleanupOlderThan(p.config.RetentionPeriod)

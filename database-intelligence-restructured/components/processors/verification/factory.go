@@ -52,7 +52,8 @@ func createLogsProcessor(
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 	
-	vp, err := newVerificationProcessor(set.Logger, vCfg, nextConsumer)
+	// Create concurrent version for better performance
+	vp, err := NewConcurrentVerificationProcessor(set.Logger, vCfg, nextConsumer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create verification processor: %w", err)
 	}

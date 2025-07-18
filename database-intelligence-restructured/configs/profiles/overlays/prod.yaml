@@ -1,0 +1,48 @@
+# Production Environment Overlay
+# Apply with: --config=profiles/[profile].yaml --config=profiles/overlays/prod.yaml
+
+processors:
+  memory_limiter:
+    limit_mib: 4096  # Production memory limit
+    spike_limit_mib: 1024
+    
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+    
+  # Production-specific sampling
+  adaptivesampler:
+    min_samples_per_second: 100
+    max_samples_per_second: 10000
+    target_heap_usage: 0.8
+    
+exporters:
+  otlphttp:
+    endpoint: ${env:PROD_OTLP_ENDPOINT}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 300s
+      max_elapsed_time: 900s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+      
+service:
+  telemetry:
+    logs:
+      level: warn
+      sampling:
+        initial: 100
+        thereafter: 10000
+    metrics:
+      level: basic
+      
+  # Production resource limits
+  resource:
+    limits:
+      memory_limit_mib: 4096
+      cpu_limit: 4.0

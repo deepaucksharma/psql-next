@@ -1,0 +1,433 @@
+# Advanced PostgreSQL Query Templates for SQLQuery Receiver
+# These queries extract deep insights without any custom code
+
+receivers:
+  # ============================================
+  # QUERY PLAN ANALYSIS (WITHOUT pg_stat_statements)
+  # ============================================
+  sqlquery/query_plans:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:localhost} port=${env:POSTGRES_PORT:5432} user=${env:POSTGRES_USER:postgres} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DB:postgres} sslmode=disable"
+    collection_interval: 60s
+    queries:
+      # Extract execution plans for currently running queries
+      - sql: |
+          WITH running_queries AS (
+            SELECT 
+              pid,
+              query,
+              state,
+              query_start,
+              EXTRACT(EPOCH FROM (NOW() - query_start)) as runtime_seconds
+            FROM pg_stat_activity
+            WHERE state = 'active' 
+              AND pid != pg_backend_pid()
+              AND query NOT LIKE '%pg_stat_activity%'
+              AND NOW() - query_start > INTERVAL '1 second'
+          )
+          SELECT 
+            pid,
+            LEFT(query, 100) as query_sample,
+            runtime_seconds,
+            pg_size_pretty(pg_database_size(current_database())) as database_size
+          FROM running_queries
+          ORDER BY runtime_seconds DESC
+          LIMIT 10
+        metrics:
+          - metric_name: postgresql.running_query.duration
+            value_column: runtime_seconds
+            value_type: gauge
+            unit: s
+            attribute_columns: [pid, query_sample]
+
+  # ============================================
+  # CONNECTION POOL ANALYSIS
+  # ============================================
+  sqlquery/connection_pool:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:localhost} port=${env:POSTGRES_PORT:5432} user=${env:POSTGRES_USER:postgres} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DB:postgres} sslmode=disable"
+    collection_interval: 10s
+    queries:
+      # Connection pool efficiency
+      - sql: |
+          WITH connection_stats AS (
+            SELECT 
+              datname,
+              usename,
+              application_name,
+              client_addr::text as client_address,
+              state,
+              COUNT(*) as connection_count,
+              COUNT(*) FILTER (WHERE state = 'active') as active_connections,
+              COUNT(*) FILTER (WHERE state = 'idle') as idle_connections,
+              COUNT(*) FILTER (WHERE state = 'idle in transaction') as idle_in_transaction,
+              COUNT(*) FILTER (WHERE state_change < NOW() - INTERVAL '10 minutes') as stale_connections,
+              MAX(EXTRACT(EPOCH FROM (NOW() - state_change))) as max_idle_time,
+              AVG(EXTRACT(EPOCH FROM (NOW() - state_change))) as avg_idle_time
+            FROM pg_stat_activity
+            WHERE pid != pg_backend_pid()
+            GROUP BY datname, usename, application_name, client_addr, state
+          )
+          SELECT 
+            datname,
+            usename,
+            application_name,
+            client_address,
+            state,
+            connection_count,
+            active_connections,
+            idle_connections,
+            idle_in_transaction,
+            stale_connections,
+            max_idle_time,
+            avg_idle_time,
+            CASE 
+              WHEN connection_count > 0 THEN ROUND((active_connections::float / connection_count::float * 100)::numeric, 2)
+              ELSE 0 
+            END as active_connection_percentage
+          FROM connection_stats
+        metrics:
+          - metric_name: postgresql.connection_pool.total
+            value_column: connection_count
+            value_type: gauge
+            unit: "{connections}"
+            attribute_columns: [datname, usename, application_name, client_address, state]
+          - metric_name: postgresql.connection_pool.active
+            value_column: active_connections
+            value_type: gauge
+            unit: "{connections}"
+            attribute_columns: [datname, usename, application_name, client_address]
+          - metric_name: postgresql.connection_pool.idle
+            value_column: idle_connections
+            value_type: gauge
+            unit: "{connections}"
+            attribute_columns: [datname, usename, application_name, client_address]
+          - metric_name: postgresql.connection_pool.idle_in_transaction
+            value_column: idle_in_transaction
+            value_type: gauge
+            unit: "{connections}"
+            attribute_columns: [datname, usename, application_name, client_address]
+          - metric_name: postgresql.connection_pool.stale
+            value_column: stale_connections
+            value_type: gauge
+            unit: "{connections}"
+            attribute_columns: [datname, usename, application_name, client_address]
+          - metric_name: postgresql.connection_pool.max_idle_time
+            value_column: max_idle_time
+            value_type: gauge
+            unit: s
+            attribute_columns: [datname, usename, application_name, client_address, state]
+          - metric_name: postgresql.connection_pool.avg_idle_time
+            value_column: avg_idle_time
+            value_type: gauge
+            unit: s
+            attribute_columns: [datname, usename, application_name, client_address, state]
+          - metric_name: postgresql.connection_pool.active_percentage
+            value_column: active_connection_percentage
+            value_type: gauge
+            unit: "%"
+            attribute_columns: [datname, usename, application_name, client_address, state]
+
+  # ============================================
+  # VACUUM AND MAINTENANCE ANALYSIS
+  # ============================================
+  sqlquery/maintenance:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:localhost} port=${env:POSTGRES_PORT:5432} user=${env:POSTGRES_USER:postgres} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DB:postgres} sslmode=disable"
+    collection_interval: 300s  # 5 minutes
+    queries:
+      # Vacuum progress monitoring
+      - sql: |
+          SELECT 
+            p.datname,
+            p.phase,
+            p.heap_blks_total,
+            p.heap_blks_scanned,
+            p.heap_blks_vacuumed,
+            p.index_vacuum_count,
+            p.max_dead_tuples,
+            p.num_dead_tuples,
+            CASE WHEN p.heap_blks_total > 0 
+              THEN ROUND((p.heap_blks_scanned::float / p.heap_blks_total::float * 100)::numeric, 2)
+              ELSE 0 
+            END as scan_progress_percent,
+            EXTRACT(EPOCH FROM (NOW() - a.query_start)) as vacuum_duration_seconds
+          FROM pg_stat_progress_vacuum p
+          JOIN pg_stat_activity a ON p.pid = a.pid
+        metrics:
+          - metric_name: postgresql.vacuum.progress.heap_blocks_total
+            value_column: heap_blks_total
+            value_type: gauge
+            unit: "{blocks}"
+            attribute_columns: [datname, phase]
+          - metric_name: postgresql.vacuum.progress.heap_blocks_scanned
+            value_column: heap_blks_scanned
+            value_type: gauge
+            unit: "{blocks}"
+            attribute_columns: [datname, phase]
+          - metric_name: postgresql.vacuum.progress.percent_complete
+            value_column: scan_progress_percent
+            value_type: gauge
+            unit: "%"
+            attribute_columns: [datname, phase]
+          - metric_name: postgresql.vacuum.duration
+            value_column: vacuum_duration_seconds
+            value_type: gauge
+            unit: s
+            attribute_columns: [datname, phase]
+
+      # Table bloat estimation
+      - sql: |
+          WITH constants AS (
+            SELECT current_setting('block_size')::numeric AS bs, 23 AS hdr, 8 AS ma
+          ),
+          no_stats AS (
+            SELECT table_schema, table_name, 
+              n_live_tup::numeric as est_rows,
+              pg_table_size(relid)::numeric as table_size
+            FROM information_schema.columns
+            JOIN pg_stat_user_tables as psut ON table_schema=psut.schemaname AND table_name=psut.tablename
+            WHERE not exists (SELECT 1 FROM pg_stats WHERE schemaname=table_schema AND tablename=table_name)
+            GROUP BY table_schema, table_name, relid, n_live_tup
+          ),
+          null_headers AS (
+            SELECT
+              hdr+1+(sum(case when null_frac <> 0 THEN 1 else 0 END)/8) as nullhdr,
+              SUM((1-null_frac)*avg_width) as datawidth,
+              MAX(null_frac) as maxfracsum,
+              schemaname,
+              tablename,
+              hdr, ma, bs
+            FROM pg_stats CROSS JOIN constants
+            GROUP BY schemaname, tablename, hdr, ma, bs
+          ),
+          data_headers AS (
+            SELECT
+              ma, bs, hdr, schemaname, tablename,
+              (datawidth+(hdr+ma-(case when hdr%ma=0 THEN ma ELSE hdr%ma END)))::numeric AS datahdr,
+              (maxfracsum*(nullhdr+ma-(case when nullhdr%ma=0 THEN ma ELSE nullhdr%ma END))) AS nullhdr2
+            FROM null_headers
+          ),
+          table_estimates AS (
+            SELECT schemaname, tablename, bs,
+              reltuples::numeric as est_rows, relpages * bs as table_bytes,
+              CEIL((reltuples*
+                    (datahdr + nullhdr2 + 4 + ma -
+                      (CASE WHEN datahdr%ma=0 THEN ma ELSE datahdr%ma END)
+                    )/(bs-20))) * bs AS expected_bytes
+            FROM data_headers
+            JOIN pg_class ON tablename = relname
+            JOIN pg_namespace ON relnamespace = pg_namespace.oid AND schemaname = nspname
+            WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+          ),
+          table_bloat AS (
+            SELECT current_database() as databasename, schemaname, tablename,
+              ROUND((table_bytes / (1024 * 1024))::numeric, 2) AS table_mb,
+              ROUND((expected_bytes / (1024 * 1024))::numeric, 2) AS expected_mb,
+              ROUND((((table_bytes - expected_bytes)::numeric / table_bytes::numeric) * 100)::numeric, 2) AS bloat_pct
+            FROM table_estimates
+            WHERE table_bytes > 0 AND expected_bytes > 0 AND table_bytes > expected_bytes
+          )
+          SELECT schemaname, tablename, table_mb, expected_mb, bloat_pct
+          FROM table_bloat
+          WHERE bloat_pct > 20 AND table_mb > 10
+          ORDER BY bloat_pct DESC
+          LIMIT 20
+        metrics:
+          - metric_name: postgresql.table.size_mb
+            value_column: table_mb
+            value_type: gauge
+            unit: MB
+            attribute_columns: [schemaname, tablename]
+          - metric_name: postgresql.table.expected_size_mb
+            value_column: expected_mb
+            value_type: gauge
+            unit: MB
+            attribute_columns: [schemaname, tablename]
+          - metric_name: postgresql.table.bloat_percent
+            value_column: bloat_pct
+            value_type: gauge
+            unit: "%"
+            attribute_columns: [schemaname, tablename]
+
+  # ============================================
+  # SECURITY AND COMPLIANCE MONITORING
+  # ============================================
+  sqlquery/security:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:localhost} port=${env:POSTGRES_PORT:5432} user=${env:POSTGRES_USER:postgres} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DB:postgres} sslmode=disable"
+    collection_interval: 300s
+    queries:
+      # User privilege audit
+      - sql: |
+          WITH role_members AS (
+            SELECT 
+              r.rolname as role,
+              m.rolname as member,
+              g.admin_option
+            FROM pg_roles r
+            JOIN pg_auth_members a ON r.oid = a.roleid
+            JOIN pg_roles m ON a.member = m.oid
+            LEFT JOIN pg_auth_members g ON r.oid = g.roleid AND g.admin_option = true
+          )
+          SELECT 
+            rolname,
+            rolsuper as is_superuser,
+            rolinherit as can_inherit,
+            rolcreaterole as can_create_role,
+            rolcreatedb as can_create_db,
+            rolcanlogin as can_login,
+            rolreplication as can_replicate,
+            rolbypassrls as bypass_rls,
+            rolconnlimit as connection_limit,
+            EXTRACT(EPOCH FROM (NOW() - rolvaliduntil)) as password_age_seconds,
+            COUNT(DISTINCT member) as member_count
+          FROM pg_roles
+          LEFT JOIN role_members rm ON pg_roles.rolname = rm.role
+          WHERE rolname NOT LIKE 'pg_%'
+          GROUP BY rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, 
+                   rolcanlogin, rolreplication, rolbypassrls, rolconnlimit, rolvaliduntil
+        metrics:
+          - metric_name: postgresql.security.superuser_count
+            value_column: is_superuser
+            value_type: gauge
+            unit: "{users}"
+            attribute_columns: [rolname]
+            aggregation: sum
+          - metric_name: postgresql.security.login_enabled_count
+            value_column: can_login
+            value_type: gauge
+            unit: "{users}"
+            attribute_columns: [rolname]
+            aggregation: sum
+          - metric_name: postgresql.security.password_age
+            value_column: password_age_seconds
+            value_type: gauge
+            unit: s
+            attribute_columns: [rolname]
+          - metric_name: postgresql.security.role_member_count
+            value_column: member_count
+            value_type: gauge
+            unit: "{members}"
+            attribute_columns: [rolname]
+
+      # SSL connection monitoring
+      - sql: |
+          SELECT 
+            ssl,
+            version as ssl_version,
+            cipher as ssl_cipher,
+            bits as ssl_bits,
+            compression as ssl_compression,
+            COUNT(*) as connection_count
+          FROM pg_stat_ssl
+          JOIN pg_stat_activity ON pg_stat_ssl.pid = pg_stat_activity.pid
+          WHERE pg_stat_activity.pid != pg_backend_pid()
+          GROUP BY ssl, version, cipher, bits, compression
+        metrics:
+          - metric_name: postgresql.security.ssl_connections
+            value_column: connection_count
+            value_type: gauge
+            unit: "{connections}"
+            attribute_columns: [ssl, ssl_version, ssl_cipher, ssl_bits, ssl_compression]
+
+  # ============================================
+  # EXTENSION-SPECIFIC MONITORING
+  # ============================================
+  sqlquery/extensions:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:localhost} port=${env:POSTGRES_PORT:5432} user=${env:POSTGRES_USER:postgres} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DB:postgres} sslmode=disable"
+    collection_interval: 3600s  # 1 hour
+    queries:
+      # Installed extensions
+      - sql: |
+          SELECT 
+            extname,
+            extversion,
+            extnamespace::regnamespace as schema,
+            extrelocatable as is_relocatable,
+            pg_size_pretty(pg_database_size(current_database())) as database_size
+          FROM pg_extension
+          WHERE extname NOT IN ('plpgsql')
+        metrics:
+          - metric_name: postgresql.extensions.installed
+            value_column: is_relocatable
+            value_type: gauge
+            unit: "{extensions}"
+            attribute_columns: [extname, extversion, schema]
+            aggregation: count
+
+      # pg_stat_statements specific metrics (if available)
+      - sql: |
+          SELECT 
+            CASE WHEN EXISTS (
+              SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'
+            ) THEN 1 ELSE 0 END as pg_stat_statements_available,
+            CASE WHEN EXISTS (
+              SELECT 1 FROM pg_extension WHERE extname = 'pg_buffercache'
+            ) THEN 1 ELSE 0 END as pg_buffercache_available,
+            CASE WHEN EXISTS (
+              SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_kcache'
+            ) THEN 1 ELSE 0 END as pg_stat_kcache_available,
+            CASE WHEN EXISTS (
+              SELECT 1 FROM pg_extension WHERE extname = 'auto_explain'
+            ) THEN 1 ELSE 0 END as auto_explain_available
+        metrics:
+          - metric_name: postgresql.extensions.pg_stat_statements_available
+            value_column: pg_stat_statements_available
+            value_type: gauge
+            unit: "{available}"
+          - metric_name: postgresql.extensions.pg_buffercache_available
+            value_column: pg_buffercache_available
+            value_type: gauge
+            unit: "{available}"
+          - metric_name: postgresql.extensions.pg_stat_kcache_available
+            value_column: pg_stat_kcache_available
+            value_type: gauge
+            unit: "{available}"
+          - metric_name: postgresql.extensions.auto_explain_available
+            value_column: auto_explain_available
+            value_type: gauge
+            unit: "{available}"
+
+  # ============================================
+  # CUSTOM BUSINESS METRICS
+  # ============================================
+  sqlquery/business:
+    driver: postgres
+    datasource: "host=${env:POSTGRES_HOST:localhost} port=${env:POSTGRES_PORT:5432} user=${env:POSTGRES_USER:postgres} password=${env:POSTGRES_PASSWORD} dbname=${env:POSTGRES_DB:postgres} sslmode=disable"
+    collection_interval: 60s
+    queries:
+      # Example: Monitor specific application tables
+      - sql: |
+          SELECT 
+            'users' as table_name,
+            COUNT(*) as total_records,
+            COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as recent_records,
+            COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as daily_records
+          FROM pg_class
+          WHERE relname = 'users' AND relkind = 'r'
+          UNION ALL
+          SELECT 
+            'orders' as table_name,
+            COUNT(*) as total_records,
+            COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as recent_records,
+            COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as daily_records
+          FROM pg_class
+          WHERE relname = 'orders' AND relkind = 'r'
+        metrics:
+          - metric_name: postgresql.business.table_records_total
+            value_column: total_records
+            value_type: gauge
+            unit: "{records}"
+            attribute_columns: [table_name]
+          - metric_name: postgresql.business.table_records_hourly
+            value_column: recent_records
+            value_type: gauge
+            unit: "{records}"
+            attribute_columns: [table_name]
+          - metric_name: postgresql.business.table_records_daily
+            value_column: daily_records
+            value_type: gauge
+            unit: "{records}"
+            attribute_columns: [table_name]

@@ -2,21 +2,691 @@
 # This file includes all base component configurations
 # Use with environment-specific overlays
 
-# Include all component configurations
-# These files define available components but don't create pipelines
-# Actual component selection happens in mode files (config-only.yaml, enhanced.yaml)
+# =============================================================================
+# RECEIVERS
+# =============================================================================
 
-# Load receiver definitions
-${file:base/receivers.yaml}
+receivers:
+  # =============================================================================
+  # STANDARD RECEIVERS (Production Ready)
+  # =============================================================================
+  
+  # PostgreSQL native receiver
+  postgresql:
+    endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+    username: ${env:DB_POSTGRES_USER}
+    password: ${env:DB_POSTGRES_PASSWORD}
+    databases:
+      - ${env:DB_POSTGRES_DATABASE}
+    collection_interval: ${env:POSTGRES_COLLECTION_INTERVAL}
+    tls:
+      insecure: ${env:POSTGRES_TLS_INSECURE}
+      insecure_skip_verify: ${env:POSTGRES_TLS_SKIP_VERIFY}
+      ca_file: ${env:POSTGRES_CA_FILE}
+      cert_file: ${env:POSTGRES_CERT_FILE}
+      key_file: ${env:POSTGRES_KEY_FILE}
 
-# Load processor definitions  
-${file:base/processors.yaml}
+  # MySQL native receiver
+  mysql:
+    endpoint: ${env:DB_MYSQL_HOST}:${env:DB_MYSQL_PORT}
+    username: ${env:DB_MYSQL_USER}
+    password: ${env:DB_MYSQL_PASSWORD}
+    database: ${env:DB_MYSQL_DATABASE}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL}
+    tls:
+      insecure: ${env:MYSQL_TLS_INSECURE}
+      insecure_skip_verify: ${env:MYSQL_TLS_SKIP_VERIFY}
+      ca_file: ${env:MYSQL_CA_FILE}
+      cert_file: ${env:MYSQL_CERT_FILE}
+      key_file: ${env:MYSQL_KEY_FILE}
 
-# Load exporter definitions
-${file:base/exporters.yaml}
+  # SQL Query receiver for custom PostgreSQL queries
+  sqlquery/postgresql:
+    driver: postgres
+    datasource: "host=${env:DB_POSTGRES_HOST} port=${env:DB_POSTGRES_PORT} user=${env:DB_POSTGRES_USER} password=${env:DB_POSTGRES_PASSWORD} dbname=${env:DB_POSTGRES_DATABASE} sslmode=${env:POSTGRES_SSLMODE}"
+    collection_interval: ${env:POSTGRES_QUERY_INTERVAL}
+    queries:
+      # User activity monitoring
+      - sql: |
+          SELECT 
+            usename as username,
+            application_name,
+            client_addr,
+            state,
+            COUNT(*) as connection_count,
+            MAX(EXTRACT(EPOCH FROM (now() - state_change))) as max_connection_age_seconds,
+            COUNT(*) FILTER (WHERE state = 'active') as active_connections,
+            COUNT(*) FILTER (WHERE wait_event IS NOT NULL) as waiting_connections
+          FROM pg_stat_activity
+          WHERE pid != pg_backend_pid()
+          GROUP BY usename, application_name, client_addr, state
+        metrics:
+          - metric_name: db.postgresql.user.connections
+            value_column: connection_count
+            attribute_columns: [username, application_name, client_addr, state]
+            value_type: int
+          - metric_name: db.postgresql.user.connection.age.max
+            value_column: max_connection_age_seconds
+            attribute_columns: [username, application_name, client_addr, state]
+            value_type: double
+          - metric_name: db.postgresql.user.connections.active
+            value_column: active_connections
+            attribute_columns: [username, application_name, client_addr]
+            value_type: int
+          - metric_name: db.postgresql.user.connections.waiting
+            value_column: waiting_connections
+            attribute_columns: [username, application_name, client_addr]
+            value_type: int
 
-# Load extension definitions
-${file:base/extensions.yaml}
+      # Query performance statistics
+      - sql: |
+          SELECT 
+            queryid,
+            LEFT(query, 50) as query_text,
+            calls,
+            total_exec_time,
+            mean_exec_time,
+            stddev_exec_time,
+            rows,
+            100.0 * shared_blks_hit / NULLIF(shared_blks_hit + shared_blks_read, 0) AS cache_hit_ratio
+          FROM pg_stat_statements
+          WHERE query NOT LIKE '%pg_stat_statements%'
+          ORDER BY total_exec_time DESC
+          LIMIT 20
+        metrics:
+          - metric_name: db.postgresql.query.calls
+            value_column: calls
+            attribute_columns: [queryid, query_text]
+            value_type: int
+          - metric_name: db.postgresql.query.total_time
+            value_column: total_exec_time
+            attribute_columns: [queryid, query_text]
+            value_type: double
+          - metric_name: db.postgresql.query.mean_time
+            value_column: mean_exec_time
+            attribute_columns: [queryid, query_text]
+            value_type: double
+          - metric_name: db.postgresql.query.rows
+            value_column: rows
+            attribute_columns: [queryid, query_text]
+            value_type: int
+          - metric_name: db.postgresql.query.cache_hit_ratio
+            value_column: cache_hit_ratio
+            attribute_columns: [queryid, query_text]
+            value_type: double
+
+  # SQL Query receiver for custom MySQL queries
+  sqlquery/mysql:
+    driver: mysql
+    datasource: "${env:DB_MYSQL_USER}:${env:DB_MYSQL_PASSWORD}@tcp(${env:DB_MYSQL_HOST}:${env:DB_MYSQL_PORT})/${env:DB_MYSQL_DATABASE}"
+    collection_interval: ${env:MYSQL_QUERY_INTERVAL}
+    queries:
+      # User activity monitoring
+      - sql: |
+          SELECT 
+            user,
+            host,
+            db,
+            command,
+            state,
+            COUNT(*) as connection_count,
+            SUM(time) as total_time
+          FROM information_schema.processlist
+          WHERE id != CONNECTION_ID()
+          GROUP BY user, host, db, command, state
+        metrics:
+          - metric_name: db.mysql.user.connections
+            value_column: connection_count
+            attribute_columns: [user, host, db, command, state]
+            value_type: int
+          - metric_name: db.mysql.user.total_time
+            value_column: total_time
+            attribute_columns: [user, host, db, command, state]
+            value_type: double
+
+  # OTLP receiver for external metrics
+  otlp:
+    protocols:
+      grpc:
+        endpoint: ${env:OTLP_GRPC_ENDPOINT}
+      http:
+        endpoint: ${env:OTLP_HTTP_ENDPOINT}
+
+  # Prometheus receiver for scraping
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: ${env:PROMETHEUS_SCRAPE_INTERVAL}
+          static_configs:
+            - targets: ['localhost:8888']
+
+  # =============================================================================
+  # CUSTOM RECEIVERS (Require Enhanced Build)
+  # =============================================================================
+  
+  # Active Session History receiver
+  ash:
+    endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+    username: ${env:DB_POSTGRES_USER}
+    password: ${env:DB_POSTGRES_PASSWORD}
+    database: ${env:DB_POSTGRES_DATABASE}
+    collection_interval: ${env:ASH_COLLECTION_INTERVAL}
+    sampling_interval: ${env:ASH_SAMPLING_INTERVAL}
+    retention_period: ${env:ASH_RETENTION_PERIOD}
+    max_samples: ${env:ASH_MAX_SAMPLES}
+
+  # Enhanced SQL receiver with advanced features
+  enhancedsql:
+    driver: postgres
+    connection_string: "postgresql://${env:DB_POSTGRES_USER}:${env:DB_POSTGRES_PASSWORD}@${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}/${env:DB_POSTGRES_DATABASE}"
+    enable_query_plans: ${env:ENABLE_QUERY_PLANS}
+    enable_wait_events: ${env:ENABLE_WAIT_EVENTS}
+    enable_lock_monitoring: ${env:ENABLE_LOCK_MONITORING}
+    queries:
+      - name: active_queries
+        sql: |
+          SELECT 
+            pid,
+            query,
+            state,
+            wait_event_type,
+            wait_event,
+            EXTRACT(EPOCH FROM (now() - query_start)) as duration_seconds
+          FROM pg_stat_activity
+          WHERE state != 'idle'
+            AND pid != pg_backend_pid()
+        interval: ${env:ACTIVE_QUERY_INTERVAL}
+
+  # Kernel metrics receiver
+  kernelmetrics:
+    collection_interval: ${env:KERNEL_COLLECTION_INTERVAL}
+    scrapers:
+      cpu:
+        enabled: true
+      memory:
+        enabled: true
+      disk:
+        enabled: true
+      network:
+        enabled: true
+      filesystem:
+        enabled: true
+
+# =============================================================================
+# PROCESSORS
+# =============================================================================
+
+processors:
+  # =============================================================================
+  # STANDARD PROCESSORS (Production Ready)
+  # =============================================================================
+  
+  # Memory limiter - MUST be first processor in pipeline
+  memory_limiter:
+    check_interval: ${env:MEMORY_CHECK_INTERVAL}
+    limit_mib: ${env:MEMORY_LIMIT_MIB}
+    spike_limit_mib: ${env:MEMORY_SPIKE_LIMIT_MIB}
+    limit_percentage: ${env:MEMORY_LIMIT_PERCENTAGE}
+    spike_limit_percentage: ${env:MEMORY_SPIKE_PERCENTAGE}
+
+  # Resource processor - Add service metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:SERVICE_NAME}
+        action: upsert
+      - key: service.version
+        value: ${env:SERVICE_VERSION}
+        action: upsert
+      - key: service.namespace
+        value: ${env:SERVICE_NAMESPACE}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+      - key: cloud.provider
+        value: ${env:CLOUD_PROVIDER}
+        action: upsert
+      - key: cloud.region
+        value: ${env:CLOUD_REGION}
+        action: upsert
+      - key: cloud.availability_zone
+        value: ${env:CLOUD_AZ}
+        action: upsert
+      - key: host.name
+        from_attribute: host.name
+        action: upsert
+      - key: host.id
+        from_attribute: host.id
+        action: upsert
+
+  # Attributes processor - Manipulate attributes
+  attributes:
+    actions:
+      # Add database type
+      - key: db.system
+        from_attribute: db.connection_string
+        action: extract
+        pattern: ^(?P<db_type>postgresql|mysql)://
+      # Normalize database names
+      - key: db.name
+        action: update
+        from_attribute: database
+      # Add monitoring metadata
+      - key: telemetry.sdk.name
+        value: "database-intelligence"
+        action: insert
+      - key: telemetry.sdk.version
+        value: ${env:SERVICE_VERSION}
+        action: insert
+
+  # Filter processor - Drop unwanted metrics
+  filter:
+    metrics:
+      # Drop internal metrics
+      exclude:
+        match_type: regexp
+        metric_names:
+          - .*\.internal\..*
+          - .*test.*
+      # Drop metrics from test databases
+      datapoint:
+        - 'attributes["db.name"] == "test"'
+        - 'attributes["db.name"] == "temp"'
+
+  # Transform processor - Metric transformations
+  transform:
+    metric_statements:
+      # Convert units
+      - context: metric
+        statements:
+          - set(unit, "ms") where name == "db.query.duration" and unit == "s"
+          - set(description, "Query execution time in milliseconds") where name == "db.query.duration"
+      # Add computed metrics
+      - context: datapoint
+        statements:
+          - set(attributes["db.operation.latency_bucket"], "high") where metric.name == "db.query.duration" and value > 1000
+          - set(attributes["db.operation.latency_bucket"], "medium") where metric.name == "db.query.duration" and value > 100 and value <= 1000
+          - set(attributes["db.operation.latency_bucket"], "low") where metric.name == "db.query.duration" and value <= 100
+
+  # Batch processor - Optimize network usage
+  batch:
+    timeout: ${env:BATCH_TIMEOUT}
+    send_batch_size: ${env:BATCH_SIZE}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE}
+
+  # =============================================================================
+  # CUSTOM PROCESSORS (Require Enhanced Build)
+  # =============================================================================
+  
+  # Adaptive sampler - Dynamic sampling based on load
+  adaptivesampler:
+    sampling_rules:
+      - min_sampling_rate: ${env:MIN_SAMPLING_RATE}
+        max_sampling_rate: ${env:MAX_SAMPLING_RATE}
+        target_rate: ${env:TARGET_SAMPLING_RATE}
+    evaluation_interval: ${env:SAMPLING_EVAL_INTERVAL}
+    metrics_to_track:
+      - db.query.duration
+      - db.connection.count
+      - db.transaction.duration
+
+  # Circuit breaker - Protect databases from overload
+  circuitbreaker:
+    failure_threshold: ${env:CIRCUIT_FAILURE_THRESHOLD}
+    min_requests: ${env:CIRCUIT_MIN_REQUESTS}
+    timeout: ${env:CIRCUIT_TIMEOUT}
+    cooldown: ${env:CIRCUIT_COOLDOWN}
+    metrics:
+      - name: db.query.errors
+        threshold: ${env:QUERY_ERROR_THRESHOLD}
+      - name: db.connection.failures
+        threshold: ${env:CONNECTION_FAILURE_THRESHOLD}
+
+  # Plan attribute extractor - Extract query execution plans
+  planattributeextractor:
+    enabled: ${env:ENABLE_PLAN_EXTRACTION}
+    extract_fields:
+      - cost
+      - rows
+      - width
+      - actual_time
+      - actual_rows
+      - loops
+    databases:
+      - postgres
+    max_plan_size: ${env:MAX_PLAN_SIZE}
+    cache_plans: ${env:CACHE_QUERY_PLANS}
+    cache_ttl: ${env:PLAN_CACHE_TTL}
+
+  # Query correlator - Link queries to sessions/transactions
+  querycorrelator:
+    correlation_window: ${env:CORRELATION_WINDOW}
+    max_queries_tracked: ${env:MAX_QUERIES_TRACKED}
+    correlation_attributes:
+      - session_id
+      - transaction_id
+      - user_id
+      - application_name
+
+  # Verification processor - Data quality and PII detection
+  verification:
+    pii_detection:
+      enabled: ${env:ENABLE_PII_DETECTION}
+      patterns:
+        - email
+        - ssn
+        - credit_card
+        - phone
+      redaction_string: "[REDACTED]"
+    data_quality:
+      check_nulls: true
+      check_types: true
+      enforce_schemas: ${env:ENFORCE_SCHEMAS}
+    validation_rules:
+      - metric: db.query.duration
+        min: 0
+        max: 3600000  # 1 hour in ms
+
+  # Cost control processor - Enforce budget limits
+  costcontrol:
+    max_data_points_per_minute: ${env:MAX_DPM}
+    max_cardinality: ${env:MAX_CARDINALITY}
+    enforcement_mode: ${env:COST_ENFORCEMENT_MODE}
+    budgets:
+      - service: ${env:SERVICE_NAME}
+        limit: ${env:SERVICE_BUDGET}
+        period: ${env:BUDGET_PERIOD}
+    alert_thresholds:
+      - percentage: 80
+        action: warn
+      - percentage: 90
+        action: throttle
+      - percentage: 100
+        action: drop
+
+  # New Relic error monitor - Proactive error detection
+  nrerrormonitor:
+    enabled: ${env:ENABLE_ERROR_MONITOR}
+    error_rate_threshold: ${env:ERROR_RATE_THRESHOLD}
+    latency_threshold: ${env:LATENCY_THRESHOLD}
+    alert_channels:
+      - email
+      - slack
+    check_interval: ${env:ERROR_CHECK_INTERVAL}
+
+  # OHI transform processor - Legacy compatibility
+  ohitransform:
+    enabled: ${env:ENABLE_OHI_TRANSFORM}
+    target_format: "newrelic"
+    preserve_original: true
+    mappings:
+      postgresql:
+        source: "postgresql"
+        target: "PostgresqlSample"
+      mysql:
+        source: "mysql"
+        target: "MysqlSample"
+
+# =============================================================================
+# EXPORTERS
+# =============================================================================
+
+exporters:
+  # =============================================================================
+  # STANDARD EXPORTERS (Production Ready)
+  # =============================================================================
+  
+  # OTLP HTTP exporter - Primary New Relic export
+  otlphttp:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: ${env:OTLP_COMPRESSION}
+    timeout: ${env:OTLP_TIMEOUT}
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:RETRY_INITIAL_INTERVAL}
+      max_interval: ${env:RETRY_MAX_INTERVAL}
+      max_elapsed_time: ${env:RETRY_MAX_ELAPSED}
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:EXPORT_NUM_CONSUMERS}
+      queue_size: ${env:EXPORT_QUEUE_SIZE}
+      storage: ${env:EXPORT_STORAGE}
+    tls:
+      insecure: false
+      insecure_skip_verify: false
+      ca_file: ${env:OTLP_CA_FILE}
+      cert_file: ${env:OTLP_CERT_FILE}
+      key_file: ${env:OTLP_KEY_FILE}
+
+  # OTLP gRPC exporter - Alternative export path
+  otlp:
+    endpoint: ${env:OTLP_GRPC_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: ${env:OTLP_COMPRESSION}
+    timeout: ${env:OTLP_TIMEOUT}
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:RETRY_INITIAL_INTERVAL}
+      max_interval: ${env:RETRY_MAX_INTERVAL}
+      max_elapsed_time: ${env:RETRY_MAX_ELAPSED}
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:EXPORT_NUM_CONSUMERS}
+      queue_size: ${env:EXPORT_QUEUE_SIZE}
+    tls:
+      insecure: false
+      insecure_skip_verify: false
+
+  # Debug exporter - Development and troubleshooting
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY}
+    sampling_initial: ${env:DEBUG_SAMPLING_INITIAL}
+    sampling_thereafter: ${env:DEBUG_SAMPLING_THEREAFTER}
+
+  # Logging exporter - Structured logging output
+  logging:
+    loglevel: ${env:LOG_LEVEL}
+    sampling_initial: ${env:LOG_SAMPLING_INITIAL}
+    sampling_thereafter: ${env:LOG_SAMPLING_THEREAFTER}
+
+  # File exporter - Local data archival
+  file:
+    path: ${env:FILE_EXPORT_PATH}
+    rotation:
+      enabled: true
+      max_megabytes: ${env:FILE_MAX_SIZE_MB}
+      max_days: ${env:FILE_MAX_DAYS}
+      max_backups: ${env:FILE_MAX_BACKUPS}
+      localtime: true
+    format: ${env:FILE_FORMAT}
+    compression: ${env:FILE_COMPRESSION}
+
+  # Prometheus exporter - Metrics endpoint
+  prometheus:
+    endpoint: ${env:PROMETHEUS_ENDPOINT}
+    namespace: ${env:PROMETHEUS_NAMESPACE}
+    const_labels:
+      service: ${env:SERVICE_NAME}
+      environment: ${env:ENVIRONMENT}
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+    metric_expiration: ${env:PROMETHEUS_METRIC_EXPIRATION}
+
+  # =============================================================================
+  # CUSTOM EXPORTERS (Require Enhanced Build)
+  # =============================================================================
+  
+  # New Relic Infrastructure exporter - Legacy compatibility
+  nri:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    api_key: ${env:NEW_RELIC_LICENSE_KEY}
+    account_id: ${env:NEW_RELIC_ACCOUNT_ID}
+    timeout: ${env:NRI_TIMEOUT}
+    retry_on_failure:
+      enabled: true
+      initial_interval: ${env:RETRY_INITIAL_INTERVAL}
+      max_interval: ${env:RETRY_MAX_INTERVAL}
+    compression: gzip
+    format: "ohi"  # OHI compatibility mode
+
+  # New Relic error monitor exporter
+  nrerrormonitor:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    api_key: ${env:NEW_RELIC_LICENSE_KEY}
+    alert_thresholds:
+      error_rate: ${env:ALERT_ERROR_RATE}
+      latency_p99: ${env:ALERT_LATENCY_P99}
+      throughput_drop: ${env:ALERT_THROUGHPUT_DROP}
+    notification_channels:
+      - type: email
+        config:
+          to: ${env:ALERT_EMAIL}
+      - type: slack
+        config:
+          webhook: ${env:ALERT_SLACK_WEBHOOK}
+      - type: pagerduty
+        config:
+          integration_key: ${env:ALERT_PAGERDUTY_KEY}
+
+  # Failover exporter configuration
+  loadbalancing:
+    protocol:
+      otlp:
+        timeout: ${env:OTLP_TIMEOUT}
+        retry_on_failure:
+          enabled: true
+    resolver:
+      static:
+        hostnames:
+          - ${env:NEW_RELIC_OTLP_ENDPOINT}
+          - ${env:NEW_RELIC_OTLP_ENDPOINT_BACKUP}
+
+# =============================================================================
+# EXTENSIONS
+# =============================================================================
+
+extensions:
+  # =============================================================================
+  # STANDARD EXTENSIONS (Production Ready)
+  # =============================================================================
+  
+  # Health check extension - Liveness and readiness probes
+  health_check:
+    endpoint: ${env:HEALTH_CHECK_ENDPOINT}
+    path: ${env:HEALTH_CHECK_PATH}
+    tls:
+      cert_file: ${env:HEALTH_TLS_CERT}
+      key_file: ${env:HEALTH_TLS_KEY}
+    check_collector_pipeline:
+      enabled: true
+      interval: ${env:HEALTH_CHECK_INTERVAL}
+      exporter_failure_threshold: ${env:HEALTH_EXPORTER_THRESHOLD}
+
+  # Performance profiler extension
+  pprof:
+    endpoint: ${env:PPROF_ENDPOINT}
+    block_profile_fraction: ${env:PPROF_BLOCK_FRACTION}
+    mutex_profile_fraction: ${env:PPROF_MUTEX_FRACTION}
+    save_to_file: ${env:PPROF_SAVE_TO_FILE}
+
+  # zPages extension - Live debugging
+  zpages:
+    endpoint: ${env:ZPAGES_ENDPOINT}
+
+  # File storage extension - Persistent queue state
+  file_storage:
+    directory: ${env:STORAGE_DIR}
+    timeout: ${env:STORAGE_TIMEOUT}
+    compaction:
+      on_start: true
+      on_shutdown: true
+      directory: ${env:STORAGE_COMPACTION_DIR}
+    ttl: ${env:STORAGE_TTL}
+
+  # Basic auth extension
+  basicauth/client:
+    client_auth:
+      username: ${env:BASIC_AUTH_USERNAME}
+      password: ${env:BASIC_AUTH_PASSWORD}
+
+  # Bearer token auth extension
+  bearertokenauth:
+    token: ${env:BEARER_TOKEN}
+    filename: ${env:BEARER_TOKEN_FILE}
+    scheme: ${env:BEARER_SCHEME}
+
+  # OAuth2 client credentials extension
+  oauth2client:
+    client_id: ${env:OAUTH_CLIENT_ID}
+    client_secret: ${env:OAUTH_CLIENT_SECRET}
+    token_url: ${env:OAUTH_TOKEN_URL}
+    scopes: ${env:OAUTH_SCOPES}
+    timeout: ${env:OAUTH_TIMEOUT}
+
+  # =============================================================================
+  # CUSTOM EXTENSIONS (Require Enhanced Build)
+  # =============================================================================
+  
+  # PostgreSQL query extension - Direct query execution
+  postgresqlquery:
+    endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+    username: ${env:DB_POSTGRES_USER}
+    password: ${env:DB_POSTGRES_PASSWORD}
+    database: ${env:DB_POSTGRES_DATABASE}
+    max_connections: ${env:PG_QUERY_MAX_CONNECTIONS}
+    connection_timeout: ${env:PG_QUERY_TIMEOUT}
+    query_timeout: ${env:PG_QUERY_EXEC_TIMEOUT}
+    enable_ssl: ${env:PG_QUERY_SSL_ENABLED}
+    ssl_mode: ${env:PG_QUERY_SSL_MODE}
+
+  # Feature detection extension
+  featuredetection:
+    databases:
+      - type: postgresql
+        endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+        username: ${env:DB_POSTGRES_USER}
+        password: ${env:DB_POSTGRES_PASSWORD}
+      - type: mysql
+        endpoint: ${env:DB_MYSQL_HOST}:${env:DB_MYSQL_PORT}
+        username: ${env:DB_MYSQL_USER}
+        password: ${env:DB_MYSQL_PASSWORD}
+    check_interval: ${env:FEATURE_CHECK_INTERVAL}
+    features_to_detect:
+      - pg_stat_statements
+      - pg_stat_activity
+      - performance_schema
+      - sys_schema
+
+  # Healthcheck extension with database validation
+  healthcheck/advanced:
+    endpoint: ${env:HEALTH_CHECK_ENDPOINT}
+    path: ${env:HEALTH_CHECK_PATH}
+    database_checks:
+      - name: postgres_connectivity
+        type: postgresql
+        endpoint: ${env:DB_POSTGRES_HOST}:${env:DB_POSTGRES_PORT}
+        query: "SELECT 1"
+        timeout: ${env:DB_HEALTH_TIMEOUT}
+      - name: mysql_connectivity
+        type: mysql
+        endpoint: ${env:DB_MYSQL_HOST}:${env:DB_MYSQL_PORT}
+        query: "SELECT 1"
+        timeout: ${env:DB_HEALTH_TIMEOUT}
+    thresholds:
+      response_time: ${env:HEALTH_RESPONSE_TIME_MS}
+      error_rate: ${env:HEALTH_ERROR_RATE}
+      
+  # Memory ballast extension (deprecated, use memory_limiter processor)
+  # Kept for backward compatibility
+  memory_ballast:
+    size_mib: ${env:BALLAST_SIZE_MIB}
+    size_in_percentage: ${env:BALLAST_SIZE_PERCENTAGE}
 
 # Service configuration is defined in mode files
 # This allows different modes to use different pipelines

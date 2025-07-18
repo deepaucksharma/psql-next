@@ -64,11 +64,11 @@ mkdir -p /opt/otelcol/data
 2. **Copy configuration file**
 ```bash
 # For PostgreSQL
-curl -o /opt/otelcol/config/otelcol.yaml \
+curl -o /opt/otelcol/configs/postgresql-maximum-extraction.yaml \
   https://raw.githubusercontent.com/db-otel/database-intelligence/main/configs/examples/config-only-base.yaml
 
 # For MySQL
-curl -o /opt/otelcol/config/otelcol.yaml \
+curl -o /opt/otelcol/configs/postgresql-maximum-extraction.yaml \
   https://raw.githubusercontent.com/db-otel/database-intelligence/main/configs/examples/config-only-mysql.yaml
 ```
 
@@ -106,7 +106,7 @@ services:
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
-      - /opt/otelcol/config/otelcol.yaml:/etc/otelcol/config.yaml:ro
+      - /opt/otelcol/configs/postgresql-maximum-extraction.yaml:/etc/otelcol/config.yaml:ro
       - /opt/otelcol/data:/var/lib/otelcol
     env_file:
       - /opt/otelcol/.env

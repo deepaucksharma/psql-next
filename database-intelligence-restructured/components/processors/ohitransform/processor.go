@@ -164,13 +164,12 @@ func (otp *ohiTransformProcessor) transformHistogram(hist pmetric.Histogram, rul
 			sumDp.Attributes().PutStr("statistic", "sum")
 		}
 		
-		if dp.HasCount() {
-			countDp := newGauge.DataPoints().AppendEmpty()
-			countDp.SetTimestamp(dp.Timestamp())
-			countDp.SetIntValue(int64(dp.Count()))
-			otp.transformAttributes(dp.Attributes(), rule, countDp.Attributes())
-			countDp.Attributes().PutStr("statistic", "count")
-		}
+		// Count is always available for histograms
+		countDp := newGauge.DataPoints().AppendEmpty()
+		countDp.SetTimestamp(dp.Timestamp())
+		countDp.SetIntValue(int64(dp.Count()))
+		otp.transformAttributes(dp.Attributes(), rule, countDp.Attributes())
+		countDp.Attributes().PutStr("statistic", "count")
 		
 		// Add percentiles if available
 		buckets := dp.BucketCounts()

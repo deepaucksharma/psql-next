@@ -47,14 +47,14 @@ func createMetricsExporter(
 		return nil, err
 	}
 	
-	return exporterhelper.NewMetrics(
+	return exporterhelper.NewMetricsExporter(
 		ctx,
 		settings,
 		cfg,
 		exp.exportMetrics,
 		exporterhelper.WithStart(exp.start),
 		exporterhelper.WithShutdown(exp.shutdown),
-		exporterhelper.WithTimeout(exporterhelper.TimeoutConfig{Timeout: nriCfg.Timeout}),
+		exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: nriCfg.Timeout}),
 	)
 }
 
@@ -74,13 +74,13 @@ func createLogsExporter(
 		return nil, err
 	}
 	
-	return exporterhelper.NewLogs(
+	return exporterhelper.NewLogsExporter(
 		ctx,
 		settings,
 		cfg,
 		exp.exportLogs,
 		exporterhelper.WithStart(exp.start),
 		exporterhelper.WithShutdown(exp.shutdown),
-		exporterhelper.WithTimeout(exporterhelper.TimeoutConfig{Timeout: nriCfg.Timeout}),
+		exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: nriCfg.Timeout}),
 	)
 }

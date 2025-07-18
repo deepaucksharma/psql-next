@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/collector/config/configretry"
-	"go.opentelemetry.io/collector/scraper/scraperhelper"
+	"go.opentelemetry.io/collector/receiver/scraperhelper"
 )
 
 // Config represents the receiver configuration

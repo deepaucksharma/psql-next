@@ -4,7 +4,7 @@ import (
     "go.opentelemetry.io/collector/component"
     "go.opentelemetry.io/collector/exporter"
     
-    "github.com/deepaksharma/db-otel/components/exporters/nri"
+    "github.com/database-intelligence/db-intel/components/exporters/nri"
 )
 
 // All returns all exporter factories

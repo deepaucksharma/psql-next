@@ -1,0 +1,367 @@
+{
+  "name": "Database Intelligence - Multi-Database Overview",
+  "description": "Comprehensive overview of all databases monitored by Database Intelligence",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Overview",
+      "description": "High-level database metrics across all database types",
+      "widgets": [
+        {
+          "title": "Total Databases",
+          "configuration": {
+            "nrql": "SELECT uniqueCount(db.instance) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') SINCE 5 minutes ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 3,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          }
+        },
+        {
+          "title": "Healthy Databases",
+          "configuration": {
+            "nrql": "SELECT uniqueCount(db.instance) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') AND db.status = 'up' SINCE 5 minutes ago"
+          },
+          "layout": {
+            "column": 4,
+            "row": 1,
+            "width": 3,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          }
+        },
+        {
+          "title": "Total Operations/sec",
+          "configuration": {
+            "nrql": "SELECT sum(db.operations.rate) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') SINCE 5 minutes ago TIMESERIES"
+          },
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 3,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          }
+        },
+        {
+          "title": "Total Active Connections",
+          "configuration": {
+            "nrql": "SELECT sum(db.connections.active) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') SINCE 5 minutes ago"
+          },
+          "layout": {
+            "column": 10,
+            "row": 1,
+            "width": 3,
+            "height": 2
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          }
+        },
+        {
+          "title": "Database Health Status",
+          "configuration": {
+            "nrql": "SELECT latest(db.status) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') FACET db.instance, db.system SINCE 5 minutes ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 3,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Connection Pool Usage by Database",
+          "configuration": {
+            "nrql": "SELECT average(db.connections.usage.percent) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') FACET db.instance TIMESERIES SINCE 30 minutes ago"
+          },
+          "layout": {
+            "column": 7,
+            "row": 3,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance",
+      "description": "Database performance metrics",
+      "widgets": [
+        {
+          "title": "Operations Per Second by Database",
+          "configuration": {
+            "nrql": "SELECT rate(sum(db.operations.count), 1 second) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') FACET db.instance, db.system TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Query Latency (95th percentile)",
+          "configuration": {
+            "nrql": "SELECT percentile(db.query.duration, 95) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') FACET db.instance, db.system TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Cache Hit Ratio",
+          "configuration": {
+            "nrql": "SELECT average(db.cache.hit.ratio) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'redis') FACET db.instance, db.system TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Slow Queries by Database",
+          "configuration": {
+            "nrql": "SELECT sum(db.slowqueries.count) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') FACET db.instance, db.system SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resource Usage",
+      "description": "Database resource consumption",
+      "widgets": [
+        {
+          "title": "Database Size",
+          "configuration": {
+            "nrql": "SELECT latest(db.size.bytes) / 1073741824 AS 'Size (GB)' FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb') FACET db.instance, db.database, db.system SINCE 5 minutes ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        },
+        {
+          "title": "Memory Usage",
+          "configuration": {
+            "nrql": "SELECT average(db.memory.usage.bytes) / 1073741824 AS 'Memory (GB)' FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') FACET db.instance, db.system TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "CPU Usage",
+          "configuration": {
+            "nrql": "SELECT average(db.cpu.usage.percent) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') FACET db.instance, db.system TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Disk I/O",
+          "configuration": {
+            "nrql": "SELECT rate(sum(db.disk.read.bytes + db.disk.write.bytes), 1 second) AS 'Bytes/sec' FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb') FACET db.instance, db.system TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replication & HA",
+      "description": "Replication and high availability metrics",
+      "widgets": [
+        {
+          "title": "Replication Status",
+          "configuration": {
+            "nrql": "SELECT latest(db.replication.lag.seconds) AS 'Lag (seconds)', latest(db.replication.state) AS 'State' FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb') AND db.replication.role IS NOT NULL FACET db.instance, db.system, db.replication.role SINCE 5 minutes ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Replication Lag Trend",
+          "configuration": {
+            "nrql": "SELECT average(db.replication.lag.seconds) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb') AND db.replication.role = 'replica' FACET db.instance, db.system TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Cluster Health (MongoDB/Redis)",
+          "configuration": {
+            "nrql": "SELECT latest(db.cluster.state) AS 'State', latest(db.cluster.nodes.total) AS 'Total Nodes', latest(db.cluster.nodes.healthy) AS 'Healthy Nodes' FROM Metric WHERE db.system IN ('mongodb', 'redis') AND db.cluster.enabled = true FACET db.instance, db.system SINCE 5 minutes ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Failover Events",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM DatabaseFailover WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') FACET db.instance, db.system TIMESERIES SINCE 24 hours ago"
+          },
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alerts & Issues",
+      "description": "Database alerts and issues",
+      "widgets": [
+        {
+          "title": "Active Alerts",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM DatabaseAlert WHERE alert.status = 'active' FACET db.system, alert.severity SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        },
+        {
+          "title": "Top Error Messages",
+          "configuration": {
+            "nrql": "SELECT count(*) FROM DatabaseError FACET error.message, db.system SINCE 1 hour ago LIMIT 10"
+          },
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          }
+        },
+        {
+          "title": "Connection Failures",
+          "configuration": {
+            "nrql": "SELECT sum(db.connections.failed) FROM Metric WHERE db.system IN ('postgresql', 'mysql', 'mongodb', 'redis') FACET db.instance, db.system TIMESERIES SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          }
+        },
+        {
+          "title": "Deadlocks & Lock Waits",
+          "configuration": {
+            "nrql": "SELECT sum(db.locks.deadlocks) AS 'Deadlocks', sum(db.locks.waits) AS 'Lock Waits' FROM Metric WHERE db.system IN ('postgresql', 'mysql') FACET db.instance, db.system SINCE 1 hour ago"
+          },
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          }
+        }
+      ]
+    }
+  ]
+}

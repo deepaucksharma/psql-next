@@ -1,96 +1,100 @@
-# Testing Infrastructure
+# Database Intelligence Test Suite
 
-This directory contains all testing tools, frameworks, and test suites for the Database Intelligence project.
+Comprehensive testing framework for Database Intelligence collectors.
 
-## Directory Structure
+## Test Structure
 
 ```
 tests/
-├── tools/              # Testing utilities and tools
-│   ├── load-generator/     # Database load generation tool
-│   ├── postgres-test-generator/  # PostgreSQL test data generator
-│   ├── validation/         # OHI compatibility validator
-│   └── minimal-db-check/   # Minimal database connectivity checker
-├── e2e/               # End-to-end testing framework
-│   ├── framework/         # Test framework utilities
-│   ├── configs/          # Test-specific configurations
-│   └── cmd/              # Test execution commands
-├── fixtures/          # Test data and fixtures
-├── dashboard-validation/  # Dashboard validation tools
-└── archive/           # Historical test configurations
+├── unit/          # Unit tests for individual components
+├── integration/   # Integration tests with real databases
+├── e2e/           # End-to-end tests with full pipeline
+├── performance/   # Performance benchmarks and load tests
+├── fixtures/      # Test data and configurations
+└── utils/         # Shared test utilities
 ```
 
-## Testing Tools
+## Running Tests
 
-### Load Generator (`tools/load-generator/`)
-Generates realistic database load for testing:
+### All Tests
 ```bash
-cd tests/tools/load-generator
-go run main.go --database=postgres --connections=10 --duration=5m
+./scripts/testing/run-tests.sh all
 ```
 
-### PostgreSQL Test Generator (`tools/postgres-test-generator/`)
-Creates test data for PostgreSQL databases:
+### Specific Test Type
 ```bash
-cd tests/tools/postgres-test-generator  
-go run main.go --host=localhost --database=testdb
+# Unit tests only
+./scripts/testing/run-tests.sh unit
+
+# Integration tests
+./scripts/testing/run-tests.sh integration postgresql
+
+# End-to-end tests
+./scripts/testing/run-tests.sh e2e
+
+# Performance tests
+./scripts/testing/run-tests.sh performance mysql
 ```
 
-### Validation Tools (`tools/validation/`)
-Validates OHI compatibility and metrics accuracy:
+### Individual Test Suites
 ```bash
-cd tests/tools/validation
-go run ohi-compatibility-validator.go
+# Configuration validation
+./scripts/validation/validate-config.sh
+
+# Database-specific test
+./scripts/testing/test-database-config.sh postgresql
+
+# Performance benchmark
+./scripts/testing/benchmark-performance.sh postgresql 300
 ```
 
-### Minimal DB Check (`tools/minimal-db-check/`)
-Basic database connectivity verification:
+## Writing Tests
+
+### Unit Tests
+Place unit tests in `tests/unit/` and follow the naming convention `test_*.sh`.
+
+Example:
 ```bash
-cd tests/tools/minimal-db-check
-go run minimal_db_check.go --host=localhost --port=5432
+#!/bin/bash
+source "$(dirname "$0")/../utils/common.sh"
+
+# Test assertions
+assert_equals "expected" "actual" "Test description"
+assert_file_exists "path/to/file"
+assert_contains "file.yaml" "pattern" "Should contain pattern"
 ```
 
-## E2E Testing Framework
+### Integration Tests
+Integration tests should:
+1. Set up test environment
+2. Run collector with test config
+3. Verify metrics are collected
+4. Clean up resources
 
-The `e2e/` directory contains comprehensive end-to-end testing:
-- **Framework**: Reusable testing utilities and helpers
-- **Configs**: Test-specific collector configurations
-- **Commands**: Test execution and validation tools
+### Performance Tests
+Performance tests measure:
+- Metric collection rate
+- Memory usage
+- CPU utilization
+- Cardinality impact
 
-## Usage Patterns
+## CI/CD Integration
 
-### Development Testing
-```bash
-# Run unit tests
-make test
+The test suite is designed to run in CI/CD pipelines:
 
-# Run with test database
-make test-integration
-
-# Run E2E tests
-make test-e2e
+```yaml
+# GitHub Actions example
+- name: Run tests
+  run: ./scripts/testing/run-tests.sh all
 ```
 
-### Load Testing
-```bash
-# Generate database load
-cd tests/tools/load-generator
-go run main.go --config=../../configs/load-test.yaml
-```
+## Test Coverage
 
-### Validation Testing
-```bash
-# Validate metrics accuracy
-cd tests/tools/validation
-go run . --config=../../e2e/configs/validation-test.yaml
-```
-
-## Test Data Management
-
-- **Fixtures**: Static test data in `fixtures/`
-- **Generators**: Dynamic test data creation tools
-- **Cleanup**: Automated cleanup after test runs
-
-This consolidation provides a unified testing infrastructure with clear organization and easy discovery of testing tools.
-EOF < /dev/null
-This consolidation provides a unified testing infrastructure with clear organization and easy discovery of testing tools.
+Current test coverage includes:
+- ✅ Configuration validation
+- ✅ Metric naming conventions
+- ✅ Database connectivity
+- ✅ Collector startup/shutdown
+- ✅ Metric export verification
+- ✅ Performance benchmarks
+- ✅ Cardinality analysis

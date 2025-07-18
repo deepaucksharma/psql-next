@@ -1,0 +1,554 @@
+name: Multi-Database CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.23.0'
+  POSTGRES_VERSION: '15'
+  MYSQL_VERSION: '8.0'
+  MONGODB_VERSION: '7.0'
+  REDIS_VERSION: '7.2'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.61.0
+          
+      - name: Run linters
+        run: |
+          golangci-lint run ./...
+          go vet ./...
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          
+      - name: Build all components
+        run: |
+          make build
+          
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-intel-binary
+          path: ./bin/db-intel-unified
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          
+      - name: Run unit tests
+        run: |
+          go test -v -race -coverprofile=coverage.out ./...
+          
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+
+  test-postgresql:
+    name: PostgreSQL Integration Tests
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      postgres:
+        image: postgres:${{ env.POSTGRES_VERSION }}
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: db-intel-binary
+          path: ./bin
+          
+      - name: Make binary executable
+        run: chmod +x ./bin/db-intel-unified
+          
+      - name: Create test config
+        run: |
+          cat > test-config.yaml <<EOF
+          receivers:
+            postgresql:
+              endpoint: localhost:5432
+              username: postgres
+              password: testpass
+              databases:
+                - testdb
+              collection_interval: 10s
+            
+            enhancedsql:
+              driver: postgres
+              datasource: "host=localhost port=5432 user=postgres password=testpass dbname=testdb sslmode=disable"
+              collection_interval: 10s
+              
+            ash:
+              driver: postgres
+              datasource: "host=localhost port=5432 user=postgres password=testpass dbname=testdb sslmode=disable"
+              buffer_size: 1000
+              collection_interval: 10s
+              
+          processors:
+            batch:
+              timeout: 5s
+              
+          exporters:
+            debug:
+              verbosity: detailed
+              
+          service:
+            pipelines:
+              metrics:
+                receivers: [postgresql, enhancedsql, ash]
+                processors: [batch]
+                exporters: [debug]
+          EOF
+          
+      - name: Run collector
+        run: |
+          timeout 60s ./bin/db-intel-unified --config test-config.yaml || true
+          
+      - name: Check metrics
+        run: |
+          curl -s http://localhost:8888/metrics | grep -E "postgresql_|ash_" || exit 1
+
+  test-mysql:
+    name: MySQL Integration Tests
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      mysql:
+        image: mysql:${{ env.MYSQL_VERSION }}
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: testdb
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        ports:
+          - 3306:3306
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: db-intel-binary
+          path: ./bin
+          
+      - name: Make binary executable
+        run: chmod +x ./bin/db-intel-unified
+          
+      - name: Create test config
+        run: |
+          cat > test-config.yaml <<EOF
+          receivers:
+            mysql:
+              endpoint: localhost:3306
+              username: root
+              password: testpass
+              database: testdb
+              collection_interval: 10s
+            
+            enhancedsql:
+              driver: mysql
+              datasource: "root:testpass@tcp(localhost:3306)/testdb"
+              collection_interval: 10s
+              
+          processors:
+            batch:
+              timeout: 5s
+              
+          exporters:
+            debug:
+              verbosity: detailed
+              
+          service:
+            pipelines:
+              metrics:
+                receivers: [mysql, enhancedsql]
+                processors: [batch]
+                exporters: [debug]
+          EOF
+          
+      - name: Run collector
+        run: |
+          timeout 60s ./bin/db-intel-unified --config test-config.yaml || true
+          
+      - name: Check metrics
+        run: |
+          curl -s http://localhost:8888/metrics | grep "mysql_" || exit 1
+
+  test-mongodb:
+    name: MongoDB Integration Tests
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      mongodb:
+        image: mongo:${{ env.MONGODB_VERSION }}
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: testpass
+        options: >-
+          --health-cmd="mongosh --eval 'db.adminCommand({ping: 1})'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        ports:
+          - 27017:27017
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: db-intel-binary
+          path: ./bin
+          
+      - name: Make binary executable
+        run: chmod +x ./bin/db-intel-unified
+          
+      - name: Create test config
+        run: |
+          cat > test-config.yaml <<EOF
+          receivers:
+            mongodb:
+              uri: mongodb://admin:testpass@localhost:27017
+              collection_interval: 10s
+              metrics:
+                server_status: true
+                database_stats: true
+                collection_stats: false
+                index_stats: false
+              
+          processors:
+            batch:
+              timeout: 5s
+              
+          exporters:
+            debug:
+              verbosity: detailed
+              
+          service:
+            pipelines:
+              metrics:
+                receivers: [mongodb]
+                processors: [batch]
+                exporters: [debug]
+          EOF
+          
+      - name: Run collector
+        run: |
+          timeout 60s ./bin/db-intel-unified --config test-config.yaml || true
+          
+      - name: Check metrics
+        run: |
+          curl -s http://localhost:8888/metrics | grep "mongodb_" || exit 1
+
+  test-redis:
+    name: Redis Integration Tests
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      redis:
+        image: redis:${{ env.REDIS_VERSION }}
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: db-intel-binary
+          path: ./bin
+          
+      - name: Make binary executable
+        run: chmod +x ./bin/db-intel-unified
+          
+      - name: Create test config
+        run: |
+          cat > test-config.yaml <<EOF
+          receivers:
+            redis:
+              endpoint: localhost:6379
+              collection_interval: 10s
+              metrics:
+                server_info:
+                  server: true
+                  clients: true
+                  memory: true
+                  stats: true
+                command_stats: true
+              
+          processors:
+            batch:
+              timeout: 5s
+              
+          exporters:
+            debug:
+              verbosity: detailed
+              
+          service:
+            pipelines:
+              metrics:
+                receivers: [redis]
+                processors: [batch]
+                exporters: [debug]
+          EOF
+          
+      - name: Run collector
+        run: |
+          timeout 60s ./bin/db-intel-unified --config test-config.yaml || true
+          
+      - name: Check metrics
+        run: |
+          curl -s http://localhost:8888/metrics | grep "redis_" || exit 1
+
+  test-multi-database:
+    name: Multi-Database E2E Test
+    runs-on: ubuntu-latest
+    needs: [test-postgresql, test-mysql, test-mongodb, test-redis]
+    services:
+      postgres:
+        image: postgres:${{ env.POSTGRES_VERSION }}
+        env:
+          POSTGRES_PASSWORD: testpass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+      mysql:
+        image: mysql:${{ env.MYSQL_VERSION }}
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        ports:
+          - 3306:3306
+          
+      mongodb:
+        image: mongo:${{ env.MONGODB_VERSION }}
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: testpass
+        ports:
+          - 27017:27017
+          
+      redis:
+        image: redis:${{ env.REDIS_VERSION }}
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+          
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: db-intel-binary
+          path: ./bin
+          
+      - name: Make binary executable
+        run: chmod +x ./bin/db-intel-unified
+          
+      - name: Create multi-db config
+        run: |
+          cat > multi-db-config.yaml <<EOF
+          receivers:
+            postgresql:
+              endpoint: localhost:5432
+              username: postgres
+              password: testpass
+              collection_interval: 10s
+              
+            mysql:
+              endpoint: localhost:3306
+              username: root
+              password: testpass
+              collection_interval: 10s
+              
+            mongodb:
+              uri: mongodb://admin:testpass@localhost:27017
+              collection_interval: 10s
+              
+            redis:
+              endpoint: localhost:6379
+              collection_interval: 10s
+              
+          processors:
+            batch:
+              timeout: 5s
+              
+            adaptivesampler:
+              mode: adaptive
+              initial_sampling_rate: 1.0
+              target_records_per_second: 100
+              
+          exporters:
+            debug:
+              verbosity: detailed
+              sampling_initial: 10
+              sampling_thereafter: 100
+              
+            otlp:
+              endpoint: localhost:4317
+              tls:
+                insecure: true
+              
+          service:
+            telemetry:
+              logs:
+                level: info
+                
+            pipelines:
+              metrics/postgresql:
+                receivers: [postgresql]
+                processors: [batch]
+                exporters: [debug]
+                
+              metrics/mysql:
+                receivers: [mysql]
+                processors: [batch]
+                exporters: [debug]
+                
+              metrics/mongodb:
+                receivers: [mongodb]
+                processors: [adaptivesampler, batch]
+                exporters: [debug]
+                
+              metrics/redis:
+                receivers: [redis]
+                processors: [batch]
+                exporters: [debug]
+          EOF
+          
+      - name: Run multi-database collector
+        run: |
+          timeout 120s ./bin/db-intel-unified --config multi-db-config.yaml || true
+          
+      - name: Validate all metrics
+        run: |
+          echo "Checking for PostgreSQL metrics..."
+          curl -s http://localhost:8888/metrics | grep "postgresql_" || exit 1
+          
+          echo "Checking for MySQL metrics..."
+          curl -s http://localhost:8888/metrics | grep "mysql_" || exit 1
+          
+          echo "Checking for MongoDB metrics..."
+          curl -s http://localhost:8888/metrics | grep "mongodb_" || exit 1
+          
+          echo "Checking for Redis metrics..."
+          curl -s http://localhost:8888/metrics | grep "redis_" || exit 1
+          
+          echo "All database metrics collected successfully!"
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [test-multi-database]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deployments/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: |
+            db-intel:latest
+            db-intel:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

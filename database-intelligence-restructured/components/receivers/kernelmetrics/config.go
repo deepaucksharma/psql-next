@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"go.opentelemetry.io/collector/scraper/scraperhelper"
+	"go.opentelemetry.io/collector/receiver/scraperhelper"
 )
 
 // Config represents the receiver configuration for kernel-level metrics
