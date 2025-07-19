@@ -72,6 +72,11 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       NAMESPACE: docker
       TEAM_NAME: ${TEAM_NAME:-database-team}
+      
+      # Debug Settings
+      DEBUG_VERBOSITY: normal
+      DEBUG_SAMPLING_INITIAL: 10
+      DEBUG_SAMPLING_THEREAFTER: 100
       SERVICE_NAME: ${SERVICE_NAME:-mysql-monitoring}
       COST_CENTER: ${COST_CENTER:-engineering}
       CLUSTER_NAME: ${CLUSTER_NAME:-mysql-cluster}

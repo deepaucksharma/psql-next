@@ -84,6 +84,45 @@
               "title": "Top Intelligence Insights",
               "type": "table",
               "query": "SELECT max(value) as 'Score', latest(attributes['query_text']) as 'Query', latest(attributes['recommendations']) as 'Recommendations' FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive' FACET attributes['query_digest'] LIMIT 10 SINCE 1 hour ago"
+            },
+            {
+              "title": "🧠 AI-Powered Performance Score",
+              "type": "billboard",
+              "query": "SELECT average(value) as 'Intelligence Score', uniqueCount(attributes['query_digest']) as 'Unique Queries', sum(value) filter(WHERE attributes['ml.is_anomaly'] = 'true') as 'Anomaly Score', max(attributes['business.revenue_impact']) as 'Max Revenue Impact' FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive' SINCE 5 minutes ago",
+              "thresholds": [
+                {"value": 150, "severity": "critical"},
+                {"value": 100, "severity": "warning"}
+              ]
+            },
+            {
+              "title": "🚨 Critical Business Impact Matrix",
+              "type": "heatmap",
+              "query": "SELECT histogram(attributes['business.revenue_impact'], 100, 10) FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive' FACET attributes['business_criticality'], attributes['wait_severity'] SINCE 30 minutes ago"
+            },
+            {
+              "title": "📈 ML Anomaly Detection Timeline",
+              "type": "line",
+              "query": "SELECT count(*) as 'Anomalies', average(value) as 'Avg Score', max(value) as 'Max Score', uniqueCount(attributes['query_digest']) as 'Unique Queries' FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive' AND attributes['ml.is_anomaly'] = 'true' TIMESERIES 1 minute SINCE 2 hours ago"
+            },
+            {
+              "title": "💰 Cost Impact Analysis",
+              "type": "area",
+              "query": "SELECT sum(attributes['cost.compute_impact']) as 'Compute Cost', sum(attributes['cost.io_impact']) as 'I/O Cost', sum(attributes['business.revenue_impact']) as 'Revenue at Risk' FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive' FACET attributes['db_schema'] TIMESERIES 5 minutes SINCE 1 hour ago"
+            },
+            {
+              "title": "🎯 Advisory Command Center",
+              "type": "table",
+              "query": "SELECT latest(attributes['recommendations']) as 'Action Required', count(*) as 'Occurrences', average(value) as 'Avg Impact Score', latest(attributes['advisory.priority']) as 'Priority', latest(attributes['query_text']) as 'Query' FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive' AND attributes['advisory.type'] IS NOT NULL FACET attributes['advisory.type'], attributes['query_digest'] SINCE 30 minutes ago LIMIT 20"
+            },
+            {
+              "title": "🔄 Query Performance Percentiles",
+              "type": "line",
+              "query": "SELECT percentile(value, 50) as 'P50', percentile(value, 95) as 'P95', percentile(value, 99) as 'P99' FROM Metric WHERE metricName = 'mysql.query.wait_percentiles' FACET attributes['wait.category'] TIMESERIES 5 minutes SINCE 1 hour ago"
+            },
+            {
+              "title": "📊 Resource Pressure Correlation",
+              "type": "scatter",
+              "query": "SELECT average(attributes['ml.resource_pressure']) as 'Resource Pressure', average(value) as 'Intelligence Score' FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive' FACET attributes['wait.primary_category'] SINCE 1 hour ago"
             }
           ]
         },
@@ -122,6 +161,18 @@
       "name": "MySQL Critical Anomalies",
       "query": "SELECT filter(count(*), WHERE attributes['anomaly.severity'] = 'critical') FROM Metric WHERE instrumentation.provider = 'opentelemetry'",
       "threshold": 5,
+      "duration": 3
+    },
+    {
+      "name": "High Intelligence Score Alert",
+      "query": "SELECT max(value) FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive'",
+      "threshold": 200,
+      "duration": 5
+    },
+    {
+      "name": "Business Revenue Impact Alert",
+      "query": "SELECT sum(attributes['business.revenue_impact']) FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive'",
+      "threshold": 1000,
       "duration": 3
     }
   ]

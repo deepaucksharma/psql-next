@@ -1,0 +1,199 @@
+receivers:
+  mysql:
+    endpoint: mysql-primary:3306
+    username: otel_monitor
+    password: otelmonitorpass
+    collection_interval: 10s
+    metrics:
+      mysql.buffer_pool.data_pages: true
+      mysql.buffer_pool.operations: true
+      mysql.buffer_pool.page_flushes: true
+      mysql.buffer_pool.pages: true
+      mysql.buffer_pool.usage: true
+      mysql.commands: true
+      mysql.connection.count: true
+      mysql.connection.errors: true
+      mysql.double_writes: true
+      mysql.handlers: true
+      mysql.index.io.wait.count: true
+      mysql.index.io.wait.time: true
+      mysql.innodb.row_lock.time: true
+      mysql.innodb.row_lock.waits: true
+      mysql.innodb.row_operations: true
+      mysql.locks: true
+      mysql.log_operations: true
+      mysql.operations: true
+      mysql.page_operations: true
+      mysql.prepared_statements: true
+      mysql.query.client.count: true
+      mysql.query.count: true
+      mysql.query.slow.count: true
+      mysql.replica.lag: true
+      mysql.replica.sql_delay: true
+      mysql.replica.time_behind_source: true
+      mysql.row_locks: true
+      mysql.row_operations: true
+      mysql.sorts: true
+      mysql.statement_event.count: true
+      mysql.statement_event.wait.histogram: true
+      mysql.statement_event.wait.time: true
+      mysql.table.io.wait.count: true
+      mysql.table.io.wait.time: true
+      mysql.table.lock_wait.count: true
+      mysql.table.lock_wait.time: true
+      mysql.table_open_cache: true
+      mysql.threads: true
+      mysql.tmp_resources: true
+      mysql.uptime: true
+
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+      memory:
+      disk:
+      network:
+
+  # SQL Query Intelligence
+  sqlquery/intelligence:
+    driver: mysql
+    datasource: "otel_monitor:otelmonitorpass@tcp(mysql-primary:3306)/"
+    collection_interval: 5s
+    queries:
+      - sql: |
+          WITH wait_analysis AS (
+            SELECT 
+              DIGEST,
+              DIGEST_TEXT,
+              COUNT_STAR as exec_count,
+              SUM_TIMER_WAIT/1000000000000 as total_wait_sec,
+              AVG_TIMER_WAIT/1000000000000 as avg_wait_sec,
+              SUM_LOCK_TIME/1000000000000 as lock_time_sec,
+              SUM_ROWS_EXAMINED as rows_examined,
+              SUM_ROWS_SENT as rows_sent,
+              SUM_NO_INDEX_USED as no_index_used,
+              SUM_NO_GOOD_INDEX_USED as no_good_index_used
+            FROM performance_schema.events_statements_summary_by_digest
+            WHERE DIGEST_TEXT IS NOT NULL
+              AND COUNT_STAR > 0
+              AND SCHEMA_NAME NOT IN ('performance_schema', 'information_schema', 'sys', 'mysql')
+          ),
+          categorized AS (
+            SELECT 
+              *,
+              CASE 
+                WHEN avg_wait_sec > 1 THEN 'critical'
+                WHEN avg_wait_sec > 0.1 THEN 'warning'
+                ELSE 'normal'
+              END as wait_severity,
+              CASE
+                WHEN DIGEST_TEXT LIKE '%SELECT%' THEN 'read'
+                WHEN DIGEST_TEXT LIKE '%INSERT%' OR DIGEST_TEXT LIKE '%UPDATE%' OR DIGEST_TEXT LIKE '%DELETE%' THEN 'write'
+                ELSE 'other'
+              END as query_type,
+              CASE
+                WHEN no_index_used > 0 OR no_good_index_used > 0 THEN 'index_missing'
+                WHEN lock_time_sec > total_wait_sec * 0.5 THEN 'lock_heavy'
+                WHEN rows_examined > rows_sent * 100 AND rows_sent > 0 THEN 'inefficient_scan'
+                ELSE 'normal'
+              END as performance_issue
+            FROM wait_analysis
+          )
+          SELECT 
+            DIGEST as query_digest,
+            LEFT(DIGEST_TEXT, 200) as query_text,
+            exec_count,
+            total_wait_sec,
+            avg_wait_sec,
+            lock_time_sec,
+            rows_examined,
+            rows_sent,
+            wait_severity,
+            query_type,
+            performance_issue,
+            CASE 
+              WHEN performance_issue = 'index_missing' THEN 'CREATE INDEX on affected columns'
+              WHEN performance_issue = 'lock_heavy' THEN 'Review transaction isolation level'
+              WHEN performance_issue = 'inefficient_scan' THEN 'Optimize WHERE clause'
+              ELSE 'Query performing well'
+            END as recommendations
+          FROM categorized
+          ORDER BY total_wait_sec DESC
+          LIMIT 50
+        metrics:
+          - metric_name: mysql.intelligence.comprehensive
+            value_column: total_wait_sec
+            attribute_columns:
+              - query_digest
+              - query_text
+              - exec_count
+              - avg_wait_sec
+              - lock_time_sec
+              - wait_severity
+              - query_type
+              - performance_issue
+              - recommendations
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  resource:
+    attributes:
+      - key: service.name
+        value: mysql-monitoring
+        action: insert
+      - key: environment
+        value: production
+        action: insert
+      - key: db.system
+        value: mysql
+        action: insert
+
+  # Metrics transform for intelligence insights
+  metricstransform:
+    transforms:
+      - include: mysql.intelligence.comprehensive
+        match_type: strict
+        action: insert
+        new_name: mysql.intelligence.rate
+        operations:
+          - action: experimental_scale_value
+            experimental_scale: 60
+          - action: aggregate_labels
+            aggregation_type: sum
+            label_set: [query_digest]
+
+  # Memory limiter
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 2048
+    spike_limit_mib: 512
+
+exporters:
+  otlp:
+    endpoint: otlp.nr-data.net:4317
+    headers:
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
+
+  debug:
+    verbosity: basic
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [mysql, hostmetrics]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp, debug]
+    
+    # Intelligence pipeline for SQL query analysis
+    metrics/intelligence:
+      receivers: [sqlquery/intelligence]
+      processors: [memory_limiter, metricstransform, batch, resource]
+      exporters: [otlp, debug]

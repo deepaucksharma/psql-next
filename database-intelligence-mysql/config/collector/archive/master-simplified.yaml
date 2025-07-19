@@ -1,0 +1,238 @@
+# Master OpenTelemetry Collector Configuration - Simplified
+# All variables replaced with actual values
+
+receivers:
+  # Primary MySQL metrics receiver
+  mysql/primary:
+    endpoint: mysql-primary:3306
+    username: otel_monitor
+    password: otelmonitorpass
+    collection_interval: 10s
+    metrics:
+      mysql.buffer_pool.data_pages: { enabled: true }
+      mysql.buffer_pool.limit: { enabled: true }
+      mysql.buffer_pool.operations: { enabled: true }
+      mysql.buffer_pool.page_flushes: { enabled: true }
+      mysql.buffer_pool.pages: { enabled: true }
+      mysql.buffer_pool.usage: { enabled: true }
+      mysql.client.network.io: { enabled: true }
+      mysql.commands: { enabled: true }
+      mysql.connection.count: { enabled: true }
+      mysql.connection.errors: { enabled: true }
+      mysql.double_writes: { enabled: true }
+      mysql.handlers: { enabled: true }
+      mysql.index.io.wait.count: { enabled: true }
+      mysql.index.io.wait.time: { enabled: true }
+      mysql.innodb.row_lock.time: { enabled: true }
+      mysql.innodb.row_lock.waits: { enabled: true }
+      mysql.locks: { enabled: true }
+      mysql.log_operations: { enabled: true }
+      mysql.operations: { enabled: true }
+      mysql.page_operations: { enabled: true }
+      mysql.prepared_statements: { enabled: true }
+      mysql.query.client.count: { enabled: true }
+      mysql.query.count: { enabled: true }
+      mysql.query.slow.count: { enabled: true }
+      mysql.replica.lag: { enabled: true }
+      mysql.replica.sql_delay: { enabled: true }
+      mysql.replica.time_behind_source: { enabled: true }
+      mysql.row_locks: { enabled: true }
+      mysql.row_operations: { enabled: true }
+      mysql.sorts: { enabled: true }
+      mysql.statement_event.count: { enabled: true }
+      mysql.statement_event.wait.histogram: { enabled: true }
+      mysql.statement_event.wait.time: { enabled: true }
+      mysql.table.io.wait.count: { enabled: true }
+      mysql.table.io.wait.time: { enabled: true }
+      mysql.table.lock_wait.count: { enabled: true }
+      mysql.table.lock_wait.time: { enabled: true }
+      mysql.table_open_cache: { enabled: true }
+      mysql.threads: { enabled: true }
+      mysql.tmp_resources: { enabled: true }
+      mysql.uptime: { enabled: true }
+
+  # SQL Query Intelligence
+  sqlquery/intelligence:
+    driver: mysql
+    datasource: "otel_monitor:otelmonitorpass@tcp(mysql-primary:3306)/"
+    collection_interval: 5s
+    queries:
+      - sql: |
+          WITH wait_analysis AS (
+            SELECT 
+              DIGEST,
+              DIGEST_TEXT,
+              COUNT_STAR as exec_count,
+              SUM_TIMER_WAIT/1000000000000 as total_wait_sec,
+              AVG_TIMER_WAIT/1000000000000 as avg_wait_sec,
+              SUM_LOCK_TIME/1000000000000 as lock_time_sec,
+              SUM_ROWS_EXAMINED as rows_examined,
+              SUM_ROWS_SENT as rows_sent,
+              SUM_NO_INDEX_USED as no_index_used,
+              SUM_NO_GOOD_INDEX_USED as no_good_index_used
+            FROM performance_schema.events_statements_summary_by_digest
+            WHERE DIGEST_TEXT IS NOT NULL
+              AND COUNT_STAR > 0
+          ),
+          categorized AS (
+            SELECT 
+              *,
+              CASE 
+                WHEN avg_wait_sec > 1 THEN 'critical'
+                WHEN avg_wait_sec > 0.1 THEN 'warning'
+                ELSE 'normal'
+              END as wait_severity,
+              CASE
+                WHEN DIGEST_TEXT LIKE '%SELECT%' THEN 'read'
+                WHEN DIGEST_TEXT LIKE '%INSERT%' OR DIGEST_TEXT LIKE '%UPDATE%' OR DIGEST_TEXT LIKE '%DELETE%' THEN 'write'
+                ELSE 'other'
+              END as query_type,
+              CASE
+                WHEN no_index_used > 0 OR no_good_index_used > 0 THEN 'index_missing'
+                WHEN lock_time_sec > total_wait_sec * 0.5 THEN 'lock_heavy'
+                WHEN rows_examined > rows_sent * 100 THEN 'inefficient_scan'
+                ELSE 'normal'
+              END as performance_issue
+            FROM wait_analysis
+          )
+          SELECT 
+            DIGEST as query_digest,
+            DIGEST_TEXT as query_text,
+            exec_count,
+            total_wait_sec,
+            avg_wait_sec,
+            lock_time_sec,
+            rows_examined,
+            rows_sent,
+            wait_severity,
+            query_type,
+            performance_issue,
+            CASE 
+              WHEN performance_issue = 'index_missing' THEN 'CREATE INDEX on affected columns'
+              WHEN performance_issue = 'lock_heavy' THEN 'Review transaction isolation level'
+              WHEN performance_issue = 'inefficient_scan' THEN 'Optimize WHERE clause'
+              ELSE 'Query performing well'
+            END as recommendation
+          FROM categorized
+          ORDER BY total_wait_sec DESC
+          LIMIT 100
+        metrics:
+          - metric_name: mysql.intelligence.comprehensive
+            value_column: total_wait_sec
+            attribute_columns:
+              - query_digest
+              - query_text
+              - exec_count
+              - avg_wait_sec
+              - lock_time_sec
+              - wait_severity
+              - query_type
+              - performance_issue
+              - recommendation
+            data_point_type: gauge
+
+  # Host metrics
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+      memory:
+      disk:
+      network:
+
+processors:
+  # Batch processor
+  batch:
+    timeout: 5s
+    send_batch_size: 10000
+
+  # Resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: mysql-monitoring
+        action: insert
+      - key: environment
+        value: production
+        action: insert
+      - key: mysql.instance.endpoint
+        value: mysql-primary:3306
+        action: insert
+
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: db.system
+        value: mysql
+        action: insert
+
+  # Metrics transform for rate calculation
+  metricstransform:
+    transforms:
+      - include: mysql.intelligence.comprehensive
+        match_type: strict
+        action: insert
+        new_name: mysql.intelligence.rate
+        operations:
+          - action: experimental_scale_value
+            experimental_scale: 60
+          - action: aggregate_labels
+            aggregation_type: sum
+            label_set: [query_digest]
+
+  # Memory limiter
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 2048
+    spike_limit_mib: 512
+
+exporters:
+  # New Relic OTLP exporter
+  otlp/newrelic:
+    endpoint: https://otlp.nr-data.net:4318
+    headers:
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+
+  # Debug exporter
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  
+  pipelines:
+    # Standard metrics pipeline
+    metrics/standard:
+      receivers: [mysql/primary, hostmetrics]
+      processors: [memory_limiter, batch, resource, attributes/newrelic]
+      exporters: [otlp/newrelic, debug]
+    
+    # Intelligence pipeline
+    metrics/intelligence:
+      receivers: [sqlquery/intelligence]
+      processors: [memory_limiter, metricstransform, batch, resource, attributes/newrelic]
+      exporters: [otlp/newrelic, debug]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

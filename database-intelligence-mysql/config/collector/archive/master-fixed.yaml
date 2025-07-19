@@ -9,12 +9,12 @@
 receivers:
   # Primary MySQL metrics receiver with all available metrics
   mysql/primary:
-    endpoint: ${env:MYSQL_PRIMARY_ENDPOINT}
-    username: ${env:MYSQL_USER}
-    password: ${env:MYSQL_PASSWORD}
-    database: ${env:MYSQL_DATABASE:""}
-    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:10s}
-    initial_delay: ${env:MYSQL_INITIAL_DELAY:1s}
+    endpoint: mysql-primary:3306
+    username: otel_monitor
+    password: otelmonitorpass
+    database: ${MYSQL_DATABASE:-""}
+    collection_interval: ${MYSQL_COLLECTION_INTERVAL:-10s}
+    initial_delay: ${MYSQL_INITIAL_DELAY:-1s}
     transport: tcp
     metrics:
       mysql.buffer_pool.data_pages:
@@ -116,12 +116,12 @@ receivers:
     
   # Replica MySQL receiver for replication monitoring
   mysql/replica:
-    endpoint: ${env:MYSQL_REPLICA_ENDPOINT}
-    username: ${env:MYSQL_USER}
-    password: ${env:MYSQL_PASSWORD}
-    database: ${env:MYSQL_DATABASE:""}
-    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:10s}
-    initial_delay: ${env:MYSQL_INITIAL_DELAY:1s}
+    endpoint: mysql-replica:3306
+    username: otel_monitor
+    password: otelmonitorpass
+    database: ${MYSQL_DATABASE:-""}
+    collection_interval: ${MYSQL_COLLECTION_INTERVAL:-10s}
+    initial_delay: ${MYSQL_INITIAL_DELAY:-1s}
     metrics:
       mysql.replica.time_behind_source:
         enabled: true
@@ -142,7 +142,7 @@ receivers:
     
   # Host metrics for system resource monitoring
   hostmetrics:
-    collection_interval: ${env:HOST_COLLECTION_INTERVAL:10s}
+    collection_interval: ${HOST_COLLECTION_INTERVAL:-10s}
     scrapers:
       cpu:
         metrics:
@@ -188,8 +188,8 @@ receivers:
   # Ultra-comprehensive SQL query intelligence receiver
   sqlquery/extreme_intelligence:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_PRIMARY_ENDPOINT})/"
-    collection_interval: ${env:SQL_INTELLIGENCE_INTERVAL:5s}
+    datasource: "otel_monitor:otelmonitorpass@tcp(mysql-primary:3306)/"
+    collection_interval: ${SQL_INTELLIGENCE_INTERVAL:-5s}
     queries:
       # Mega query for complete database intelligence
       - sql: |
@@ -517,10 +517,10 @@ receivers:
   prometheus/advanced:
     config:
       global:
-        scrape_interval: ${env:PROMETHEUS_SCRAPE_INTERVAL:10s}
+        scrape_interval: ${PROMETHEUS_SCRAPE_INTERVAL:-10s}
         external_labels:
-          cluster: '${env:CLUSTER_NAME}'
-          environment: '${env:ENVIRONMENT}'
+          cluster: '${CLUSTER_NAME}'
+          environment: '${ENVIRONMENT}'
       
       scrape_configs:
         - job_name: 'mysql_exporter_advanced'
@@ -538,7 +538,7 @@ receivers:
               - perf_schema.replication_group_members
           
           static_configs:
-            - targets: ['${env:MYSQL_EXPORTER_ENDPOINT}']
+            - targets: ['${MYSQL_EXPORTER_ENDPOINT}']
           
           metric_relabel_configs:
             - source_labels: [__name__, operation, schema]
@@ -569,9 +569,9 @@ receivers:
 processors:
   # Memory management
   memory_limiter:
-    check_interval: ${env:MEMORY_CHECK_INTERVAL:5s}
-    limit_percentage: ${env:MEMORY_LIMIT_PERCENT:80}
-    spike_limit_percentage: ${env:MEMORY_SPIKE_PERCENT:30}
+    check_interval: ${MEMORY_CHECK_INTERVAL:-5s}
+    limit_percentage: ${MEMORY_LIMIT_PERCENT:-80}
+    spike_limit_percentage: ${MEMORY_SPIKE_PERCENT:-30}
 
   memory_limiter/small:
     check_interval: 1s
@@ -580,9 +580,9 @@ processors:
     
   # Batching for efficiency
   batch:
-    timeout: ${env:BATCH_TIMEOUT:5s}
-    send_batch_size: ${env:BATCH_SIZE:1000}
-    send_batch_max_size: ${env:BATCH_MAX_SIZE:2000}
+    timeout: ${BATCH_TIMEOUT:-5s}
+    send_batch_size: ${BATCH_SIZE:-1000}
+    send_batch_max_size: ${BATCH_MAX_SIZE:-2000}
     
   # Small batch for critical metrics
   batch/minimal:
@@ -600,28 +600,28 @@ processors:
   resource:
     attributes:
       - key: service.name
-        value: ${env:SERVICE_NAME:mysql-monitoring}
+        value: ${SERVICE_NAME:-mysql-monitoring}
         action: insert
       - key: service.namespace
-        value: ${env:NAMESPACE}
+        value: ${NAMESPACE}
         action: insert
       - key: service.version
-        value: ${env:MYSQL_VERSION}
+        value: ${MYSQL_VERSION}
         action: insert
       - key: mysql.instance.endpoint
-        value: ${env:MYSQL_PRIMARY_ENDPOINT}
+        value: mysql-primary:3306
         action: insert
       - key: mysql.instance.role
-        value: ${env:MYSQL_ROLE}
+        value: ${MYSQL_ROLE}
         action: insert
       - key: cloud.provider
-        value: ${env:CLOUD_PROVIDER}
+        value: ${CLOUD_PROVIDER}
         action: insert
       - key: cloud.region
-        value: ${env:CLOUD_REGION}
+        value: ${CLOUD_REGION}
         action: insert
       - key: deployment.environment
-        value: ${env:ENVIRONMENT}
+        value: ${ENVIRONMENT}
         action: insert
         
   # New Relic specific attributes
@@ -643,13 +643,13 @@ processors:
         value: mysql
         action: insert
       - key: environment
-        value: ${env:ENVIRONMENT}
+        value: ${ENVIRONMENT}
         action: insert
       - key: team
-        value: ${env:TEAM_NAME}
+        value: ${TEAM_NAME}
         action: insert
       - key: cost_center
-        value: ${env:COST_CENTER}
+        value: ${COST_CENTER}
         action: insert
 
   # Transform standard metrics for analysis
@@ -1118,7 +1118,7 @@ processors:
       
   # Sampling for high-volume metrics
   probabilistic_sampler:
-    sampling_percentage: ${env:SAMPLING_PERCENTAGE:100}
+    sampling_percentage: ${SAMPLING_PERCENTAGE:-100}
 
 # ============================================================================
 # EXPORTERS - Data Destinations
@@ -1127,17 +1127,17 @@ processors:
 exporters:
   # Debug output for troubleshooting
   debug:
-    verbosity: ${DEBUG_VERBOSITY:-normal}
-    sampling_initial: ${DEBUG_SAMPLING_INITIAL:-10}
-    sampling_thereafter: ${DEBUG_SAMPLING_THEREAFTER:-100}
+    verbosity: normal
+    sampling_initial: 10
+    sampling_thereafter: 100
     
   # Primary New Relic OTLP HTTP exporter
   otlphttp/newrelic:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net}
+    endpoint: https://otlp.nr-data.net
     headers:
-      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
     compression: gzip
-    timeout: ${env:EXPORT_TIMEOUT:30s}
+    timeout: ${EXPORT_TIMEOUT:-30s}
     retry_on_failure:
       enabled: true
       initial_interval: 5s
@@ -1145,14 +1145,14 @@ exporters:
       max_elapsed_time: 300s
     sending_queue:
       enabled: true
-      num_consumers: ${env:EXPORT_WORKERS:5}
-      queue_size: ${env:EXPORT_QUEUE_SIZE:10000}
+      num_consumers: ${EXPORT_WORKERS:-5}
+      queue_size: ${EXPORT_QUEUE_SIZE:-10000}
 
   # Multiple priority exporters
   otlp/realtime_high_priority:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    endpoint: https://otlp.nr-data.net:4318
     headers:
-      api-key: ${env:NEW_RELIC_API_KEY}
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
     compression: none  # No compression for lowest latency
     timeout: 5s
     sending_queue:
@@ -1166,9 +1166,9 @@ exporters:
       max_elapsed_time: 30s
     
   otlp/near_realtime:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    endpoint: https://otlp.nr-data.net:4318
     headers:
-      api-key: ${env:NEW_RELIC_API_KEY}
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
     compression: gzip
     timeout: 10s
     sending_queue:
@@ -1177,9 +1177,9 @@ exporters:
       queue_size: 10000
     
   otlp/standard:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    endpoint: https://otlp.nr-data.net:4318
     headers:
-      api-key: ${env:NEW_RELIC_API_KEY}
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
     compression: gzip
     timeout: 30s
     sending_queue:
@@ -1193,9 +1193,9 @@ exporters:
       max_elapsed_time: 300s
     
   otlp/batch_low_priority:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    endpoint: https://otlp.nr-data.net:4318
     headers:
-      api-key: ${env:NEW_RELIC_API_KEY}
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
     compression: gzip
     timeout: 60s
     sending_queue:
@@ -1211,9 +1211,9 @@ exporters:
 
   # Default OTLP exporter for compatibility
   otlp/newrelic:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    endpoint: https://otlp.nr-data.net:4318
     headers:
-      api-key: ${env:NEW_RELIC_API_KEY}
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
     compression: gzip
     retry_on_failure:
       enabled: true
@@ -1223,30 +1223,30 @@ exporters:
 
   # Business dashboard specific exporter
   otlp/business_dashboard:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    endpoint: https://otlp.nr-data.net:4318
     headers:
-      api-key: ${env:NEW_RELIC_API_KEY}
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
     compression: gzip
     timeout: 30s
 
   # ML endpoint for AI/ML features
   otlp/ml_endpoint:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    endpoint: https://otlp.nr-data.net:4318
     headers:
-      api-key: ${env:NEW_RELIC_API_KEY}
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
     compression: gzip
     timeout: 30s
       
   # Alternative OTLP gRPC exporter
   otlp/newrelic_grpc:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:otlp.nr-data.net:4317}
+    endpoint: otlp.nr-data.net:4317
     headers:
-      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
     compression: gzip
     
   # Prometheus exporter for local metrics
   prometheus:
-    endpoint: 0.0.0.0:${env:PROMETHEUS_PORT:8889}
+    endpoint: 0.0.0.0:${PROMETHEUS_PORT:-8889}
     namespace: mysql
     const_labels:
       service: mysql-monitoring
@@ -1255,7 +1255,7 @@ exporters:
       
   # File exporter for backup
   file:
-    path: ${env:METRICS_FILE_PATH:/tmp/mysql-metrics.json}
+    path: /tmp/mysql-metrics.json
     rotation:
       max_megabytes: 10
       max_days: 3
@@ -1263,7 +1263,7 @@ exporters:
       
   # Logging exporter
   logging:
-    loglevel: ${env:LOG_EXPORT_LEVEL:info}
+    loglevel: info
     sampling_initial: 5
     sampling_thereafter: 200
 
@@ -1274,24 +1274,24 @@ exporters:
 extensions:
   # Health check endpoint
   health_check:
-    endpoint: 0.0.0.0:${env:HEALTH_PORT:13133}
+    endpoint: 0.0.0.0:${HEALTH_PORT:-13133}
     path: /health
     
   # Performance profiling
   pprof:
-    endpoint: 0.0.0.0:${env:PPROF_PORT:1777}
+    endpoint: 0.0.0.0:${PPROF_PORT:-1777}
     
   # zPages for debugging
   zpages:
-    endpoint: 0.0.0.0:${env:ZPAGES_PORT:55679}
+    endpoint: 0.0.0.0:${ZPAGES_PORT:-55679}
     
   # File storage for queue persistence
   file_storage:
-    directory: ${env:OTEL_FILE_STORAGE_DIR:/tmp/otel-storage}
+    directory: ${OTEL_FILE_STORAGE_DIR:-/tmp/otel-storage}
     timeout: 10s
     compaction:
       on_start: true
-      directory: ${env:OTEL_FILE_STORAGE_DIR:/tmp/otel-storage}
+      directory: ${OTEL_FILE_STORAGE_DIR:-/tmp/otel-storage}
       max_transaction_size: 65536
 
 # ============================================================================
@@ -1302,13 +1302,13 @@ service:
   # Telemetry settings
   telemetry:
     logs:
-      level: ${env:LOG_LEVEL:info}
+      level: ${LOG_LEVEL:-info}
       initial_fields:
         service: mysql-otel-collector
         version: "3.0.0"
     metrics:
-      level: ${env:TELEMETRY_LEVEL:detailed}
-      address: 0.0.0.0:${env:TELEMETRY_PORT:8888}
+      level: ${TELEMETRY_LEVEL:-detailed}
+      address: 0.0.0.0:${TELEMETRY_PORT:-8888}
       
   # Active extensions
   extensions: [health_check, pprof, zpages, file_storage]
