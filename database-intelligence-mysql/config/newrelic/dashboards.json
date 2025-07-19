@@ -1,0 +1,128 @@
+{
+  "dashboards": [
+    {
+      "name": "MySQL Comprehensive Monitoring",
+      "description": "Complete MySQL monitoring with intelligence, wait analysis, and business impact",
+      "pages": [
+        {
+          "name": "Overview",
+          "widgets": [
+            {
+              "title": "MySQL Health Score",
+              "type": "billboard",
+              "query": "SELECT latest(value) as 'Health Score' FROM Metric WHERE metricName = 'mysql.health.score' AND instrumentation.provider = 'opentelemetry' FACET mysql.instance.endpoint SINCE 5 minutes ago",
+              "thresholds": [
+                {"value": 70, "severity": "warning"},
+                {"value": 50, "severity": "critical"}
+              ]
+            },
+            {
+              "title": "Active Connections",
+              "type": "line",
+              "query": "SELECT average(mysql.threads) as 'Current', average(mysql.connection.max) as 'Max' FROM Metric WHERE instrumentation.provider = 'opentelemetry' TIMESERIES AUTO"
+            },
+            {
+              "title": "Query Rate",
+              "type": "area",
+              "query": "SELECT rate(sum(mysql.query.count), 1 minute) as 'Queries/min' FROM Metric WHERE instrumentation.provider = 'opentelemetry' TIMESERIES AUTO"
+            },
+            {
+              "title": "Database Size",
+              "type": "table",
+              "query": "SELECT latest(mysql.table.size) as 'Size (MB)' FROM Metric WHERE instrumentation.provider = 'opentelemetry' FACET db.name, table.name LIMIT 20"
+            }
+          ]
+        },
+        {
+          "name": "Performance Analysis",
+          "widgets": [
+            {
+              "title": "Wait Profile Analysis",
+              "type": "bar",
+              "query": "SELECT sum(value) as 'Total Wait Time', filter(count(*), WHERE attributes['exec_count'] IS NOT NULL) as 'Executions' FROM Metric WHERE metricName = 'mysql.query.wait_profile' FACET attributes['query_hash'] LIMIT 20 SINCE 1 hour ago"
+            },
+            {
+              "title": "Wait Categories",
+              "type": "pie",
+              "query": "SELECT sum(value) FROM Metric WHERE metricName = 'mysql.query.wait_profile' FACET attributes['wait.category'] SINCE 1 hour ago"
+            },
+            {
+              "title": "InnoDB Buffer Pool",
+              "type": "line",
+              "query": "SELECT average(mysql.buffer_pool.usage) as 'Usage %', average(mysql.buffer_pool.hit_ratio) as 'Hit Ratio %' FROM Metric WHERE instrumentation.provider = 'opentelemetry' TIMESERIES AUTO"
+            },
+            {
+              "title": "Lock Waits",
+              "type": "area",
+              "query": "SELECT sum(mysql.locks.deadlock) as 'Deadlocks', sum(mysql.locks.row_waiting) as 'Row Locks Waiting' FROM Metric WHERE instrumentation.provider = 'opentelemetry' TIMESERIES AUTO"
+            }
+          ]
+        },
+        {
+          "name": "Intelligence & Advisory",
+          "widgets": [
+            {
+              "title": "Active Advisories",
+              "type": "table",
+              "query": "SELECT count(*) as 'Count', latest(attributes['advisor.recommendation']) as 'Recommendation', latest(attributes['advisor.priority']) as 'Priority' FROM Metric WHERE attributes['advisor.type'] IS NOT NULL FACET attributes['advisor.type'] SINCE 1 hour ago"
+            },
+            {
+              "title": "Anomaly Detection",
+              "type": "billboard",
+              "query": "SELECT filter(count(*), WHERE attributes['anomaly.detected'] = true) as 'Active Anomalies', filter(count(*), WHERE attributes['anomaly.severity'] = 'critical') as 'Critical' FROM Metric WHERE instrumentation.provider = 'opentelemetry' SINCE 30 minutes ago",
+              "thresholds": [
+                {"value": 5, "severity": "warning"},
+                {"value": 10, "severity": "critical"}
+              ]
+            },
+            {
+              "title": "Intelligence Score Trend",
+              "type": "line",
+              "query": "SELECT average(value) as 'Score' FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive' TIMESERIES 5 minutes"
+            },
+            {
+              "title": "Top Intelligence Insights",
+              "type": "table",
+              "query": "SELECT max(value) as 'Score', latest(attributes['query_text']) as 'Query', latest(attributes['recommendations']) as 'Recommendations' FROM Metric WHERE metricName = 'mysql.intelligence.comprehensive' FACET attributes['query_digest'] LIMIT 10 SINCE 1 hour ago"
+            }
+          ]
+        },
+        {
+          "name": "Replication",
+          "widgets": [
+            {
+              "title": "Replication Lag",
+              "type": "line",
+              "query": "SELECT average(mysql.replica.lag) as 'Lag (seconds)' FROM Metric WHERE instrumentation.provider = 'opentelemetry' FACET mysql.instance.endpoint TIMESERIES AUTO"
+            },
+            {
+              "title": "Replication Status",
+              "type": "table",
+              "query": "SELECT latest(mysql.replica.io_running) as 'IO Running', latest(mysql.replica.sql_running) as 'SQL Running', latest(mysql.replica.lag) as 'Lag' FROM Metric WHERE instrumentation.provider = 'opentelemetry' FACET mysql.instance.endpoint"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "alerts": [
+    {
+      "name": "MySQL High Connection Usage",
+      "query": "SELECT average(mysql.threads) / average(mysql.connection.max) * 100 FROM Metric WHERE instrumentation.provider = 'opentelemetry'",
+      "threshold": 80,
+      "duration": 5
+    },
+    {
+      "name": "MySQL Replication Lag",
+      "query": "SELECT max(mysql.replica.lag) FROM Metric WHERE instrumentation.provider = 'opentelemetry'",
+      "threshold": 10,
+      "duration": 5
+    },
+    {
+      "name": "MySQL Critical Anomalies",
+      "query": "SELECT filter(count(*), WHERE attributes['anomaly.severity'] = 'critical') FROM Metric WHERE instrumentation.provider = 'opentelemetry'",
+      "threshold": 5,
+      "duration": 3
+    }
+  ]
+}

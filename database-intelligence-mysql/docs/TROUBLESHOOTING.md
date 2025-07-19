@@ -307,6 +307,49 @@ processors:
     sampling_percentage: 10  # Only keep 10% of data points
 ```
 
+## 9. Git Push Blocked by Secret Detection
+
+**Symptoms:**
+- GitHub blocks push due to detected API keys in commit history
+- Error mentions secret scanning alerts
+- Cannot push to remote repository
+
+**Causes:**
+- New Relic API keys were committed in previous commits
+- GitHub's secret scanning detected the keys
+
+**Solutions:**
+
+### Quick Fix - Allow Secrets (Private Repos Only)
+Visit the secret scanning URLs provided by GitHub to allow the secrets.
+
+### Recommended - Clean History
+Since secrets are already removed in latest commits:
+
+```bash
+# Create a squashed commit with all changes
+git checkout master
+git reset --soft <commit-before-secrets>
+git add -A
+git commit -m "Consolidated commit without secrets"
+
+# Force push
+git push --force origin master
+```
+
+### Alternative - New Branch
+```bash
+git checkout -b mysql-monitoring-clean
+git push origin mysql-monitoring-clean
+# Create PR to merge into master
+```
+
+### Prevention
+- All sensitive API keys have been replaced with placeholders
+- Always use environment variables for secrets
+- Add `.env` files to `.gitignore`
+- Use templates like `.env.example` for sharing configuration
+
 ## Getting Help
 
 If these solutions don't resolve your issue:

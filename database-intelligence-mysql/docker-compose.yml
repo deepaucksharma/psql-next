@@ -14,7 +14,7 @@ services:
     volumes:
       - ./mysql/init:/docker-entrypoint-initdb.d
       - mysql_primary_data:/var/lib/mysql
-      - ./mysql/conf/primary.cnf:/etc/mysql/conf.d/custom.cnf
+      - ./config/mysql/primary.cnf:/etc/mysql/conf.d/custom.cnf
     command: --default-authentication-plugin=mysql_native_password
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -37,7 +37,7 @@ services:
     volumes:
       - ./mysql/init:/docker-entrypoint-initdb.d
       - mysql_replica_data:/var/lib/mysql
-      - ./mysql/conf/replica.cnf:/etc/mysql/conf.d/custom.cnf
+      - ./config/mysql/replica.cnf:/etc/mysql/conf.d/custom.cnf
     command: --default-authentication-plugin=mysql_native_password
     depends_on:
       mysql-primary:
@@ -51,7 +51,7 @@ services:
       - mysql-network
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.96.0
+    image: otel/opentelemetry-collector-contrib:latest
     container_name: otel-collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     environment:
@@ -66,7 +66,7 @@ services:
       # New Relic Configuration
       NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
       NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
-      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net:4318}
       
       # Environment Settings
       ENVIRONMENT: ${ENVIRONMENT:-development}
@@ -74,16 +74,35 @@ services:
       TEAM_NAME: ${TEAM_NAME:-database-team}
       SERVICE_NAME: ${SERVICE_NAME:-mysql-monitoring}
       COST_CENTER: ${COST_CENTER:-engineering}
+      CLUSTER_NAME: ${CLUSTER_NAME:-mysql-cluster}
+      MYSQL_ROLE: ${MYSQL_ROLE:-primary}
       
       # Cloud Provider Settings
       CLOUD_PROVIDER: ${CLOUD_PROVIDER:-docker}
       CLOUD_REGION: ${CLOUD_REGION:-local}
       
+      # Master Configuration Settings
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-advanced}
+      ENABLE_SQL_INTELLIGENCE: ${ENABLE_SQL_INTELLIGENCE:-true}
+      MYSQL_COLLECTION_INTERVAL: ${MYSQL_COLLECTION_INTERVAL:-5s}
+      SQL_INTELLIGENCE_INTERVAL: ${SQL_INTELLIGENCE_INTERVAL:-5s}
+      BATCH_SIZE: ${BATCH_SIZE:-1000}
+      MEMORY_LIMIT_PERCENT: ${MEMORY_LIMIT_PERCENT:-80}
+      SCRAPE_INTERVAL: ${SCRAPE_INTERVAL:-10s}
+      PERFORMANCE_SCHEMA_EVENTS_LIMIT: ${PERFORMANCE_SCHEMA_EVENTS_LIMIT:-100}
+      WAIT_PROFILE_ENABLED: ${WAIT_PROFILE_ENABLED:-true}
+      ML_FEATURES_ENABLED: ${ML_FEATURES_ENABLED:-true}
+      BUSINESS_CONTEXT_ENABLED: ${BUSINESS_CONTEXT_ENABLED:-true}
+      ANOMALY_DETECTION_ENABLED: ${ANOMALY_DETECTION_ENABLED:-true}
+      ADVISOR_ENGINE_ENABLED: ${ADVISOR_ENGINE_ENABLED:-true}
+      
       # Resource limits
       GOMAXPROCS: "2"
       GOMEMLIMIT: "1750MiB"
+      OTEL_FILE_STORAGE_DIR: "/tmp/otel-storage"
     volumes:
-      - ./otel/config/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+      - ./config/collector/master.yaml:/etc/otel-collector-config.yaml:ro
+      - otel_storage:/tmp/otel-storage
     ports:
       - "13133:13133" # Health check extension
       - "55679:55679" # zPages extension
@@ -108,7 +127,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
     volumes:
-      - ./app:/app
+      - ./examples/python-app:/app
     working_dir: /app
     command: python app.py
     depends_on:
@@ -125,3 +144,4 @@ networks:
 volumes:
   mysql_primary_data:
   mysql_replica_data:
+  otel_storage:

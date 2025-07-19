@@ -1,0 +1,1442 @@
+# MySQL OpenTelemetry Collector - Master Configuration
+# Consolidates ALL features from all configurations
+# Version: 3.0.0
+
+# ============================================================================
+# RECEIVERS - Data Collection Sources
+# ============================================================================
+
+receivers:
+  # Primary MySQL metrics receiver with all available metrics
+  mysql/primary:
+    endpoint: ${env:MYSQL_PRIMARY_ENDPOINT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DATABASE:""}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:10s}
+    initial_delay: ${env:MYSQL_INITIAL_DELAY:1s}
+    transport: tcp
+    metrics:
+      mysql.buffer_pool.data_pages:
+        enabled: true
+      mysql.buffer_pool.limit:
+        enabled: true
+      mysql.buffer_pool.operations:
+        enabled: true
+      mysql.buffer_pool.page_flushes:
+        enabled: true
+      mysql.buffer_pool.pages:
+        enabled: true
+      mysql.buffer_pool.usage:
+        enabled: true
+      mysql.client.network.io:
+        enabled: true
+      mysql.commands:
+        enabled: true
+      mysql.connection.count:
+        enabled: true
+      mysql.connection.errors:
+        enabled: true
+      mysql.connection.max:
+        enabled: true
+      mysql.double_writes:
+        enabled: true
+      mysql.handlers:
+        enabled: true
+      mysql.index.io.wait.count:
+        enabled: true
+      mysql.index.io.wait.time:
+        enabled: true
+      mysql.innodb.buffer_pool_pages:
+        enabled: true
+      mysql.innodb.data_fsyncs:
+        enabled: true
+      mysql.innodb.os_log_pending_fsyncs:
+        enabled: true
+      mysql.innodb.pages_created:
+        enabled: true
+      mysql.innodb.pages_read:
+        enabled: true
+      mysql.innodb.pages_written:
+        enabled: true
+      mysql.innodb.row_lock_time:
+        enabled: true
+      mysql.innodb.row_lock_waits:
+        enabled: true
+      mysql.innodb.row_operations:
+        enabled: true
+      mysql.joins:
+        enabled: true
+      mysql.locks:
+        enabled: true
+      mysql.log_operations:
+        enabled: true
+      mysql.opened_resources:
+        enabled: true
+      mysql.page_operations:
+        enabled: true
+      mysql.prepared_statements:
+        enabled: true
+      mysql.query.client.count:
+        enabled: true
+      mysql.query.count:
+        enabled: true
+      mysql.query.slow.count:
+        enabled: true
+      mysql.replica.sql_delay:
+        enabled: true
+      mysql.replica.time_behind_source:
+        enabled: true
+      mysql.row_locks:
+        enabled: true
+      mysql.row_operations:
+        enabled: true
+      mysql.sorts:
+        enabled: true
+      mysql.statement_event.count:
+        enabled: true
+      mysql.statement_event.wait.time:
+        enabled: true
+      mysql.table.io.wait.count:
+        enabled: true
+      mysql.table.io.wait.time:
+        enabled: true
+      mysql.table.lock_wait.count:
+        enabled: true
+      mysql.table.lock_wait.time:
+        enabled: true
+      mysql.table_open_cache:
+        enabled: true
+      mysql.threads:
+        enabled: true
+      mysql.tmp_resources:
+        enabled: true
+      mysql.uptime:
+        enabled: true
+    
+  # Replica MySQL receiver for replication monitoring
+  mysql/replica:
+    endpoint: ${env:MYSQL_REPLICA_ENDPOINT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DATABASE:""}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:10s}
+    initial_delay: ${env:MYSQL_INITIAL_DELAY:1s}
+    metrics:
+      mysql.replica.time_behind_source:
+        enabled: true
+      mysql.replica.sql_delay:
+        enabled: true
+      mysql.buffer_pool.usage:
+        enabled: true
+      mysql.connection.count:
+        enabled: true
+      mysql.connection.max:
+        enabled: true
+      mysql.query.count:
+        enabled: true
+      mysql.threads:
+        enabled: true
+      mysql.uptime:
+        enabled: true
+    
+  # Host metrics for system resource monitoring
+  hostmetrics:
+    collection_interval: ${env:HOST_COLLECTION_INTERVAL:10s}
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.usage:
+            enabled: true
+          system.memory.utilization:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.io_time:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.usage:
+            enabled: true
+          system.filesystem.utilization:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.packets:
+            enabled: true
+          system.network.errors:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+          system.cpu.load_average.15m:
+            enabled: true
+            
+  # Ultra-comprehensive SQL query intelligence receiver
+  sqlquery/extreme_intelligence:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_PRIMARY_ENDPOINT})/"
+    collection_interval: ${env:SQL_INTELLIGENCE_INTERVAL:5s}
+    queries:
+      # Mega query for complete database intelligence
+      - sql: |
+          WITH 
+          -- Real-time wait analysis
+          current_waits AS (
+            SELECT 
+              t.THREAD_ID,
+              t.PROCESSLIST_ID,
+              esh.DIGEST,
+              esh.CURRENT_SCHEMA,
+              esh.SQL_TEXT,
+              esh.TIMER_WAIT as statement_time,
+              esh.LOCK_TIME,
+              esh.ROWS_EXAMINED,
+              esh.ROWS_SENT,
+              esh.NO_INDEX_USED,
+              esh.NO_GOOD_INDEX_USED,
+              esh.CREATED_TMP_DISK_TABLES,
+              esh.SELECT_FULL_JOIN,
+              esh.SELECT_SCAN,
+              esh.SORT_SCAN,
+              esh.TIMER_START,
+              esh.TIMER_END,
+              COUNT(DISTINCT ews.EVENT_NAME) as wait_event_types,
+              SUM(ews.TIMER_WAIT) as total_wait_time,
+              GROUP_CONCAT(
+                CONCAT(ews.EVENT_NAME, ':', ROUND(ews.TIMER_WAIT/1000000))
+                ORDER BY ews.TIMER_WAIT DESC
+                SEPARATOR '|'
+              ) as wait_profile
+            FROM performance_schema.threads t
+            JOIN performance_schema.events_statements_current esh 
+              ON t.THREAD_ID = esh.THREAD_ID
+            LEFT JOIN performance_schema.events_waits_current ews 
+              ON t.THREAD_ID = ews.THREAD_ID
+            WHERE t.TYPE = 'FOREGROUND'
+              AND esh.TIMER_END IS NULL
+            GROUP BY t.THREAD_ID, esh.EVENT_ID
+          ),
+          -- Historical patterns
+          historical_patterns AS (
+            SELECT 
+              DIGEST,
+              COUNT_STAR as total_executions,
+              SUM_TIMER_WAIT as total_time,
+              MIN_TIMER_WAIT as best_time,
+              MAX_TIMER_WAIT as worst_time,
+              AVG_TIMER_WAIT as avg_time,
+              SUM_LOCK_TIME as total_lock_time,
+              SUM_ROWS_EXAMINED as total_rows_examined,
+              SUM_ROWS_SENT as total_rows_sent,
+              SUM_SELECT_FULL_JOIN as full_joins,
+              SUM_SELECT_SCAN as full_scans,
+              SUM_NO_INDEX_USED as no_index_count,
+              SUM_NO_GOOD_INDEX_USED as bad_index_count,
+              SUM_CREATED_TMP_DISK_TABLES as disk_tmp_tables,
+              SUM_SORT_SCAN as sort_scans,
+              FIRST_SEEN,
+              LAST_SEEN,
+              DIGEST_TEXT
+            FROM performance_schema.events_statements_summary_by_digest
+          ),
+          -- Lock analysis
+          lock_analysis AS (
+            SELECT 
+              REQUESTING_THREAD_ID,
+              BLOCKING_THREAD_ID,
+              REQUESTING_ENGINE_LOCK_ID,
+              BLOCKING_ENGINE_LOCK_ID,
+              REQUESTING_ENGINE_TRANSACTION_ID,
+              BLOCKING_ENGINE_TRANSACTION_ID,
+              OBJECT_SCHEMA,
+              OBJECT_NAME,
+              INDEX_NAME,
+              LOCK_TYPE,
+              LOCK_MODE,
+              LOCK_STATUS,
+              LOCK_DATA
+            FROM performance_schema.data_lock_waits dlw
+            JOIN performance_schema.data_locks dl 
+              ON dlw.REQUESTING_ENGINE_LOCK_ID = dl.ENGINE_LOCK_ID
+          ),
+          -- Resource usage
+          resource_metrics AS (
+            SELECT 
+              'cpu' as resource_type,
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_status 
+               WHERE VARIABLE_NAME = 'Threads_running') / 
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_variables 
+               WHERE VARIABLE_NAME = 'max_connections') * 100 as usage_percent,
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_status 
+               WHERE VARIABLE_NAME = 'Threads_running') as current_value,
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_variables 
+               WHERE VARIABLE_NAME = 'max_connections') as max_value
+            UNION ALL
+            SELECT 
+              'memory' as resource_type,
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_status 
+               WHERE VARIABLE_NAME = 'Innodb_buffer_pool_bytes_data') / 
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_variables 
+               WHERE VARIABLE_NAME = 'innodb_buffer_pool_size') * 100 as usage_percent,
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_status 
+               WHERE VARIABLE_NAME = 'Innodb_buffer_pool_bytes_data') as current_value,
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_variables 
+               WHERE VARIABLE_NAME = 'innodb_buffer_pool_size') as max_value
+            UNION ALL
+            SELECT 
+              'connections' as resource_type,
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_status 
+               WHERE VARIABLE_NAME = 'Threads_connected') / 
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_variables 
+               WHERE VARIABLE_NAME = 'max_connections') * 100 as usage_percent,
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_status 
+               WHERE VARIABLE_NAME = 'Threads_connected') as current_value,
+              (SELECT VARIABLE_VALUE FROM performance_schema.global_variables 
+               WHERE VARIABLE_NAME = 'max_connections') as max_value
+          )
+          -- FINAL INTELLIGENCE QUERY
+          SELECT 
+            -- Query identification
+            COALESCE(cw.DIGEST, hp.DIGEST) as query_digest,
+            COALESCE(cw.CURRENT_SCHEMA, 'unknown') as db_schema,
+            COALESCE(LEFT(cw.SQL_TEXT, 200), LEFT(hp.DIGEST_TEXT, 200)) as query_text,
+            
+            -- Real-time metrics
+            COALESCE(cw.statement_time, 0) / 1000000 as current_exec_time_ms,
+            COALESCE(cw.LOCK_TIME, 0) / 1000000 as current_lock_time_ms,
+            COALESCE(cw.ROWS_EXAMINED, 0) as current_rows_examined,
+            COALESCE(cw.ROWS_SENT, 0) as current_rows_sent,
+            COALESCE(cw.wait_profile, '') as current_wait_profile,
+            COALESCE(cw.total_wait_time, 0) / 1000000 as current_wait_time_ms,
+            COALESCE(cw.wait_event_types, 0) as current_wait_event_count,
+            
+            -- Historical intelligence
+            COALESCE(hp.total_executions, 0) as historical_exec_count,
+            COALESCE(hp.avg_time, 0) / 1000000 as historical_avg_time_ms,
+            COALESCE(hp.best_time, 0) / 1000000 as historical_best_time_ms,
+            COALESCE(hp.worst_time, 0) / 1000000 as historical_worst_time_ms,
+            
+            -- Performance indicators
+            CASE 
+              WHEN cw.NO_INDEX_USED = 1 THEN 'MISSING_INDEX'
+              WHEN cw.NO_GOOD_INDEX_USED = 1 THEN 'BAD_INDEX'
+              WHEN cw.CREATED_TMP_DISK_TABLES > 0 THEN 'DISK_TMP_TABLE'
+              WHEN cw.SELECT_FULL_JOIN > 0 THEN 'FULL_JOIN'
+              WHEN cw.SELECT_SCAN > 0 THEN 'FULL_SCAN'
+              WHEN cw.SORT_SCAN > 0 THEN 'FILESORT'
+              ELSE 'OK'
+            END as performance_issue,
+            
+            -- Wait analysis
+            CASE
+              WHEN cw.total_wait_time > cw.statement_time * 0.9 THEN 'CRITICAL'
+              WHEN cw.total_wait_time > cw.statement_time * 0.7 THEN 'HIGH'
+              WHEN cw.total_wait_time > cw.statement_time * 0.5 THEN 'MEDIUM'
+              WHEN cw.total_wait_time > cw.statement_time * 0.3 THEN 'LOW'
+              ELSE 'MINIMAL'
+            END as wait_severity,
+            
+            -- Lock intelligence
+            CASE 
+              WHEN la.BLOCKING_THREAD_ID IS NOT NULL THEN 'BLOCKED'
+              WHEN EXISTS (
+                SELECT 1 FROM lock_analysis la2 
+                WHERE la2.BLOCKING_THREAD_ID = cw.THREAD_ID
+              ) THEN 'BLOCKING'
+              ELSE 'NONE'
+            END as lock_status,
+            COALESCE(la.OBJECT_NAME, '') as locked_table,
+            COALESCE(la.LOCK_TYPE, '') as lock_type,
+            COALESCE(la.LOCK_MODE, '') as lock_mode,
+            
+            -- Resource correlation
+            rm_cpu.usage_percent as cpu_usage_percent,
+            rm_mem.usage_percent as memory_usage_percent,
+            rm_conn.usage_percent as connection_usage_percent,
+            
+            -- Intelligent scoring
+            (
+              -- Base score from execution time
+              CASE 
+                WHEN cw.statement_time > hp.avg_time * 2 THEN 100
+                WHEN cw.statement_time > hp.avg_time THEN 60
+                ELSE 20
+              END +
+              -- Wait time impact
+              (cw.total_wait_time / NULLIF(cw.statement_time, 0) * 50) +
+              -- Resource impact
+              (rm_cpu.usage_percent * 0.3 + rm_mem.usage_percent * 0.2) +
+              -- Lock impact
+              CASE WHEN la.BLOCKING_THREAD_ID IS NOT NULL THEN 50 ELSE 0 END +
+              -- Performance issue impact
+              CASE 
+                WHEN cw.NO_INDEX_USED = 1 THEN 30
+                WHEN cw.CREATED_TMP_DISK_TABLES > 0 THEN 25
+                WHEN cw.SELECT_FULL_JOIN > 0 THEN 20
+                ELSE 0
+              END
+            ) as intelligence_score,
+            
+            -- Business impact estimation
+            CASE
+              WHEN cw.CURRENT_SCHEMA IN ('orders', 'payments', 'customers') THEN 'CRITICAL'
+              WHEN cw.CURRENT_SCHEMA IN ('products', 'inventory') THEN 'HIGH'
+              WHEN cw.CURRENT_SCHEMA IN ('analytics', 'reporting') THEN 'MEDIUM'
+              ELSE 'LOW'
+            END as business_criticality,
+            
+            -- Recommendations
+            CONCAT_WS('; ',
+              CASE WHEN cw.NO_INDEX_USED = 1 
+                THEN CONCAT('Add index on WHERE clause columns') 
+              END,
+              CASE WHEN cw.CREATED_TMP_DISK_TABLES > 0 
+                THEN 'Increase tmp_table_size or optimize GROUP BY' 
+              END,
+              CASE WHEN cw.SELECT_FULL_JOIN > 0 
+                THEN 'Add indexes on JOIN columns' 
+              END,
+              CASE WHEN la.BLOCKING_THREAD_ID IS NOT NULL 
+                THEN CONCAT('Blocked by thread ', la.BLOCKING_THREAD_ID) 
+              END,
+              CASE WHEN cw.total_wait_time > cw.statement_time * 0.7 
+                THEN 'High wait time - investigate wait profile' 
+              END,
+              CASE WHEN rm_cpu.usage_percent > 80 
+                THEN 'High CPU usage - consider query optimization' 
+              END
+            ) as recommendations,
+            
+            -- Metadata
+            NOW() as collection_timestamp,
+            CONNECTION_ID() as connection_id,
+            @@hostname as mysql_hostname,
+            @@version as mysql_version
+            
+          FROM current_waits cw
+          LEFT JOIN historical_patterns hp ON cw.DIGEST = hp.DIGEST
+          LEFT JOIN lock_analysis la ON cw.THREAD_ID = la.REQUESTING_THREAD_ID
+          CROSS JOIN (SELECT * FROM resource_metrics WHERE resource_type = 'cpu') rm_cpu
+          CROSS JOIN (SELECT * FROM resource_metrics WHERE resource_type = 'memory') rm_mem
+          CROSS JOIN (SELECT * FROM resource_metrics WHERE resource_type = 'connections') rm_conn
+          
+          UNION ALL
+          
+          -- Include historical queries not currently running
+          SELECT 
+            hp.DIGEST as query_digest,
+            'historical' as db_schema,
+            LEFT(hp.DIGEST_TEXT, 200) as query_text,
+            0 as current_exec_time_ms,
+            0 as current_lock_time_ms,
+            0 as current_rows_examined,
+            0 as current_rows_sent,
+            '' as current_wait_profile,
+            0 as current_wait_time_ms,
+            0 as current_wait_event_count,
+            hp.total_executions as historical_exec_count,
+            hp.avg_time / 1000000 as historical_avg_time_ms,
+            hp.best_time / 1000000 as historical_best_time_ms,
+            hp.worst_time / 1000000 as historical_worst_time_ms,
+            CASE 
+              WHEN hp.no_index_count > 0 THEN 'MISSING_INDEX'
+              WHEN hp.disk_tmp_tables > 0 THEN 'DISK_TMP_TABLE'
+              WHEN hp.full_joins > 0 THEN 'FULL_JOIN'
+              WHEN hp.full_scans > 0 THEN 'FULL_SCAN'
+              ELSE 'OK'
+            END as performance_issue,
+            'HISTORICAL' as wait_severity,
+            'NONE' as lock_status,
+            '' as locked_table,
+            '' as lock_type,
+            '' as lock_mode,
+            0 as cpu_usage_percent,
+            0 as memory_usage_percent,
+            0 as connection_usage_percent,
+            (hp.avg_time / 1000000) * LOG10(hp.total_executions + 1) as intelligence_score,
+            'UNKNOWN' as business_criticality,
+            'Historical query - monitor if becomes active' as recommendations,
+            NOW() as collection_timestamp,
+            CONNECTION_ID() as connection_id,
+            @@hostname as mysql_hostname,
+            @@version as mysql_version
+          FROM historical_patterns hp
+          WHERE hp.DIGEST NOT IN (SELECT DIGEST FROM current_waits)
+            AND hp.total_executions > 100
+            AND hp.LAST_SEEN > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+          ORDER BY intelligence_score DESC
+          LIMIT 500
+        metrics:
+          - metric_name: mysql.intelligence.comprehensive
+            value_column: intelligence_score
+            attribute_columns: 
+              - query_digest
+              - db_schema
+              - query_text
+              - current_exec_time_ms
+              - current_lock_time_ms
+              - current_wait_profile
+              - current_wait_time_ms
+              - current_rows_examined
+              - current_rows_sent
+              - current_wait_event_count
+              - historical_exec_count
+              - historical_avg_time_ms
+              - historical_best_time_ms
+              - historical_worst_time_ms
+              - performance_issue
+              - wait_severity
+              - lock_status
+              - locked_table
+              - lock_type
+              - lock_mode
+              - cpu_usage_percent
+              - memory_usage_percent
+              - connection_usage_percent
+              - business_criticality
+              - recommendations
+              - mysql_hostname
+              - mysql_version
+            data_point_type: gauge
+
+  # Prometheus receiver for MySQL exporter metrics
+  prometheus/advanced:
+    config:
+      global:
+        scrape_interval: ${env:PROMETHEUS_SCRAPE_INTERVAL:10s}
+        external_labels:
+          cluster: '${env:CLUSTER_NAME}'
+          environment: '${env:ENVIRONMENT}'
+      
+      scrape_configs:
+        - job_name: 'mysql_exporter_advanced'
+          scrape_interval: 15s
+          params:
+            collect[]:
+              - engine_innodb_status
+              - info_schema.innodb_metrics
+              - info_schema.processlist
+              - info_schema.query_response_time
+              - perf_schema.eventsstatementssum
+              - perf_schema.eventswaitssum
+              - perf_schema.file_events
+              - perf_schema.memory_events
+              - perf_schema.replication_group_members
+          
+          static_configs:
+            - targets: ['${env:MYSQL_EXPORTER_ENDPOINT}']
+          
+          metric_relabel_configs:
+            - source_labels: [__name__, operation, schema]
+              separator: ":"
+              target_label: __tmp_composite_key
+              regex: '(mysql_perf_schema_table_io_waits_total):(.+):(.+)'
+            
+            - source_labels: [__name__]
+              target_label: __tmp_rate_metric
+              regex: '(mysql_global_status_bytes_.*|mysql_global_status_commands_total)'
+              
+  # Internal collector metrics
+  prometheus/internal:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['0.0.0.0:8888']
+
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+# ============================================================================
+# PROCESSORS - Data Transformation and Enrichment
+# ============================================================================
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: ${env:MEMORY_CHECK_INTERVAL:5s}
+    limit_percentage: ${env:MEMORY_LIMIT_PERCENT:80}
+    spike_limit_percentage: ${env:MEMORY_SPIKE_PERCENT:30}
+
+  memory_limiter/small:
+    check_interval: 1s
+    limit_percentage: 60
+    spike_limit_percentage: 20
+    
+  # Batching for efficiency
+  batch:
+    timeout: ${env:BATCH_TIMEOUT:5s}
+    send_batch_size: ${env:BATCH_SIZE:1000}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE:2000}
+    
+  # Small batch for critical metrics
+  batch/minimal:
+    timeout: 1s
+    send_batch_size: 100
+    send_batch_max_size: 200
+    
+  # Large batch for historical data
+  batch/large:
+    timeout: 30s
+    send_batch_size: 10000
+    send_batch_max_size: 20000
+    
+  # Resource attributes enrichment
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:SERVICE_NAME:mysql-monitoring}
+        action: insert
+      - key: service.namespace
+        value: ${env:NAMESPACE}
+        action: insert
+      - key: service.version
+        value: ${env:MYSQL_VERSION}
+        action: insert
+      - key: mysql.instance.endpoint
+        value: ${env:MYSQL_PRIMARY_ENDPOINT}
+        action: insert
+      - key: mysql.instance.role
+        value: ${env:MYSQL_ROLE}
+        action: insert
+      - key: cloud.provider
+        value: ${env:CLOUD_PROVIDER}
+        action: insert
+      - key: cloud.region
+        value: ${env:CLOUD_REGION}
+        action: insert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+        
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "1.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: db.system
+        value: mysql
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: team
+        value: ${env:TEAM_NAME}
+        action: insert
+      - key: cost_center
+        value: ${env:COST_CENTER}
+        action: insert
+
+  # Transform standard metrics for analysis
+  transform/metric_enrichment:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - set(attributes["nr.metricType"], "mysql")
+          - set(attributes["nr.category"], "database")
+      - context: datapoint
+        statements:
+          # Table and index limits for cardinality control
+          - limit(attributes["table"], 100) where metric.name == "mysql.table.io.wait.count"
+          - limit(attributes["index"], 100) where metric.name == "mysql.index.io.wait.count"
+          - limit(attributes["schema"], 50) where IsMatch(metric.name, "mysql\\.table\\..*")
+          
+          # Performance calculations
+          - set(attributes["connection_saturation"], (value / attributes["mysql.connection.max"]) * 100) where metric.name == "mysql.threads" and attributes["mysql.connection.max"] != nil
+          - set(attributes["slow_query_rate"], rate(value, 60)) where metric.name == "mysql.query.slow.count"
+          - set(attributes["lock_wait_rate"], rate(value, 60)) where metric.name == "mysql.innodb.row_lock_waits"
+          - set(attributes["buffer_pool_hit_rate"], 100) where metric.name == "mysql.buffer_pool.operations"
+
+  # Stage 1: Multi-level categorization
+  transform/stage1_categorization:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Advanced wait categorization from wait profiles
+          - set(attributes["wait.primary_category"], "io") 
+            where IsMatch(attributes["current_wait_profile"], "(?i).*wait/io/file.*")
+          - set(attributes["wait.primary_category"], "lock") 
+            where IsMatch(attributes["current_wait_profile"], "(?i).*wait/(lock|synch/mutex).*")
+          - set(attributes["wait.primary_category"], "network") 
+            where IsMatch(attributes["current_wait_profile"], "(?i).*wait/io/socket.*")
+          - set(attributes["wait.primary_category"], "cpu") 
+            where IsMatch(attributes["current_wait_profile"], "(?i).*wait/synch/cond.*")
+          - set(attributes["wait.primary_category"], "other") 
+            where attributes["wait.primary_category"] == nil
+          
+          # Multi-level severity scoring
+          - set(attributes["severity.score"], 
+                attributes["intelligence_score"] * 
+                (1 + attributes["cpu_usage_percent"] / 100) * 
+                (1 + attributes["memory_usage_percent"] / 100))
+            where attributes["intelligence_score"] != nil
+          
+          # Query pattern detection
+          - set(attributes["query.pattern"], "read_heavy")
+            where attributes["current_rows_sent"] > attributes["current_rows_examined"] * 0.5
+          - set(attributes["query.pattern"], "write_heavy")
+            where IsMatch(attributes["query_text"], "(?i)(INSERT|UPDATE|DELETE)")
+          - set(attributes["query.pattern"], "analytical")
+            where attributes["current_rows_examined"] > 10000
+          - set(attributes["query.pattern"], "transactional")
+            where attributes["query.pattern"] == nil
+
+  # Advanced wait analysis processor (legacy compatibility)
+  transform/wait_analysis:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Create wait profile metrics from statement events
+          - set(metric.name, "mysql.query.wait_profile") where metric.name == "mysql.statement_event.wait.time"
+          
+          # Extract query components for better analysis
+          - set(attributes["event_name"], attributes["event.name"]) where metric.name == "mysql.query.wait_profile" and attributes["event.name"] != nil
+          - set(attributes["digest_text"], attributes["digest.text"]) where metric.name == "mysql.query.wait_profile" and attributes["digest.text"] != nil
+          - set(attributes["total_time"], attributes["sum.timer.wait"]) where metric.name == "mysql.query.wait_profile" and attributes["sum.timer.wait"] != nil
+          - set(attributes["ROWS_EXAMINED"], attributes["sum.rows.examined"]) where metric.name == "mysql.query.wait_profile" and attributes["sum.rows.examined"] != nil
+          - set(attributes["ROWS_SENT"], attributes["sum.rows.sent"]) where metric.name == "mysql.query.wait_profile" and attributes["sum.rows.sent"] != nil
+          
+          # Calculate wait categories based on event patterns
+          - set(attributes["wait.category"], "lock") where metric.name == "mysql.query.wait_profile" and IsMatch(attributes["event_name"], "(?i).*(lock|mutex|rwlock).*")
+          - set(attributes["wait.category"], "io") where metric.name == "mysql.query.wait_profile" and IsMatch(attributes["event_name"], "(?i).*(io|read|write|disk).*")
+          - set(attributes["wait.category"], "cpu") where metric.name == "mysql.query.wait_profile" and IsMatch(attributes["event_name"], "(?i).*(cpu|processor).*")
+          - set(attributes["wait.category"], "network") where metric.name == "mysql.query.wait_profile" and IsMatch(attributes["event_name"], "(?i).*(net|socket|tcp).*")
+          - set(attributes["wait.category"], "other") where metric.name == "mysql.query.wait_profile" and attributes["wait.category"] == nil
+          
+          # Generate query hash for aggregation
+          - set(attributes["query_hash"], Hash(attributes["digest_text"])) where metric.name == "mysql.query.wait_profile" and attributes["digest_text"] != nil
+          - set(attributes["query_hash"], Hash(attributes["query"])) where metric.name == "mysql.query.wait_profile" and attributes["query_hash"] == nil and attributes["query"] != nil
+          
+          # Calculate wait percentage
+          - set(attributes["wait_percentage"], (value / attributes["total_time"]) * 100) where metric.name == "mysql.query.wait_profile" and attributes["total_time"] != nil and attributes["total_time"] > 0
+          - set(attributes["wait_percentage"], 0) where metric.name == "mysql.query.wait_profile" and attributes["wait_percentage"] == nil
+          
+          # Track execution count
+          - set(attributes["exec_count"], 1) where metric.name == "mysql.query.wait_profile"
+
+  # Stage 2: ML features generation
+  transform/stage2_ml_features:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Time-based features for ML
+          - set(attributes["ml.hour_of_day"], Hour(Now()))
+          - set(attributes["ml.day_of_week"], DayOfWeek(Now()))
+          - set(attributes["ml.minute_of_hour"], Minute(Now()))
+          
+          # Execution pattern features
+          - set(attributes["ml.exec_time_ratio"], 
+                attributes["current_exec_time_ms"] / 
+                Coalesce(attributes["historical_avg_time_ms"], 1))
+            where attributes["current_exec_time_ms"] != nil
+          
+          - set(attributes["ml.wait_time_ratio"], 
+                attributes["current_wait_time_ms"] / 
+                Coalesce(attributes["current_exec_time_ms"], 1))
+            where attributes["current_wait_time_ms"] != nil
+          
+          # Resource pressure indicators
+          - set(attributes["ml.resource_pressure"], 
+                (Coalesce(attributes["cpu_usage_percent"], 0) + 
+                 Coalesce(attributes["memory_usage_percent"], 0) + 
+                 Coalesce(attributes["connection_usage_percent"], 0)) / 3)
+          
+          # Anomaly detection features
+          - set(attributes["ml.is_anomaly"], true)
+            where (attributes["ml.exec_time_ratio"] > 3 and attributes["ml.exec_time_ratio"] != nil)
+              or (attributes["severity.score"] > 200 and attributes["severity.score"] != nil)
+              or attributes["wait_severity"] == "CRITICAL"
+
+  # Performance advisor engine
+  transform/advisor:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Missing index advisor
+          - set(attributes["advisor.type"], "missing_index") where metric.name in ["mysql.query.wait_profile", "mysql.intelligence.comprehensive"] and attributes["ROWS_EXAMINED"] != nil and attributes["ROWS_SENT"] != nil and attributes["ROWS_EXAMINED"] > 10000 and attributes["ROWS_SENT"] < 100
+          - set(attributes["advisor.type"], "missing_index") where attributes["performance_issue"] == "MISSING_INDEX"
+          - set(attributes["advisor.priority"], "P0") where attributes["advisor.type"] == "missing_index" and attributes["wait_percentage"] > 50
+          - set(attributes["advisor.priority"], "P1") where attributes["advisor.type"] == "missing_index" and attributes["advisor.priority"] == nil
+          - set(attributes["advisor.recommendation"], "Consider adding index on filtered columns to reduce rows examined") where attributes["advisor.type"] == "missing_index"
+          
+          # Lock contention advisor
+          - set(attributes["advisor.type"], "lock_contention") where metric.name in ["mysql.query.wait_profile", "mysql.intelligence.comprehensive"] and attributes["wait.category"] == "lock" and value > 1000
+          - set(attributes["advisor.type"], "lock_contention") where attributes["lock_status"] in ["BLOCKED", "BLOCKING"]
+          - set(attributes["advisor.priority"], "P1") where attributes["advisor.type"] == "lock_contention" and value > 1000
+          - set(attributes["advisor.priority"], "P0") where attributes["advisor.type"] == "lock_contention" and value > 5000
+          - set(attributes["advisor.recommendation"], "Review transaction isolation levels and query patterns to reduce lock contention") where attributes["advisor.type"] == "lock_contention"
+          
+          # Resource saturation advisor
+          - set(attributes["advisor.type"], "resource_saturation") where metric.name in ["mysql.query.wait_profile", "mysql.intelligence.comprehensive"] and attributes["wait.category"] == "cpu" and value > 5000
+          - set(attributes["advisor.type"], "resource_saturation") where attributes["ml.resource_pressure"] > 80
+          - set(attributes["advisor.priority"], "P0") where attributes["advisor.type"] == "resource_saturation"
+          - set(attributes["advisor.recommendation"], "Scale up compute resources or optimize query execution plans") where attributes["advisor.type"] == "resource_saturation"
+          
+          # I/O bottleneck advisor
+          - set(attributes["advisor.type"], "io_bottleneck") where metric.name in ["mysql.query.wait_profile", "mysql.intelligence.comprehensive"] and attributes["wait.category"] == "io" and value > 2000
+          - set(attributes["advisor.priority"], "P1") where attributes["advisor.type"] == "io_bottleneck"
+          - set(attributes["advisor.recommendation"], "Consider faster storage, optimize buffer pool size, or review data access patterns") where attributes["advisor.type"] == "io_bottleneck"
+          
+          # Increment advisor count for tracking
+          - set(attributes["advisor.count"], 1) where attributes["advisor.type"] != nil
+
+  # Stage 3: Business impact analysis
+  transform/stage3_business_impact:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Revenue impact calculation
+          - set(attributes["business.revenue_impact"], 100)
+            where IsMatch(attributes["query_text"], "(?i).*(order|payment|checkout).*")
+              and attributes["current_exec_time_ms"] > 1000
+          
+          - set(attributes["business.revenue_impact"], 50)
+            where IsMatch(attributes["query_text"], "(?i).*(cart|customer|auth).*")
+              and attributes["current_exec_time_ms"] > 2000
+          
+          - set(attributes["business.revenue_impact"], 10)
+            where attributes["business_criticality"] == "HIGH"
+              and attributes["current_exec_time_ms"] > 5000
+          
+          - set(attributes["business.revenue_impact"], 0)
+            where attributes["business.revenue_impact"] == nil
+          
+          # User experience scoring
+          - set(attributes["ux.impact_score"], 
+                Case(
+                  attributes["current_exec_time_ms"] < 100, 0,
+                  attributes["current_exec_time_ms"] < 500, 10,
+                  attributes["current_exec_time_ms"] < 1000, 30,
+                  attributes["current_exec_time_ms"] < 5000, 60,
+                  100
+                ))
+            where attributes["current_exec_time_ms"] != nil
+          
+          # SLA tracking
+          - set(attributes["sla.threshold_ms"], 
+                Case(
+                  attributes["business_criticality"] == "CRITICAL", 100,
+                  attributes["business_criticality"] == "HIGH", 500,
+                  attributes["business_criticality"] == "MEDIUM", 2000,
+                  10000
+                ))
+          
+          - set(attributes["sla.violated"], true)
+            where attributes["current_exec_time_ms"] > attributes["sla.threshold_ms"]
+
+  # Stage 4: Advanced advisory synthesis
+  transform/stage4_advanced_advisory:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Composite advisory generation
+          - set(attributes["advisory.type"], "critical_missing_index")
+            where attributes["performance_issue"] == "MISSING_INDEX"
+              and attributes["current_exec_time_ms"] > 1000
+              and attributes["business_criticality"] == "CRITICAL"
+              and attributes["advisory.type"] == nil
+          
+          - set(attributes["advisory.type"], "lock_storm_detected")
+            where attributes["lock_status"] in ["BLOCKED", "BLOCKING"]
+              and attributes["cpu_usage_percent"] > 70
+              and attributes["advisory.type"] == nil
+          
+          # Priority calculation with business context
+          - set(attributes["advisory.priority"], 
+                Case(
+                  attributes["sla.violated"] == true and 
+                    attributes["business.revenue_impact"] > 50, "P0",
+                  attributes["ml.is_anomaly"] == true and 
+                    attributes["severity.score"] > 150, "P1",
+                  attributes["performance_issue"] != "OK" and 
+                    attributes["historical_exec_count"] > 1000, "P2",
+                  attributes["wait_severity"] in ["HIGH", "MEDIUM"], "P3",
+                  "P4"
+                ))
+            where attributes["advisory.priority"] == nil
+          
+          # Cost impact estimation
+          - set(attributes["cost.compute_impact"], 
+                attributes["current_exec_time_ms"] * 
+                Coalesce(attributes["historical_exec_count"], 1) * 
+                0.000001)
+            where attributes["current_exec_time_ms"] != nil
+          
+          - set(attributes["cost.io_impact"], 
+                attributes["current_rows_examined"] * 
+                0.0000001)
+            where attributes["current_rows_examined"] != nil
+
+  # Anomaly detection processor
+  transform/anomaly_detection:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Threshold-based anomaly detection with multiple severity levels
+          - set(attributes["anomaly.detected"], true) where metric.name in ["mysql.query.wait_profile", "mysql.intelligence.comprehensive"] and value > 10000
+          - set(attributes["anomaly.severity"], "critical") where attributes["anomaly.detected"] == true and value > 30000
+          - set(attributes["anomaly.severity"], "warning") where attributes["anomaly.detected"] == true and value > 10000 and value <= 30000
+          
+          # Anomaly score calculation (normalized to 0-100 scale)
+          - set(attributes["anomaly.score"], value / 1000) where attributes["anomaly.detected"] == true and value < 100000
+          - set(attributes["anomaly.score"], 100) where attributes["anomaly.detected"] == true and value >= 100000
+          
+          # Connection anomalies
+          - set(attributes["anomaly.detected"], true) where metric.name == "mysql.threads" and attributes["connection_saturation"] > 90
+          - set(attributes["anomaly.type"], "connection_saturation") where metric.name == "mysql.threads" and attributes["anomaly.detected"] == true
+          
+          # Replication anomalies
+          - set(attributes["anomaly.detected"], true) where metric.name == "mysql.replica.time_behind_source" and value > 30
+          - set(attributes["anomaly.type"], "replication_lag") where metric.name == "mysql.replica.time_behind_source" and attributes["anomaly.detected"] == true
+
+  # Business context processor
+  transform/business_context:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Identify critical queries based on patterns
+          - set(attributes["critical.query"], true) where IsMatch(attributes["digest_text"], "(?i).*(payment|order|checkout|auth|customer|transaction).*")
+          - set(attributes["critical.query"], true) where IsMatch(attributes["query"], "(?i).*(payment|order|checkout|auth|customer|transaction).*") and attributes["critical.query"] == nil
+          - set(attributes["critical.query"], true) where IsMatch(attributes["query_text"], "(?i).*(payment|order|checkout|auth|customer|transaction).*") and attributes["critical.query"] == nil
+          
+          # Query classification
+          - set(attributes["query.classification"], "payment") where IsMatch(Coalesce(attributes["query_text"], attributes["digest_text"], ""), "(?i).*payment.*")
+          - set(attributes["query.classification"], "order") where IsMatch(Coalesce(attributes["query_text"], attributes["digest_text"], ""), "(?i).*order.*") and attributes["query.classification"] == nil
+          - set(attributes["query.classification"], "auth") where IsMatch(Coalesce(attributes["query_text"], attributes["digest_text"], ""), "(?i).*(auth|login|session).*") and attributes["query.classification"] == nil
+          - set(attributes["query.classification"], "customer") where IsMatch(Coalesce(attributes["query_text"], attributes["digest_text"], ""), "(?i).*customer.*") and attributes["query.classification"] == nil
+          - set(attributes["query.classification"], "general") where attributes["query.classification"] == nil
+          
+          # User impact calculation
+          - set(attributes["user_facing"], true) where attributes["critical.query"] == true
+          - set(attributes["affected_users"], 100) where attributes["user_facing"] == true and value > 5000
+          - set(attributes["affected_users"], 50) where attributes["user_facing"] == true and value > 2000 and value <= 5000
+          - set(attributes["affected_users"], 10) where attributes["user_facing"] == true and value <= 2000
+
+  # Health score calculator
+  transform/health_score:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          # Create health score metric from uptime
+          - set(name, "mysql.health.score") where name == "mysql.uptime"
+      - context: datapoint
+        statements:
+          # Calculate health score (0-100 scale)
+          - set(value, 100) where metric.name == "mysql.health.score"
+          - set(value, value - 20) where metric.name == "mysql.health.score" and attributes["connection_saturation"] > 80
+          - set(value, value - 30) where metric.name == "mysql.health.score" and attributes["slow_query_rate"] > 10
+          - set(value, value - 25) where metric.name == "mysql.health.score" and attributes["lock_wait_rate"] > 50
+          - set(value, value - 25) where metric.name == "mysql.health.score" and attributes["buffer_pool_hit_rate"] < 90
+          - set(value, 0) where metric.name == "mysql.health.score" and value < 0
+
+  # Final cleanup and validation
+  transform/cleanup:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Ensure all numeric values are properly typed
+          - set(value, Double(value)) where metric.name in ["mysql.query.wait_profile", "mysql.intelligence.comprehensive"]
+          - set(attributes["wait_percentage"], Double(attributes["wait_percentage"])) where attributes["wait_percentage"] != nil
+          - set(attributes["anomaly.score"], Double(attributes["anomaly.score"])) where attributes["anomaly.score"] != nil
+          - set(attributes["severity.score"], Double(attributes["severity.score"])) where attributes["severity.score"] != nil
+          - set(attributes["ml.exec_time_ratio"], Double(attributes["ml.exec_time_ratio"])) where attributes["ml.exec_time_ratio"] != nil
+
+  # Intelligent metric filtering
+  filter/critical_only:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["advisory.priority"] in ["P0", "P1"]'
+        - 'attributes["sla.violated"] == true'
+        - 'attributes["ml.is_anomaly"] == true'
+        - 'attributes["business.revenue_impact"] > 50'
+
+  filter/business_relevant:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["business_criticality"] in ["CRITICAL", "HIGH"]'
+        - 'attributes["business.revenue_impact"] > 0'
+
+  filter/ml_relevant:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["ml.exec_time_ratio"] != nil'
+        - 'attributes["ml.resource_pressure"] != nil'
+
+  filter/historical_only:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["db_schema"] == "historical"'
+
+  filter/importance:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["intelligence_score"] > 50'
+        - 'attributes["severity.score"] > 100'
+
+  filter/errors:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["error"] == true'
+        
+  # Filter out system schemas
+  filter/schemas:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["table_schema"] not in ["mysql", "information_schema", "performance_schema", "sys"]'
+
+  # Intelligent routing based on priority
+  routing/priority:
+    from_attribute: advisory.priority
+    default_exporters: [otlp/batch_low_priority]
+    table:
+      - value: "P0"
+        exporters: [otlp/realtime_high_priority]
+      - value: "P1"
+        exporters: [otlp/near_realtime]
+      - value: "P2"
+        exporters: [otlp/standard]
+      - value: "P3"
+        exporters: [otlp/batch_low_priority]
+
+  # Advanced sampling with context
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100000
+    expected_new_traces_per_sec: 10000
+    policies:
+      - name: business_critical
+        type: string_attribute
+        string_attribute: {key: business_criticality, values: [CRITICAL]}
+      
+      - name: anomalies
+        type: boolean_attribute
+        boolean_attribute: {key: ml.is_anomaly, value: true}
+      
+      - name: sla_violations
+        type: boolean_attribute
+        boolean_attribute: {key: sla.violated, value: true}
+      
+      - name: probabilistic_sampling
+        type: probabilistic
+        probabilistic: {sampling_percentage: 10}
+
+  # Group for efficient batching
+  groupbyattrs:
+    keys:
+      - service.name
+      - db_schema
+      - wait.primary_category
+      - advisory.priority
+      - business_criticality
+      
+  # Resource detection
+  resourcedetection:
+    detectors: [env, system]
+    system:
+      hostname_sources: ["os", "dns"]
+      
+  # Sampling for high-volume metrics
+  probabilistic_sampler:
+    sampling_percentage: ${env:SAMPLING_PERCENTAGE:100}
+
+# ============================================================================
+# EXPORTERS - Data Destinations
+# ============================================================================
+
+exporters:
+  # Debug output for troubleshooting
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:normal}
+    sampling_initial: ${env:DEBUG_SAMPLING_INITIAL:10}
+    sampling_thereafter: ${env:DEBUG_SAMPLING_THEREAFTER:100}
+    
+  # Primary New Relic OTLP HTTP exporter
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: ${env:EXPORT_TIMEOUT:30s}
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:EXPORT_WORKERS:5}
+      queue_size: ${env:EXPORT_QUEUE_SIZE:10000}
+
+  # Multiple priority exporters
+  otlp/realtime_high_priority:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    headers:
+      api-key: ${env:NEW_RELIC_API_KEY}
+    compression: none  # No compression for lowest latency
+    timeout: 5s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 500ms
+      max_interval: 5s
+      max_elapsed_time: 30s
+    
+  otlp/near_realtime:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    headers:
+      api-key: ${env:NEW_RELIC_API_KEY}
+    compression: gzip
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+    
+  otlp/standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    headers:
+      api-key: ${env:NEW_RELIC_API_KEY}
+    compression: gzip
+    timeout: 30s
+    sending_queue:
+      enabled: true
+      num_consumers: 3
+      queue_size: 50000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    
+  otlp/batch_low_priority:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    headers:
+      api-key: ${env:NEW_RELIC_API_KEY}
+    compression: gzip
+    timeout: 60s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 100000
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      initial_interval: 10s
+      max_interval: 60s
+      max_elapsed_time: 600s
+
+  # Default OTLP exporter for compatibility
+  otlp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    headers:
+      api-key: ${env:NEW_RELIC_API_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Business dashboard specific exporter
+  otlp/business_dashboard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    headers:
+      api-key: ${env:NEW_RELIC_API_KEY}
+    compression: gzip
+    timeout: 30s
+
+  # ML endpoint for AI/ML features
+  otlp/ml_endpoint:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net:4318}
+    headers:
+      api-key: ${env:NEW_RELIC_API_KEY}
+    compression: gzip
+    timeout: 30s
+      
+  # Alternative OTLP gRPC exporter
+  otlp/newrelic_grpc:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:otlp.nr-data.net:4317}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    
+  # Prometheus exporter for local metrics
+  prometheus:
+    endpoint: 0.0.0.0:${env:PROMETHEUS_PORT:8889}
+    namespace: mysql
+    const_labels:
+      service: mysql-monitoring
+    resource_to_telemetry_conversion:
+      enabled: true
+      
+  # File exporter for backup
+  file:
+    path: ${env:METRICS_FILE_PATH:/tmp/mysql-metrics.json}
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+      
+  # Logging exporter
+  logging:
+    loglevel: ${env:LOG_EXPORT_LEVEL:info}
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+# ============================================================================
+# EXTENSIONS - Additional Capabilities
+# ============================================================================
+
+extensions:
+  # Health check endpoint
+  health_check:
+    endpoint: 0.0.0.0:${env:HEALTH_PORT:13133}
+    path: /health
+    
+  # Performance profiling
+  pprof:
+    endpoint: 0.0.0.0:${env:PPROF_PORT:1777}
+    
+  # zPages for debugging
+  zpages:
+    endpoint: 0.0.0.0:${env:ZPAGES_PORT:55679}
+    
+  # File storage for queue persistence
+  file_storage:
+    directory: ${env:OTEL_FILE_STORAGE_DIR:/tmp/otel-storage}
+    timeout: 10s
+    compaction:
+      on_start: true
+      directory: ${env:OTEL_FILE_STORAGE_DIR:/tmp/otel-storage}
+      max_transaction_size: 65536
+
+# ============================================================================
+# SERVICE - Pipeline Configuration
+# ============================================================================
+
+service:
+  # Telemetry settings
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:info}
+      initial_fields:
+        service: mysql-otel-collector
+        version: "3.0.0"
+    metrics:
+      level: ${env:TELEMETRY_LEVEL:detailed}
+      address: 0.0.0.0:${env:TELEMETRY_PORT:8888}
+      
+  # Active extensions
+  extensions: [health_check, pprof, zpages, file_storage]
+  
+  # Pipelines - Choose based on deployment mode
+  pipelines:
+    # DEPLOYMENT_MODE: minimal
+    # Basic monitoring pipeline (always enabled in minimal mode)
+    metrics/minimal:
+      receivers: [mysql/primary, hostmetrics, prometheus/internal]
+      processors: [memory_limiter, resource, attributes/newrelic, batch]
+      exporters: [otlphttp/newrelic, prometheus]
+      
+    # DEPLOYMENT_MODE: standard
+    # Standard metrics pipeline with replica
+    metrics/standard:
+      receivers: [mysql/primary, mysql/replica, hostmetrics, prometheus/internal]
+      processors: [memory_limiter, resource, attributes/newrelic, transform/metric_enrichment, batch]
+      exporters: [otlphttp/newrelic, prometheus]
+      
+    # DEPLOYMENT_MODE: advanced
+    # All advanced features enabled
+    # Real-time critical path
+    metrics/critical_realtime:
+      receivers: [sqlquery/extreme_intelligence]
+      processors:
+        - memory_limiter/small
+        - filter/critical_only
+        - transform/stage1_categorization
+        - transform/stage4_advanced_advisory
+        - batch/minimal
+      exporters: [otlp/realtime_high_priority]
+    
+    # Near real-time analysis
+    metrics/analysis:
+      receivers: [sqlquery/extreme_intelligence]
+      processors:
+        - memory_limiter
+        - transform/stage1_categorization
+        - transform/stage2_ml_features
+        - transform/stage3_business_impact
+        - transform/stage4_advanced_advisory
+        - filter/importance
+        - batch
+      exporters: [otlp/near_realtime]
+    
+    # ML feature pipeline
+    metrics/ml_features:
+      receivers: [sqlquery/extreme_intelligence]
+      processors:
+        - memory_limiter
+        - transform/stage2_ml_features
+        - filter/ml_relevant
+        - batch/large
+      exporters: [otlp/ml_endpoint]
+    
+    # Business metrics pipeline
+    metrics/business:
+      receivers: [sqlquery/extreme_intelligence]
+      processors:
+        - memory_limiter
+        - filter/business_relevant
+        - transform/stage3_business_impact
+        - batch
+      exporters: [otlp/business_dashboard]
+    
+    # Standard MySQL metrics with enhancements
+    metrics/enhanced_standard:
+      receivers: [mysql/primary, mysql/replica]
+      processors: [
+        memory_limiter, 
+        batch, 
+        resource, 
+        attributes/newrelic, 
+        transform/metric_enrichment,
+        transform/wait_analysis,
+        transform/advisor,
+        transform/anomaly_detection,
+        transform/business_context,
+        transform/health_score,
+        transform/cleanup,
+        filter/errors
+      ]
+      exporters: [otlp/standard, prometheus, logging]
+    
+    # Prometheus metrics pipeline
+    metrics/prometheus:
+      receivers: [prometheus/advanced]
+      processors: [
+        memory_limiter,
+        batch,
+        resource,
+        attributes/newrelic
+      ]
+      exporters: [otlp/standard]
+      
+    # DEPLOYMENT_MODE: debug
+    # Debug pipeline (enable for troubleshooting)
+    metrics/debug:
+      receivers: [mysql/primary, hostmetrics, sqlquery/extreme_intelligence]
+      processors: [memory_limiter, resource]
+      exporters: [debug, file, logging]
+
+    # Traces pipeline (for future use)
+    traces:
+      receivers: []
+      processors: [memory_limiter, batch, resource, attributes/newrelic]
+      exporters: [otlp/newrelic, logging]
+
+# ============================================================================
+# DEPLOYMENT MODES
+# ============================================================================
+# 
+# Set DEPLOYMENT_MODE environment variable to activate specific features:
+#
+# 1. minimal: Basic monitoring (minimal pipeline only)
+#    - MySQL basic metrics
+#    - Host metrics
+#    - Low resource usage
+#    - Active pipelines: metrics/minimal
+#
+# 2. standard: Recommended for production (standard pipeline)
+#    - All minimal features
+#    - Replica monitoring
+#    - Metric enrichment
+#    - Optimized batching
+#    - Active pipelines: metrics/standard
+#
+# 3. advanced: Deep insights (all intelligence pipelines)
+#    - All standard features
+#    - SQL intelligence queries (500 queries)
+#    - Wait analysis
+#    - ML features
+#    - Business impact
+#    - Multiple priority pipelines
+#    - Active pipelines: metrics/critical_realtime, metrics/analysis, 
+#      metrics/ml_features, metrics/business, metrics/enhanced_standard, 
+#      metrics/prometheus
+#
+# 4. debug: Troubleshooting mode (all features + debug)
+#    - All features enabled
+#    - Debug output
+#    - File export
+#    - Verbose logging
+#    - Active pipelines: ALL + metrics/debug
+#
+# ============================================================================
+# ENVIRONMENT VARIABLES REFERENCE
+# ============================================================================
+#
+# Required:
+#   NEW_RELIC_LICENSE_KEY or NEW_RELIC_API_KEY
+#   MYSQL_PRIMARY_ENDPOINT
+#   MYSQL_USER
+#   MYSQL_PASSWORD
+#
+# Optional with defaults:
+#   DEPLOYMENT_MODE (minimal|standard|advanced|debug) - default: standard
+#   MYSQL_REPLICA_ENDPOINT - default: none
+#   MYSQL_DATABASE - default: ""
+#   MYSQL_COLLECTION_INTERVAL - default: 10s
+#   SQL_INTELLIGENCE_INTERVAL - default: 5s
+#   ENVIRONMENT - default: production
+#   MEMORY_LIMIT_PERCENT - default: 80
+#   BATCH_SIZE - default: 1000
+#   NEW_RELIC_OTLP_ENDPOINT - default: https://otlp.nr-data.net:4318
+#   OTEL_FILE_STORAGE_DIR - default: /tmp/otel-storage
+#
+# ============================================================================

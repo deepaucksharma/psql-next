@@ -1,165 +1,97 @@
-# MySQL OpenTelemetry Monitoring with New Relic
+# MySQL Intelligence Monitoring with OpenTelemetry
 
-A production-ready MySQL monitoring solution using OpenTelemetry collectors with deep New Relic integration. This project provides comprehensive MySQL 8.x performance insights through metrics collection, designed specifically for New Relic's observability platform.
+A comprehensive MySQL monitoring solution featuring intelligent wait analysis, ML-based anomaly detection, and business impact tracking. Built on OpenTelemetry standards with deep New Relic integration.
 
-## Features
+## 🚀 Features
 
-- **Complete MySQL Metrics**: 40+ MySQL metrics including connections, queries, InnoDB, replication, and table I/O
-- **OpenTelemetry Native**: Built on OTel standards for future-proof observability
-- **New Relic Optimized**: Deep integration with New Relic's OTLP endpoint
-- **Docker Compose Setup**: Easy local deployment with MySQL primary/replica configuration
-- **Auto-instrumentation**: Automatic Performance Schema configuration
-- **Sample Application**: Traffic generator for testing and demonstration
-- **Production Ready**: Includes health checks, resource limits, and error handling
+- **40+ MySQL Metrics**: Complete coverage including Performance Schema integration
+- **Intelligence Engine**: Advanced SQL analysis with wait profiling and pattern detection
+- **Anomaly Detection**: ML-based detection with severity scoring and alerting
+- **Business Impact**: Revenue impact estimation, SLA tracking, and cost analysis
+- **Advisory System**: Actionable performance recommendations with priority scoring
+- **Wait Analysis**: Detailed query wait profiling with categorization
+- **Multiple Deployment Modes**: From minimal to comprehensive monitoring
+- **Production Ready**: Health checks, resource limits, and error handling
 
 ## Quick Start
 
 ### Prerequisites
-
 - Docker and Docker Compose V2
-- New Relic account with API key
-- 4GB RAM minimum (for running all services)
+- New Relic account with License Key
+- 4GB RAM minimum
 
-### Setup
-
-1. Clone the repository:
+### Deploy in 30 Seconds
 ```bash
+# 1. Clone repository
 git clone <repository-url>
 cd database-intelligence-mysql
-```
 
-2. Copy environment file and configure:
-```bash
+# 2. Configure credentials
 cp .env.example .env
+# Edit .env with your New Relic License Key
+
+# 3. Deploy
+./deploy/deploy.sh --with-workload
 ```
 
-3. Edit `.env` and add your New Relic credentials:
-```env
-NEW_RELIC_API_KEY=your_new_relic_ingest_license_key_here
-NEW_RELIC_ACCOUNT_ID=your_new_relic_account_id_here
-```
+✅ **That's it!** Metrics will start flowing to New Relic immediately.
 
-4. Run the setup script:
+### Verify Deployment
 ```bash
-./scripts/setup.sh
+./operate/diagnose.sh           # Check system health
+./operate/test-connection.sh    # Test MySQL connections
+./operate/validate-metrics.sh   # Validate metric flow
 ```
 
-This will:
-- Start MySQL primary and replica instances
-- Configure replication
-- Create monitoring user
-- Start OpenTelemetry collector
-- Begin sending metrics to New Relic
+📚 **For detailed setup**: See [Getting Started](docs/getting-started.md)
 
-### Verify Setup
-
-Test connections and monitoring:
-```bash
-./scripts/test-connection.sh
-```
-
-Generate sample traffic:
-```bash
-./scripts/generate-load.sh
-```
-
-## Architecture
+## 🏗️ Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  MySQL Primary  │     │  MySQL Replica  │     │   Sample App    │
-│    Port 3306    │────▶│    Port 3307    │     │ (Traffic Gen)   │
-└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
-         │                       │                         │
-         │                       │                         │
-         └───────────┬───────────┘                         │
-                     │                                     │
-                     ▼                                     ▼
-           ┌─────────────────────┐                ┌──────────────┐
-           │   OTel Collector    │                │    MySQL     │
-           │  - MySQL Receiver   │◀───────────────│  Primary DB  │
-           │  - Batch Processor  │                └──────────────┘
-           │  - Resource Attrs   │
-           └─────────┬───────────┘
-                     │
-                     ▼
-            ┌────────────────────┐
-            │    New Relic       │
-            │  OTLP Endpoint     │
-            │  otlp.nr-data.net  │
-            └────────────────────┘
+┌─────────────────┐     ┌─────────────────────────┐     ┌─────────────────┐
+│  MySQL Primary  │────▶│    OTel Collector       │────▶│   New Relic     │
+└─────────────────┘     │                         │     └─────────────────┘
+                        │ • MySQL Receiver        │
+┌─────────────────┐     │ • SQL Intelligence      │     ┌─────────────────┐
+│  MySQL Replica  │────▶│ • ML Processing         │────▶│   Prometheus    │
+└─────────────────┘     │ • Anomaly Detection     │     └─────────────────┘
+                        │ • Business Context      │
+                        └─────────────────────────┘
 ```
 
-## Collected Metrics
+## Metrics Collected
 
-### Connection Metrics
-- `mysql.connection.count` - Total connections created
-- `mysql.connection.errors` - Failed connection attempts  
-- `mysql.threads` - Current connected threads
-- `mysql.connection.max` - Maximum allowed connections
+**40+ MySQL metrics** across 5 categories:
 
-### Query Performance
-- `mysql.query.count` - Total queries executed
-- `mysql.query.slow.count` - Slow queries
-- `mysql.query.client.count` - Client-initiated queries
-- `mysql.statement_event.count` - Statement executions by digest
-- `mysql.statement_event.wait.time` - Statement execution time
+- **Connections**: threads, errors, max connections
+- **Query Performance**: query counts, slow queries, execution times
+- **InnoDB**: buffer pool, row operations, lock waits
+- **Replication**: lag time, SQL delays
+- **Table/Index I/O**: wait times and counts
 
-### InnoDB Metrics
-- `mysql.buffer_pool.usage` - Buffer pool memory usage
-- `mysql.buffer_pool.limit` - Buffer pool size limit
-- `mysql.buffer_pool.operations` - Read/write operations
-- `mysql.innodb.row_operations` - Row-level operations
-- `mysql.innodb.row_lock_waits` - Row lock wait events
-- `mysql.innodb.pages_created/read/written` - Page operations
+📊 **Full metrics list**: See [Configuration Guide](docs/configuration.md)
 
-### Replication Metrics
-- `mysql.replica.time_behind_source` - Replication lag in seconds
-- `mysql.replica.sql_delay` - SQL thread delay
+## Configuration Options
 
-### Table/Index I/O
-- `mysql.table.io.wait.count` - Table I/O wait events
-- `mysql.table.io.wait.time` - Table I/O wait time
-- `mysql.index.io.wait.count` - Index I/O wait events
-- `mysql.table.lock_wait.time` - Table lock wait time
+### Deployment Modes
+The master configuration supports 4 deployment modes:
 
-## Configuration
+- **Minimal**: Basic monitoring for development
+- **Standard**: Production-ready with replication monitoring  
+- **Advanced**: Deep insights with SQL intelligence queries
+- **Debug**: Troubleshooting with verbose logging
 
-### OpenTelemetry Collector
+🔧 **Configuration details**: See [Configuration Guide](docs/configuration.md#deployment-modes-explained)
 
-The collector configuration is in `otel/config/otel-collector-config.yaml`:
+### Environment Variables
 
-```yaml
-receivers:
-  mysql/primary:
-    endpoint: ${env:MYSQL_PRIMARY_ENDPOINT}
-    username: ${env:MYSQL_USER}
-    password: ${env:MYSQL_PASSWORD}
-    collection_interval: 10s
-    
-processors:
-  batch:
-    send_batch_size: 1000
-    timeout: 10s
-    
-exporters:
-  otlp/newrelic:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
-    headers:
-      api-key: ${env:NEW_RELIC_API_KEY}
-```
+| Variable | Description | Example |
+|----------|-------------|---------|
+| NEW_RELIC_LICENSE_KEY | New Relic License Key | `eu01xx...NRAL` |
+| MYSQL_PRIMARY_ENDPOINT | Primary MySQL | `mysql-primary:3306` |
+| DEPLOYMENT_MODE | Deployment mode | `minimal`, `standard`, `advanced` |
 
-### MySQL Configuration
-
-Custom MySQL configurations are in:
-- `mysql/conf/primary.cnf` - Primary instance settings
-- `mysql/conf/replica.cnf` - Replica instance settings
-
-Key settings:
-- Performance Schema enabled
-- Binary logging for replication
-- Slow query log enabled
-- InnoDB monitoring enabled
+📋 **All variables**: See [Configuration Guide](docs/configuration.md#environment-variables)
 
 ## New Relic Integration
 
@@ -174,24 +106,34 @@ Key settings:
 
 Import the provided dashboard:
 1. Go to **Dashboards** → **Import dashboard**
-2. Upload `dashboards/newrelic/mysql-dashboard.json`
+2. Upload `config/newrelic/dashboards.json`
 
-Or create custom queries:
+Key dashboards included:
+- **Overview**: Health score, connections, query rate
+- **Performance Analysis**: Wait profiles, buffer pool, locks
+- **Intelligence & Advisory**: Anomalies, recommendations
+- **Replication**: Lag monitoring and status
+
+### Sample Queries
+
 ```sql
+-- Query Performance
 SELECT rate(sum(mysql.query.count), 1 minute) as 'QPS' 
 FROM Metric 
 WHERE instrumentation.provider = 'opentelemetry' 
-FACET mysql.instance.endpoint 
 TIMESERIES
+
+-- Wait Analysis
+SELECT sum(value) as 'Wait Time' 
+FROM Metric 
+WHERE metricName = 'mysql.query.wait_profile' 
+FACET attributes['wait.category']
+
+-- Anomalies
+SELECT * FROM Metric 
+WHERE attributes['anomaly.detected'] = true 
+SINCE 30 minutes ago
 ```
-
-### Setting Up Alerts
-
-Example alert conditions are provided in `dashboards/newrelic/alerts.yaml`:
-- Connection saturation
-- Replication lag
-- Slow query rate
-- Buffer pool efficiency
 
 ## Troubleshooting
 
@@ -232,67 +174,54 @@ environment:
   GOMEMLIMIT: "1750MiB"
 ```
 
-## Advanced Configuration
+## 🔬 Advanced Features
 
-### Custom Metrics
+### Intelligence Engine
+When `DEPLOYMENT_MODE=advanced`, get:
+- **Wait Profile Analysis**: Categorized query wait times
+- **Anomaly Detection**: ML-based detection with severity scoring
+- **Performance Advisory**: Actionable recommendations
+- **Business Impact**: Revenue and SLA impact tracking
+- **Historical Patterns**: Trend analysis and predictions
 
-Add custom MySQL queries to the receiver:
-```yaml
-receivers:
-  mysql/custom:
-    queries:
-      - query: "SELECT COUNT(*) as value FROM custom_table"
-        metric_name: "mysql.custom.table.count"
-        value_column: "value"
-```
-
-### Sampling High-Cardinality Metrics
-
-Configure sampling in the transform processor:
-```yaml
-processors:
-  transform:
-    metric_statements:
-      - context: datapoint
-        statements:
-          - limit(attributes["table"], 50) where metric.name == "mysql.table.io.wait.count"
-```
-
-### Multi-Environment Setup
-
-Use different `.env` files:
+### Multi-Environment Support
 ```bash
-docker compose --env-file .env.production up -d
+# Production deployment
+export DEPLOYMENT_MODE="standard"
+export ENVIRONMENT="production"
+
+# Development deployment  
+export DEPLOYMENT_MODE="minimal"
+export ENVIRONMENT="development"
 ```
 
-## Performance Considerations
+## Performance & Security
 
-- The collector uses ~200MB RAM under normal load
-- MySQL Performance Schema adds ~5-10% overhead
-- Network latency to New Relic affects batch sizes
-- Consider sampling for environments with >1000 tables
+**Performance**:
+- Collector uses ~200MB RAM (adjustable via `MEMORY_LIMIT_PERCENT`)
+- MySQL Performance Schema adds 5-10% overhead
+- Batch sizes adjustable via `BATCH_SIZE` environment variable
 
-## Security
+**Security**:
+- All credentials in environment variables
+- MySQL user has minimal required privileges
+- TLS supported for MySQL connections
 
-- All credentials are stored in environment variables
-- MySQL monitoring user has minimal required privileges
-- TLS can be enabled for MySQL connections
-- New Relic API key should be kept secure
+## Support & Contributing
 
-## Contributing
+**Get Help**:
+- 📚 [Getting Started](docs/getting-started.md)
+- 🔧 [Configuration Guide](docs/configuration.md)
+- 📝 [Operations Guide](docs/operations.md)
+- 🤔 [Troubleshooting](docs/troubleshooting.md)
+- 🌐 [New Relic Docs](https://docs.newrelic.com/)
 
+**Contributing**:
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Run tests: `./scripts/test-connection.sh`
-5. Submit a pull request
+3. Run tests: `./operate/full-test.sh`
+4. Submit a pull request
 
 ## License
 
-This project is licensed under the MIT License - see LICENSE file for details.
-
-## Support
-
-- New Relic Documentation: https://docs.newrelic.com/
-- OpenTelemetry MySQL Receiver: https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/mysqlreceiver
-- Issues: Create an issue in this repository
+MIT License - see LICENSE file for details
