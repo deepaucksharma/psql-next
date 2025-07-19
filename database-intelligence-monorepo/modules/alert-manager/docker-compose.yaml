@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  alert-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: di-alert-manager
+    ports:
+      - "8089:8089"  # OTLP gRPC receiver
+      - "4318:4318"  # OTLP HTTP receiver
+      - "9091:9091"  # Prometheus exporter
+      - "13134:13134" # Health check extension
+    environment:
+      - OTEL_SERVICE_NAME=alert-manager
+      - OTEL_LOG_LEVEL=info
+      - WEBHOOK_ENDPOINT=${WEBHOOK_ENDPOINT:-http://localhost:9999/alerts}
+      - ALERT_FILE_PATH=/var/log/alerts/alerts.json
+    volumes:
+      - ./config:/etc/otelcol
+      - alert-logs:/var/log/alerts
+    networks:
+      - intelligence-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13134/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  alert-logs:
+    driver: local
+
+networks:
+  intelligence-network:
+    external: true

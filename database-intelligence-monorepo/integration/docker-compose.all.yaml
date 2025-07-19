@@ -1,0 +1,161 @@
+version: '3.8'
+
+networks:
+  db-intelligence:
+    driver: bridge
+
+services:
+  # Shared MySQL instance
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_DATABASE: testdb
+    ports:
+      - "3306:3306"
+    networks:
+      - db-intelligence
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Core Metrics Module
+  core-metrics:
+    build: ../modules/core-metrics
+    environment:
+      MODULE_NAME: core-metrics
+      MYSQL_ENDPOINT: mysql:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: test
+      EXPORT_PORT: 8081
+    ports:
+      - "8081:8081"
+    networks:
+      - db-intelligence
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # SQL Intelligence Module
+  sql-intelligence:
+    build: ../modules/sql-intelligence
+    environment:
+      MODULE_NAME: sql-intelligence
+      MYSQL_ENDPOINT: mysql:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: test
+      EXPORT_PORT: 8082
+      METRICS_ENDPOINT: http://core-metrics:8081
+    ports:
+      - "8082:8082"
+    networks:
+      - db-intelligence
+    depends_on:
+      mysql:
+        condition: service_healthy
+      core-metrics:
+        condition: service_started
+
+  # Wait Profiler Module
+  wait-profiler:
+    build: ../modules/wait-profiler
+    environment:
+      MODULE_NAME: wait-profiler
+      MYSQL_ENDPOINT: mysql:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: test
+      EXPORT_PORT: 8083
+    ports:
+      - "8083:8083"
+    networks:
+      - db-intelligence
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # Anomaly Detector Module
+  anomaly-detector:
+    build: ../modules/anomaly-detector
+    environment:
+      MODULE_NAME: anomaly-detector
+      METRICS_ENDPOINTS: |
+        - http://core-metrics:8081
+        - http://sql-intelligence:8082
+        - http://wait-profiler:8083
+      EXPORT_PORT: 8084
+    ports:
+      - "8084:8084"
+    networks:
+      - db-intelligence
+    depends_on:
+      - core-metrics
+      - sql-intelligence
+      - wait-profiler
+
+  # Business Impact Module
+  business-impact:
+    build: ../modules/business-impact
+    environment:
+      MODULE_NAME: business-impact
+      EXPORT_PORT: 8085
+    ports:
+      - "8085:8085"
+      - "4318:4318"  # OTLP HTTP
+    networks:
+      - db-intelligence
+    depends_on:
+      - sql-intelligence
+
+  # Performance Advisor Module
+  performance-advisor:
+    build: ../modules/performance-advisor
+    environment:
+      MODULE_NAME: performance-advisor
+      METRICS_ENDPOINTS: |
+        - http://core-metrics:8081
+        - http://sql-intelligence:8082
+        - http://wait-profiler:8083
+        - http://anomaly-detector:8084
+      EXPORT_PORT: 8087
+    ports:
+      - "8087:8087"
+    networks:
+      - db-intelligence
+    depends_on:
+      - core-metrics
+      - sql-intelligence
+      - wait-profiler
+      - anomaly-detector
+
+  # Resource Monitor Module
+  resource-monitor:
+    build: ../modules/resource-monitor
+    environment:
+      MODULE_NAME: resource-monitor
+      EXPORT_PORT: 8088
+    ports:
+      - "8088:8088"
+    networks:
+      - db-intelligence
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    privileged: true
+
+  # Integration test runner
+  integration-tests:
+    build: ./tests
+    networks:
+      - db-intelligence
+    depends_on:
+      - core-metrics
+      - sql-intelligence
+      - wait-profiler
+      - anomaly-detector
+      - business-impact
+      - performance-advisor
+      - resource-monitor
+    command: pytest -v /tests/

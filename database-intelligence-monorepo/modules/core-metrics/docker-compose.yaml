@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  mysql-test:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_DATABASE: testdb
+    ports:
+      - "3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+  core-metrics:
+    build: .
+    environment:
+      MODULE_NAME: core-metrics
+      MYSQL_ENDPOINT: mysql-test:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: test
+      EXPORT_PORT: 8081
+      OTEL_SERVICE_NAME: core-metrics
+    ports:
+      - "8081:8081"
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+    volumes:
+      - ./config:/etc/otel
+    command: ["--config", "/etc/otel/collector.yaml"]

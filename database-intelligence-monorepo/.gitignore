@@ -1,0 +1,61 @@
+# Environment files
+.env
+*.env
+.env.*
+
+# Docker volumes
+**/data/
+**/logs/
+
+# Build artifacts
+**/build/
+**/dist/
+**/target/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.pytest_cache/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+
+# Module specific
+modules/*/alerts.json
+modules/*/metrics.json
+
+# Test results
+**/test-results/
+**/coverage/
+
+# Backup files
+*.bak
+*.backup
+
+# Lock files (keep package lock files)
+!package-lock.json
+!yarn.lock
+!Pipfile.lock

@@ -1,0 +1,140 @@
+# E2E Configuration for Anomaly Detector Module
+# This file defines expected metrics, dashboards, and alerts for validation
+
+# Service endpoints (defaults if not specified)
+prometheus_url: http://localhost:9090
+grafana_url: http://localhost:3000
+alertmanager_url: http://localhost:9093
+
+# Custom endpoints specific to this module
+custom_endpoints:
+  anomaly_api: http://localhost:8080/api/anomalies
+  health_check: http://localhost:8080/health
+
+# Expected metrics that should be collected
+expected_metrics:
+  # Standard MySQL metrics (inherited from base)
+  mysql_up:
+    type: gauge
+    required: true
+    min_value: 0
+    max_value: 1
+    
+  # Anomaly detector specific metrics
+  anomaly_detection_enabled:
+    type: gauge
+    description: "Whether anomaly detection is currently enabled"
+    required: true
+    min_value: 0
+    max_value: 1
+    
+  anomalies_detected_total:
+    type: counter
+    description: "Total number of anomalies detected"
+    required: true
+    
+  anomaly_detection_last_run_timestamp:
+    type: gauge
+    description: "Timestamp of last anomaly detection run"
+    required: true
+    
+  anomaly_detection_duration_seconds:
+    type: histogram
+    description: "Time taken to run anomaly detection"
+    required: false
+    
+  anomaly_false_positive_rate:
+    type: gauge
+    description: "Current false positive rate"
+    required: false
+    min_value: 0
+    max_value: 1
+
+# Expected Grafana dashboards
+expected_dashboards:
+  anomaly-detection:
+    title: "Anomaly Detection Dashboard"
+    required: true
+    panels:
+      - "Anomaly Detection Status"
+      - "Anomalies Over Time"
+      - "Anomaly Types Distribution"
+      - "Detection Performance"
+      - "False Positive Rate"
+      - "Alert History"
+      
+  anomaly-analysis:
+    title: "Anomaly Analysis"
+    required: false
+    panels:
+      - "Top Anomalous Queries"
+      - "Anomaly Patterns"
+      - "Correlation Matrix"
+
+# Expected alert rules
+expected_alerts:
+  anomaly_detector_down:
+    name: "AnomalyDetectorDown"
+    severity: critical
+    required: true
+    expression: 'anomaly_detection_enabled == 0'
+    for: 5m
+    labels:
+      severity: critical
+      service: anomaly-detector
+      team: database-intelligence
+    annotations:
+      summary: "Anomaly detector is not running"
+      description: "The anomaly detection service has been down for more than 5 minutes"
+      
+  high_anomaly_rate:
+    name: "HighAnomalyRate"
+    severity: warning
+    required: true
+    expression: 'rate(anomalies_detected_total[5m]) > 10'
+    for: 10m
+    labels:
+      severity: warning
+      service: anomaly-detector
+    annotations:
+      summary: "High rate of anomalies detected"
+      description: "More than 10 anomalies per minute detected in the last 10 minutes"
+      
+  anomaly_detection_slow:
+    name: "AnomalyDetectionSlow"
+    severity: warning
+    required: false
+    expression: 'histogram_quantile(0.95, anomaly_detection_duration_seconds) > 30'
+    for: 15m
+    labels:
+      severity: warning
+      service: anomaly-detector
+    annotations:
+      summary: "Anomaly detection is running slowly"
+      description: "95th percentile of detection duration is over 30 seconds"
+      
+  high_false_positive_rate:
+    name: "HighFalsePositiveRate"
+    severity: info
+    required: false
+    expression: 'anomaly_false_positive_rate > 0.2'
+    for: 30m
+    labels:
+      severity: info
+      service: anomaly-detector
+    annotations:
+      summary: "High false positive rate in anomaly detection"
+      description: "False positive rate is above 20%"
+
+# Additional validation settings
+validation_settings:
+  # How long to wait for metrics to appear (seconds)
+  metric_wait_time: 60
+  
+  # Minimum number of data points required for validation
+  min_data_points: 5
+  
+  # Custom validation scripts (optional)
+  custom_validators:
+    - check_ml_model_loaded.py
+    - validate_anomaly_patterns.py

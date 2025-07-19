@@ -1,0 +1,263 @@
+# E2E Configuration for Wait Profiler Module
+# This file defines expected metrics, dashboards, and alerts for validation
+
+# Service endpoints (defaults if not specified)
+prometheus_url: http://localhost:9090
+grafana_url: http://localhost:3000
+alertmanager_url: http://localhost:9093
+
+# Custom endpoints specific to this module
+custom_endpoints:
+  wait_analysis_api: http://localhost:8080/api/wait-analysis
+  wait_events_api: http://localhost:8080/api/wait-events
+  health_check: http://localhost:8080/health
+
+# Expected metrics that should be collected
+expected_metrics:
+  # Wait Profiler specific metrics
+  wait_profiler_enabled:
+    type: gauge
+    description: "Whether wait profiler is currently enabled"
+    required: true
+    min_value: 0
+    max_value: 1
+    
+  mysql_perf_schema_events_waits_total:
+    type: counter
+    description: "Total number of wait events captured"
+    required: true
+    min_value: 0
+    labels:
+      - event_name
+      - object_type
+      - object_schema
+      - object_name
+    
+  mysql_perf_schema_events_waits_seconds_total:
+    type: counter
+    description: "Total time spent in wait events"
+    required: true
+    min_value: 0
+    labels:
+      - event_name
+      - object_type
+      - object_schema
+      - object_name
+    
+  mysql_perf_schema_file_io_waits_total:
+    type: counter
+    description: "Total number of file I/O wait events"
+    required: true
+    min_value: 0
+    labels:
+      - event_name
+      - file_name
+      - operation
+    
+  mysql_perf_schema_file_io_waits_seconds_total:
+    type: counter
+    description: "Total time spent in file I/O waits"
+    required: true
+    min_value: 0
+    labels:
+      - event_name
+      - file_name
+      - operation
+    
+  mysql_perf_schema_table_io_waits_total:
+    type: counter
+    description: "Total number of table I/O wait events"
+    required: true
+    min_value: 0
+    labels:
+      - schema
+      - table
+      - operation
+    
+  mysql_perf_schema_table_io_waits_seconds_total:
+    type: counter
+    description: "Total time spent in table I/O waits"
+    required: true
+    min_value: 0
+    labels:
+      - schema
+      - table
+      - operation
+    
+  mysql_perf_schema_lock_waits_total:
+    type: counter
+    description: "Total number of lock wait events"
+    required: true
+    min_value: 0
+    labels:
+      - schema
+      - table
+      - lock_type
+    
+  mysql_perf_schema_lock_waits_seconds_total:
+    type: counter
+    description: "Total time spent waiting for locks"
+    required: true
+    min_value: 0
+    labels:
+      - schema
+      - table
+      - lock_type
+    
+  wait_event_collection_lag_seconds:
+    type: gauge
+    description: "Lag in wait event collection"
+    required: false
+    min_value: 0
+    max_value: 60
+    
+  wait_event_buffer_usage_ratio:
+    type: gauge
+    description: "Performance schema buffer usage ratio"
+    required: true
+    min_value: 0
+    max_value: 1
+    
+  top_wait_events_count:
+    type: gauge
+    description: "Number of top wait events being tracked"
+    required: true
+    min_value: 0
+    max_value: 100
+
+# Expected Grafana dashboards
+expected_dashboards:
+  wait-profiler:
+    title: "MySQL Wait Event Profiler"
+    required: true
+    panels:
+      - "Top Wait Events"
+      - "Wait Time Distribution"
+      - "File I/O Wait Analysis"
+      - "Table I/O Wait Analysis"
+      - "Lock Wait Analysis"
+      - "Wait Event Trends"
+      - "Performance Schema Buffer Usage"
+      
+  wait-analysis-detailed:
+    title: "Detailed Wait Analysis"
+    required: true
+    panels:
+      - "Wait Event Heatmap"
+      - "Schema-Level Wait Analysis"
+      - "Table-Level Wait Analysis"
+      - "Lock Contention Matrix"
+      - "I/O Bottleneck Analysis"
+      - "Wait Event Correlation"
+      
+  performance-schema-overview:
+    title: "Performance Schema Overview"
+    required: false
+    panels:
+      - "Performance Schema Configuration"
+      - "Instrumentation Coverage"
+      - "Event Loss Statistics"
+      - "Memory Usage"
+
+# Expected alert rules
+expected_alerts:
+  wait_profiler_down:
+    name: "WaitProfilerDown"
+    severity: critical
+    required: true
+    expression: 'wait_profiler_enabled == 0'
+    for: 5m
+    labels:
+      severity: critical
+      service: wait-profiler
+      module: wait-profiler
+    annotations:
+      summary: "Wait profiler is not running"
+      description: "The wait event profiler has been down for more than 5 minutes"
+      
+  high_lock_wait_time:
+    name: "HighLockWaitTime"
+    severity: critical
+    required: true
+    expression: 'rate(mysql_perf_schema_lock_waits_seconds_total[5m]) > 10'
+    for: 5m
+    labels:
+      severity: critical
+      service: wait-profiler
+      module: wait-profiler
+    annotations:
+      summary: "High lock wait time detected"
+      description: "MySQL is spending more than 10 seconds per minute waiting for locks"
+      
+  high_io_wait_time:
+    name: "HighIOWaitTime"
+    severity: warning
+    required: true
+    expression: 'rate(mysql_perf_schema_file_io_waits_seconds_total[5m]) > 30'
+    for: 10m
+    labels:
+      severity: warning
+      service: wait-profiler
+      module: wait-profiler
+    annotations:
+      summary: "High I/O wait time detected"
+      description: "MySQL is spending more than 30 seconds per minute in I/O waits"
+      
+  performance_schema_buffer_full:
+    name: "PerformanceSchemaBufferFull"
+    severity: warning
+    required: true
+    expression: 'wait_event_buffer_usage_ratio > 0.9'
+    for: 15m
+    labels:
+      severity: warning
+      service: wait-profiler
+      module: wait-profiler
+    annotations:
+      summary: "Performance Schema buffers are nearly full"
+      description: "Performance Schema buffer usage is above 90%, events may be lost"
+      
+  high_table_io_waits:
+    name: "HighTableIOWaits"
+    severity: warning
+    required: false
+    expression: 'rate(mysql_perf_schema_table_io_waits_total[5m]) > 1000'
+    for: 10m
+    labels:
+      severity: warning
+      service: wait-profiler
+      module: wait-profiler
+    annotations:
+      summary: "High rate of table I/O waits"
+      description: "More than 1000 table I/O wait events per minute"
+      
+  wait_collection_lag:
+    name: "WaitEventCollectionLag"
+    severity: info
+    required: false
+    expression: 'wait_event_collection_lag_seconds > 30'
+    for: 10m
+    labels:
+      severity: info
+      service: wait-profiler
+      module: wait-profiler
+    annotations:
+      summary: "Wait event collection is lagging"
+      description: "Wait event collection is {{ $value }} seconds behind"
+
+# Additional validation settings
+validation_settings:
+  # How long to wait for metrics to appear (seconds)
+  metric_wait_time: 60
+  
+  # Minimum number of data points required for validation
+  min_data_points: 5
+  
+  # Freshness threshold for all metrics (seconds)
+  default_freshness_threshold: 90
+  
+  # Custom validation scripts (optional)
+  custom_validators:
+    - validate_performance_schema.py
+    - check_wait_event_collection.py
+    - verify_wait_analysis.py

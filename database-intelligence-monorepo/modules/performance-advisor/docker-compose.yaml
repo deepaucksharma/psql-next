@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  performance-advisor:
+    build: .
+    container_name: performance-advisor
+    ports:
+      - "8087:8087"
+    environment:
+      - OTEL_SERVICE_NAME=performance-advisor
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=performance-advisor,service.version=1.0.0
+    volumes:
+      - ./config:/etc/otelcol-contrib
+    networks:
+      - database-intelligence
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  database-intelligence:
+    external: true

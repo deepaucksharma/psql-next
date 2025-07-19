@@ -1,0 +1,24 @@
+# Docker volumes
+data/
+logs/
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+*.swp
+*.swo
+
+# IDE files
+.idea/
+.vscode/
+
+# Test artifacts
+*.test
+coverage.out
+
+# Temporary files
+*.tmp
+*.bak

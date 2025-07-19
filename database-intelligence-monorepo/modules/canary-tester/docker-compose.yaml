@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  canary-tester:
+    build: .
+    container_name: canary-tester
+    ports:
+      - "8090:8090"
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=rootpassword
+      - MYSQL_DATABASE=test
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - CANARY_INTERVAL=30s
+      - CANARY_TIMEOUT=10s
+    volumes:
+      - ./config:/etc/otel-collector
+      - ./src:/app/queries
+    networks:
+      - otel-network
+    depends_on:
+      - mysql
+      - otel-collector
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: canary-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=test
+    ports:
+      - "3306:3306"
+    networks:
+      - otel-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: canary-otel-collector
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics
+    volumes:
+      - ./config/collector.yaml:/etc/otel-collector/config.yaml
+    command: ["--config=/etc/otel-collector/config.yaml"]
+    networks:
+      - otel-network
+
+networks:
+  otel-network:
+    driver: bridge

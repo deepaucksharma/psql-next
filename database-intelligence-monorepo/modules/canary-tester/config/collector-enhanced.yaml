@@ -1,0 +1,365 @@
+# Enhanced Canary Tester Configuration
+# Implements synthetic monitoring from master-enhanced.yaml
+
+receivers:
+  # Synthetic monitoring queries for baseline establishment
+  sqlquery/canary:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT:canary-mysql:3306})/"
+    collection_interval: ${env:CANARY_INTERVAL:60s}
+    queries:
+      # Simple connectivity check
+      - sql: "SELECT /* CANARY */ 1 as healthcheck"
+        metrics:
+          - metric_name: mysql.canary.latency
+            value_type: "query_time_ms"
+            value_column: "healthcheck"
+            attribute_columns: []
+            
+      # Lock acquisition test
+      - sql: "SELECT /* CANARY_LOCK */ GET_LOCK('canary_test', 1) as lock_acquired"
+        metrics:
+          - metric_name: mysql.canary.lock_latency
+            value_type: "query_time_ms"
+            value_column: "lock_acquired"
+            attribute_columns: []
+            
+      # Metadata query performance
+      - sql: "SELECT /* CANARY_PERF */ COUNT(*) as table_count FROM information_schema.tables WHERE TABLE_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')"
+        metrics:
+          - metric_name: mysql.canary.metadata_latency
+            value_type: "query_time_ms"
+            value_column: "table_count"
+            attribute_columns: []
+            
+      # Index usage test
+      - sql: |
+          SELECT /* CANARY_INDEX */ 
+            COUNT(*) as index_count 
+          FROM information_schema.STATISTICS 
+          WHERE TABLE_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+        metrics:
+          - metric_name: mysql.canary.index_scan_latency
+            value_type: "query_time_ms"
+            value_column: "index_count"
+            attribute_columns: []
+            
+      # Join performance test
+      - sql: |
+          SELECT /* CANARY_JOIN */ 
+            COUNT(*) as join_result
+          FROM information_schema.COLUMNS c1
+          JOIN information_schema.COLUMNS c2 
+            ON c1.TABLE_SCHEMA = c2.TABLE_SCHEMA
+          WHERE c1.TABLE_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+          LIMIT 100
+        metrics:
+          - metric_name: mysql.canary.join_latency
+            value_type: "query_time_ms"
+            value_column: "join_result"
+            attribute_columns: []
+            
+      # Transaction test
+      - sql: |
+          DO (
+            SELECT /* CANARY_TXN */ 
+            @@autocommit,
+            @@tx_isolation,
+            @@tx_read_only
+          )
+        metrics:
+          - metric_name: mysql.canary.transaction_latency
+            value_type: "query_time_ms"
+            value_column: "1"
+            attribute_columns: []
+
+  # Advanced canary queries for workload simulation
+  sqlquery/canary_workload:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT:canary-mysql:3306})/${env:CANARY_DATABASE:test}"
+    collection_interval: ${env:CANARY_WORKLOAD_INTERVAL:300s}
+    queries:
+      # OLTP simulation
+      - sql: |
+          WITH canary_oltp AS (
+            SELECT 
+              'oltp_read' as workload_type,
+              COUNT(*) as operations,
+              AVG(1) as avg_rows,
+              NOW() as test_time
+            FROM information_schema.COLUMNS
+            WHERE ORDINAL_POSITION = 1
+            LIMIT 1000
+          )
+          SELECT * FROM canary_oltp
+        metrics:
+          - metric_name: mysql.canary.workload.oltp
+            value_column: operations
+            attribute_columns: [workload_type, avg_rows]
+            
+      # OLAP simulation
+      - sql: |
+          WITH canary_olap AS (
+            SELECT 
+              'olap_aggregate' as workload_type,
+              COUNT(*) as total_rows,
+              COUNT(DISTINCT TABLE_SCHEMA) as distinct_schemas,
+              COUNT(DISTINCT TABLE_NAME) as distinct_tables,
+              MAX(ORDINAL_POSITION) as max_columns
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+          )
+          SELECT * FROM canary_olap
+        metrics:
+          - metric_name: mysql.canary.workload.olap
+            value_column: total_rows
+            attribute_columns: [workload_type, distinct_schemas, distinct_tables, max_columns]
+
+  # MySQL metrics receiver for correlation
+  mysql:
+    endpoint: ${env:MYSQL_ENDPOINT:canary-mysql:3306}
+    username: ${env:MYSQL_USER:root}
+    password: ${env:MYSQL_PASSWORD:rootpassword}
+    database: ${env:CANARY_DATABASE:test}
+    collection_interval: 30s
+    metrics:
+      mysql.buffer_pool.operations:
+        enabled: true
+      mysql.commands:
+        enabled: true
+      mysql.connections:
+        enabled: true
+      mysql.query.count:
+        enabled: true
+      mysql.query.slow.count:
+        enabled: true
+      mysql.threads:
+        enabled: true
+      mysql.uptime:
+        enabled: true
+
+  # OTLP receiver for external canary results
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus receiver for canary metrics from the Go application
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'canary-app'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['localhost:8090']
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  # Resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: canary-tester
+        action: insert
+      - key: service.version
+        value: "2.0.0"
+        action: insert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT:production}
+        action: insert
+
+  # Canary result analysis
+  transform/canary_analysis:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Calculate baseline deviation
+          - set(attributes["canary.baseline_ms"], 10)
+            where metric.name == "mysql.canary.latency"
+          - set(attributes["canary.baseline_ms"], 50)
+            where metric.name == "mysql.canary.lock_latency"
+          - set(attributes["canary.baseline_ms"], 100)
+            where metric.name == "mysql.canary.metadata_latency"
+          - set(attributes["canary.baseline_ms"], 200)
+            where metric.name == "mysql.canary.index_scan_latency"
+          - set(attributes["canary.baseline_ms"], 500)
+            where metric.name == "mysql.canary.join_latency"
+            
+          # Calculate deviation percentage
+          - set(attributes["canary.deviation_percent"], 
+                ((value - attributes["canary.baseline_ms"]) / attributes["canary.baseline_ms"]) * 100)
+            where attributes["canary.baseline_ms"] != nil
+            
+          # Set health status
+          - set(attributes["canary.health"], "healthy")
+            where attributes["canary.deviation_percent"] >= -20 and attributes["canary.deviation_percent"] <= 20
+          - set(attributes["canary.health"], "degraded")
+            where attributes["canary.deviation_percent"] > 20 and attributes["canary.deviation_percent"] <= 50
+          - set(attributes["canary.health"], "unhealthy")
+            where attributes["canary.deviation_percent"] > 50
+            
+          # Generate alerts for unhealthy canaries
+          - set(attributes["alert.type"], "canary_failure")
+            where attributes["canary.health"] == "unhealthy"
+          - set(attributes["alert.severity"], "warning")
+            where attributes["canary.health"] == "degraded"
+          - set(attributes["alert.severity"], "critical")
+            where attributes["canary.health"] == "unhealthy"
+          - set(attributes["alert.message"], 
+                "Canary " + metric.name + " deviating by " + string(attributes["canary.deviation_percent"]) + "%")
+            where attributes["alert.type"] == "canary_failure"
+
+  # Add canary metadata
+  attributes/canary:
+    actions:
+      - key: monitoring.type
+        value: synthetic
+        action: insert
+      - key: canary.enabled
+        value: "true"
+        action: insert
+      - key: canary.version
+        value: "2.0"
+        action: insert
+      - key: canary.timestamp
+        value: ${env:HOSTNAME}
+        action: insert
+
+  # Filter for alerts
+  filter/canary_alerts:
+    metrics:
+      include:
+        match_type: strict
+        attributes:
+          - key: alert.type
+            value: "canary_failure"
+
+exporters:
+  # Console logging
+  logging:
+    loglevel: info
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # Prometheus exporter with exemplars
+  prometheus:
+    endpoint: "0.0.0.0:8888"
+    metric_expiration: 10m
+    enable_open_metrics: true
+    resource_to_telemetry_conversion:
+      enabled: true
+    const_labels:
+      module: canary-tester
+
+  # OTLP for cross-module communication
+  otlp/external:
+    endpoint: ${env:OTLP_ENDPOINT:localhost:4317}
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Alert forwarding
+  otlp/alerts:
+    endpoint: ${env:ALERT_MANAGER_ENDPOINT:alert-manager:8089}
+    tls:
+      insecure: true
+
+  # Debug file export
+  file/canary:
+    path: /tmp/canary-results.json
+    format: json
+    rotation:
+      max_megabytes: 10
+      max_days: 7
+      max_backups: 3
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  
+  pprof:
+    endpoint: 0.0.0.0:1777
+  
+  zpages:
+    endpoint: 0.0.0.0:55679
+    
+  # File storage for persistent canary baselines
+  file_storage/baselines:
+    directory: ${env:CANARY_BASELINE_DIR:/var/lib/canary/baselines}
+    timeout: 10s
+
+service:
+  extensions: [health_check, pprof, zpages, file_storage/baselines]
+  
+  pipelines:
+    # Main canary metrics
+    metrics:
+      receivers: [sqlquery/canary, mysql, prometheus]
+      processors: [
+        memory_limiter, 
+        batch, 
+        resource, 
+        transform/canary_analysis,
+        attributes/canary
+      ]
+      exporters: [logging, prometheus, otlp/external]
+    
+    # Workload simulation metrics
+    metrics/workload:
+      receivers: [sqlquery/canary_workload]
+      processors: [
+        memory_limiter,
+        batch,
+        resource,
+        attributes/canary
+      ]
+      exporters: [prometheus, otlp/external]
+    
+    # Canary alerts
+    metrics/alerts:
+      receivers: [sqlquery/canary]
+      processors: [
+        memory_limiter,
+        batch,
+        transform/canary_analysis,
+        filter/canary_alerts,
+        attributes/canary
+      ]
+      exporters: [otlp/alerts, logging]
+    
+    # External metrics forwarding
+    metrics/external:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp/external]
+      
+    # Debug pipeline
+    metrics/debug:
+      receivers: [sqlquery/canary]
+      processors: [batch, transform/canary_analysis]
+      exporters: [file/canary]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:info}
+      initial_fields:
+        service: canary-tester
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8889

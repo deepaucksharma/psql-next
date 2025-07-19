@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  mysql-master:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mysql-master
+    hostname: mysql-master
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: test_db
+      MYSQL_USER: replication_user
+      MYSQL_PASSWORD: replication_password
+    volumes:
+      - ./src/init-master.sql:/docker-entrypoint-initdb.d/init-master.sql
+      - master-data:/var/lib/mysql
+    command: >
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+      --log-slave-updates=ON
+      --master-info-repository=TABLE
+      --relay-log-info-repository=TABLE
+      --transaction-write-set-extraction=XXHASH64
+      --binlog-checksum=NONE
+    networks:
+      - replication-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql-replica:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mysql-replica
+    hostname: mysql-replica
+    ports:
+      - "8086:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: test_db
+    volumes:
+      - ./src/init-replica.sql:/docker-entrypoint-initdb.d/init-replica.sql
+      - replica-data:/var/lib/mysql
+    command: >
+      --server-id=2
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+      --log-slave-updates=ON
+      --master-info-repository=TABLE
+      --relay-log-info-repository=TABLE
+      --transaction-write-set-extraction=XXHASH64
+      --binlog-checksum=NONE
+      --read-only=ON
+      --super-read-only=ON
+    depends_on:
+      mysql-master:
+        condition: service_healthy
+    networks:
+      - replication-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: replication-collector
+    command: ["--config=/etc/otel-collector/collector.yaml"]
+    volumes:
+      - ./config/collector.yaml:/etc/otel-collector/collector.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics
+      - "8889:8889"   # Prometheus exporter
+    depends_on:
+      mysql-master:
+        condition: service_healthy
+      mysql-replica:
+        condition: service_healthy
+    networks:
+      - replication-network
+
+volumes:
+  master-data:
+  replica-data:
+
+networks:
+  replication-network:
+    driver: bridge

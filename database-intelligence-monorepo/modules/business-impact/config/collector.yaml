@@ -1,0 +1,128 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  transform/business_impact:
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Calculate business impact score based on query patterns
+          - set(attributes["business_impact_score"], 0.0)
+          - set(attributes["business_category"], "general")
+          - set(attributes["revenue_impact"], "none")
+          
+          # Revenue-impacting queries (orders, payments, transactions)
+          - set(attributes["business_impact_score"], 10.0) where IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction|invoice|billing|subscription|purchase|sale|revenue|checkout).*")
+          - set(attributes["business_category"], "revenue") where IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction|invoice|billing|subscription|purchase|sale|revenue|checkout).*")
+          - set(attributes["revenue_impact"], "direct") where IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction|invoice|billing|subscription|purchase|sale|revenue|checkout).*")
+          
+          # Customer-facing operations
+          - set(attributes["business_impact_score"], 8.0) where IsMatch(attributes["db.statement"], "(?i).*(customer|user|account|profile|session|authentication|login|cart|wishlist).*") and attributes["business_impact_score"] < 8.0
+          - set(attributes["business_category"], "customer") where IsMatch(attributes["db.statement"], "(?i).*(customer|user|account|profile|session|authentication|login|cart|wishlist).*") and attributes["business_category"] == "general"
+          - set(attributes["revenue_impact"], "indirect") where IsMatch(attributes["db.statement"], "(?i).*(customer|user|account|profile|session|authentication|login|cart|wishlist).*") and attributes["revenue_impact"] == "none"
+          
+          # Inventory and fulfillment operations
+          - set(attributes["business_impact_score"], 7.0) where IsMatch(attributes["db.statement"], "(?i).*(inventory|stock|product|catalog|fulfillment|shipping|delivery|warehouse).*") and attributes["business_impact_score"] < 7.0
+          - set(attributes["business_category"], "operations") where IsMatch(attributes["db.statement"], "(?i).*(inventory|stock|product|catalog|fulfillment|shipping|delivery|warehouse).*") and attributes["business_category"] == "general"
+          
+          # Analytics and reporting
+          - set(attributes["business_impact_score"], 5.0) where IsMatch(attributes["db.statement"], "(?i).*(report|analytics|metric|dashboard|aggregate|summary|statistics).*") and attributes["business_impact_score"] < 5.0
+          - set(attributes["business_category"], "analytics") where IsMatch(attributes["db.statement"], "(?i).*(report|analytics|metric|dashboard|aggregate|summary|statistics).*") and attributes["business_category"] == "general"
+          
+          # Administrative operations
+          - set(attributes["business_impact_score"], 3.0) where IsMatch(attributes["db.statement"], "(?i).*(admin|config|setting|log|audit|backup|maintenance).*") and attributes["business_impact_score"] < 3.0
+          - set(attributes["business_category"], "admin") where IsMatch(attributes["db.statement"], "(?i).*(admin|config|setting|log|audit|backup|maintenance).*") and attributes["business_category"] == "general"
+          
+          # Boost score for critical operations
+          - set(attributes["business_impact_score"], attributes["business_impact_score"] * 1.5) where IsMatch(attributes["db.operation"], "(?i)(update|delete|insert)") and attributes["business_category"] == "revenue"
+          - set(attributes["business_impact_score"], attributes["business_impact_score"] * 1.3) where IsMatch(attributes["db.operation"], "(?i)(update|delete|insert)") and attributes["business_category"] == "customer"
+          
+          # Cap the score at 10
+          - set(attributes["business_impact_score"], 10.0) where attributes["business_impact_score"] > 10.0
+          
+          # Add SLA impact based on duration
+          - set(attributes["sla_impact"], "critical") where metric.name == "db.client.operation.duration" and value > 5.0
+          - set(attributes["sla_impact"], "warning") where metric.name == "db.client.operation.duration" and value > 2.0 and value <= 5.0
+          - set(attributes["sla_impact"], "normal") where metric.name == "db.client.operation.duration" and value <= 2.0
+          
+          # Add business-critical table identification
+          - set(attributes["critical_table"], true) where IsMatch(attributes["db.sql.table"], "(?i).*(order|payment|user|customer|transaction|invoice|product|inventory).*")
+          - set(attributes["critical_table"], false) where !IsMatch(attributes["db.sql.table"], "(?i).*(order|payment|user|customer|transaction|invoice|product|inventory).*")
+
+  transform/create_metrics:
+    metric_statements:
+      - context: scope
+        statements:
+          # Create business impact metrics
+          - set(metric.name, "business.impact.score") where metric.name == "db.client.operation.duration"
+          - set(metric.unit, "score") where metric.name == "business.impact.score"
+          - set(metric.description, "Business impact score (0-10) based on query patterns and tables") where metric.name == "business.impact.score"
+
+  attributes/business_metadata:
+    actions:
+      - key: service.name
+        value: "business-impact"
+        action: insert
+      - key: module.type
+        value: "business-impact-analyzer"
+        action: insert
+
+exporters:
+  otlp:
+    endpoint: otel-collector:4317
+    tls:
+      insecure: true
+
+  otlphttp/metrics:
+    endpoint: http://localhost:8085/v1/metrics
+    tls:
+      insecure: true
+
+  prometheus:
+    endpoint: "0.0.0.0:8888"
+    const_labels:
+      module: "business-impact"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  logging:
+    loglevel: info
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  telemetry:
+    logs:
+      level: "info"
+    metrics:
+      level: "detailed"
+      address: 0.0.0.0:8888
+
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: 
+        - batch
+        - transform/business_impact
+        - transform/create_metrics
+        - attributes/business_metadata
+      exporters: [prometheus, otlp, logging]
+
+  extensions: [health_check, pprof, zpages]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:6060
+  zpages:
+    endpoint: 0.0.0.0:55679

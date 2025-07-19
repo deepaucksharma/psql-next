@@ -1,0 +1,21 @@
+# Environment files
+.env
+.env.local
+
+# Alert logs
+alerts_received.jsonl
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  otel-collector:
+    build: .
+    container_name: resource-monitor-collector
+    ports:
+      - "8088:4317"   # OTLP gRPC receiver
+      - "8089:4318"   # OTLP HTTP receiver
+      - "8090:8888"   # Prometheus metrics
+      - "8091:13133"  # Health check
+    volumes:
+      - ./config/collector.yaml:/etc/otel-collector/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/hostname:/etc/hostname:ro
+    environment:
+      - HOST_PROC=/host/proc
+      - HOST_SYS=/host/sys
+      - HOST_ETC=/host/etc
+      - HOST_VAR=/host/var
+      - HOST_RUN=/host/run
+      - HOST_DEV=/host/dev
+    networks:
+      - resource-monitor-network
+    privileged: true
+    pid: host
+    command: ["--config=/etc/otel-collector/config.yaml"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  resource-monitor-network:
+    driver: bridge

@@ -1,0 +1,89 @@
+# Minimal MySQL Monitoring with SQL Intelligence
+# Fixed data type issues for metrics
+
+receivers:
+  # Basic MySQL metrics (no specific metric selection)
+  mysql:
+    endpoint: mysql-primary:3306
+    username: otel_monitor
+    password: otelmonitorpass
+    collection_interval: 10s
+
+  # SQL Query Intelligence with fixed data types
+  sqlquery/intelligence:
+    driver: mysql
+    datasource: "otel_monitor:otelmonitorpass@tcp(mysql-primary:3306)/"
+    collection_interval: 10s
+    queries:
+      - sql: |
+          SELECT 
+            DIGEST as query_digest,
+            LEFT(DIGEST_TEXT, 200) as query_text,
+            COUNT_STAR as exec_count,
+            ROUND(SUM_TIMER_WAIT/1000000000000) as total_wait_sec,
+            ROUND(AVG_TIMER_WAIT/1000000000000, 4) as avg_wait_sec,
+            CASE 
+              WHEN AVG_TIMER_WAIT/1000000000000 > 1 THEN 'critical'
+              WHEN AVG_TIMER_WAIT/1000000000000 > 0.1 THEN 'warning'
+              ELSE 'normal'
+            END as wait_severity
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE DIGEST_TEXT IS NOT NULL
+            AND COUNT_STAR > 0
+            AND SCHEMA_NAME NOT IN ('performance_schema', 'information_schema', 'sys', 'mysql')
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 20
+        metrics:
+          - metric_name: mysql.intelligence.query_performance
+            value_column: total_wait_sec
+            attribute_columns:
+              - query_digest
+              - query_text
+              - exec_count
+              - avg_wait_sec
+              - wait_severity
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  resource:
+    attributes:
+      - key: service.name
+        value: mysql-monitoring
+        action: insert
+      - key: environment
+        value: production
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+
+exporters:
+  otlp:
+    endpoint: otlp.nr-data.net:4317
+    headers:
+      api-key: 20a74fce4f17917940253df4d86eb080FFFFNRAL
+
+  debug:
+    verbosity: detailed
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    # Standard metrics pipeline
+    metrics:
+      receivers: [mysql]
+      processors: [batch, resource]
+      exporters: [otlp, debug]
+    
+    # Intelligence pipeline
+    metrics/intelligence:
+      receivers: [sqlquery/intelligence]
+      processors: [batch, resource]
+      exporters: [otlp, debug]

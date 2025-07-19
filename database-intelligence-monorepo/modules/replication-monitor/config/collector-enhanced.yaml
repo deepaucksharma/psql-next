@@ -1,0 +1,447 @@
+# Enhanced Replication Monitor Configuration
+# Includes all replication features from master-enhanced.yaml
+
+receivers:
+  # Primary MySQL receiver with all replication metrics
+  mysql/primary:
+    endpoint: ${env:MYSQL_PRIMARY_ENDPOINT:mysql-master:3306}
+    username: ${env:MYSQL_USER:root}
+    password: ${env:MYSQL_PASSWORD:rootpassword}
+    database: ${env:MYSQL_DATABASE:test_db}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:10s}
+    initial_delay: ${env:MYSQL_INITIAL_DELAY:1s}
+    transport: tcp
+    tls:
+      insecure: ${env:MYSQL_TLS_INSECURE:true}
+    metrics:
+      # Core replication metrics
+      mysql.replica.sql_delay:
+        enabled: true
+      mysql.replica.time_behind_source:
+        enabled: true
+      # Additional monitoring metrics
+      mysql.buffer_pool.data_pages:
+        enabled: true
+      mysql.buffer_pool.limit:
+        enabled: true
+      mysql.buffer_pool.operations:
+        enabled: true
+      mysql.buffer_pool.page_flushes:
+        enabled: true
+      mysql.buffer_pool.pages:
+        enabled: true
+      mysql.buffer_pool.usage:
+        enabled: true
+      mysql.commands:
+        enabled: true
+      mysql.connection.count:
+        enabled: true
+      mysql.connection.errors:
+        enabled: true
+      mysql.connection.max:
+        enabled: true
+      mysql.query.count:
+        enabled: true
+      mysql.threads:
+        enabled: true
+      mysql.uptime:
+        enabled: true
+
+  # Replica MySQL receiver
+  mysql/replica:
+    endpoint: ${env:MYSQL_REPLICA_ENDPOINT:mysql-replica:3306}
+    username: ${env:MYSQL_USER:root}
+    password: ${env:MYSQL_PASSWORD:rootpassword}
+    database: ${env:MYSQL_DATABASE:test_db}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:10s}
+    initial_delay: ${env:MYSQL_INITIAL_DELAY:1s}
+    transport: tcp
+    tls:
+      insecure: ${env:MYSQL_TLS_INSECURE:true}
+    metrics:
+      mysql.replica.sql_delay:
+        enabled: true
+      mysql.replica.time_behind_source:
+        enabled: true
+      mysql.buffer_pool.usage:
+        enabled: true
+      mysql.connection.count:
+        enabled: true
+      mysql.connection.max:
+        enabled: true
+      mysql.query.count:
+        enabled: true
+      mysql.threads:
+        enabled: true
+      mysql.uptime:
+        enabled: true
+
+  # Enhanced SQL queries for replication monitoring
+  sqlquery/primary:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_PRIMARY_ENDPOINT})/test_db"
+    queries:
+      - sql: |
+          SHOW MASTER STATUS
+        metrics:
+          - metric_name: mysql.replication.master.log_file
+            value_column: "File"
+            value_type: string
+            attribute_columns:
+              - "Position"
+              - "Binlog_Do_DB"
+              - "Binlog_Ignore_DB"
+          - metric_name: mysql.replication.master.log_position
+            value_column: "Position"
+            value_type: int
+        collection_interval: 10s
+
+      # Binary log analysis
+      - sql: |
+          SELECT 
+            COUNT(*) as binlog_count,
+            SUM(FILE_SIZE) as total_binlog_size
+          FROM mysql.binlog_cache_use
+        metrics:
+          - metric_name: mysql.replication.binlog.count
+            value_column: binlog_count
+          - metric_name: mysql.replication.binlog.total_size
+            value_column: total_binlog_size
+        collection_interval: 30s
+
+  sqlquery/replica:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_REPLICA_ENDPOINT})/test_db"
+    queries:
+      - sql: |
+          SHOW SLAVE STATUS
+        metrics:
+          - metric_name: mysql.replication.slave.io_running
+            value_column: "Slave_IO_Running"
+            value_type: string
+          - metric_name: mysql.replication.slave.sql_running
+            value_column: "Slave_SQL_Running"
+            value_type: string
+          - metric_name: mysql.replication.slave.seconds_behind_master
+            value_column: "Seconds_Behind_Master"
+            value_type: int
+            attribute_columns:
+              - "Master_Host"
+              - "Master_User"
+              - "Master_Port"
+          - metric_name: mysql.replication.slave.last_error
+            value_column: "Last_Error"
+            value_type: string
+            attribute_columns:
+              - "Last_Errno"
+          - metric_name: mysql.replication.slave.exec_master_log_pos
+            value_column: "Exec_Master_Log_Pos"
+            value_type: int
+            attribute_columns:
+              - "Master_Log_File"
+              - "Relay_Log_File"
+        collection_interval: 5s
+
+      # GTID monitoring
+      - sql: |
+          SELECT 
+            @@gtid_executed as executed_gtid_set,
+            @@gtid_purged as purged_gtid_set,
+            @@gtid_mode as gtid_mode,
+            @@enforce_gtid_consistency as gtid_consistency
+        metrics:
+          - metric_name: mysql.replication.gtid.executed
+            value_column: "executed_gtid_set"
+            value_type: string
+          - metric_name: mysql.replication.gtid.purged
+            value_column: "purged_gtid_set"
+            value_type: string
+          - metric_name: mysql.replication.gtid.mode
+            value_column: "gtid_mode"
+            value_type: string
+          - metric_name: mysql.replication.gtid.consistency_enforced
+            value_column: "gtid_consistency"
+            value_type: string
+        collection_interval: 10s
+
+      # Replication connection status
+      - sql: |
+          SELECT 
+            CHANNEL_NAME,
+            SERVICE_STATE,
+            LAST_ERROR_NUMBER,
+            LAST_ERROR_MESSAGE,
+            LAST_ERROR_TIMESTAMP,
+            LAST_QUEUED_TRANSACTION,
+            LAST_APPLIED_TRANSACTION
+          FROM performance_schema.replication_connection_status
+        metrics:
+          - metric_name: mysql.replication.connection.status
+            value_column: "SERVICE_STATE"
+            value_type: string
+            attribute_columns:
+              - "CHANNEL_NAME"
+              - "LAST_ERROR_NUMBER"
+              - "LAST_ERROR_MESSAGE"
+              - "LAST_QUEUED_TRANSACTION"
+              - "LAST_APPLIED_TRANSACTION"
+        collection_interval: 10s
+
+      # Replication applier status
+      - sql: |
+          SELECT 
+            CHANNEL_NAME,
+            THREAD_ID,
+            SERVICE_STATE,
+            LAST_ERROR_NUMBER,
+            LAST_ERROR_MESSAGE,
+            APPLYING_TRANSACTION,
+            LAST_APPLIED_TRANSACTION
+          FROM performance_schema.replication_applier_status
+        metrics:
+          - metric_name: mysql.replication.applier.status
+            value_column: "SERVICE_STATE"
+            value_type: string
+            attribute_columns:
+              - "CHANNEL_NAME"
+              - "THREAD_ID"
+              - "LAST_ERROR_NUMBER"
+              - "APPLYING_TRANSACTION"
+        collection_interval: 10s
+
+      # Replication lag analysis
+      - sql: |
+          SELECT 
+            WORKER_ID,
+            THREAD_ID,
+            SERVICE_STATE,
+            LAST_ERROR_NUMBER,
+            LAST_ERROR_MESSAGE,
+            APPLYING_TRANSACTION_ORIGINAL_COMMIT_TIMESTAMP,
+            APPLYING_TRANSACTION_IMMEDIATE_COMMIT_TIMESTAMP,
+            TIMESTAMPDIFF(SECOND, 
+              APPLYING_TRANSACTION_ORIGINAL_COMMIT_TIMESTAMP,
+              APPLYING_TRANSACTION_IMMEDIATE_COMMIT_TIMESTAMP
+            ) as transaction_lag_seconds
+          FROM performance_schema.replication_applier_status_by_worker
+          WHERE SERVICE_STATE = 'ON'
+        metrics:
+          - metric_name: mysql.replication.worker.transaction_lag
+            value_column: transaction_lag_seconds
+            attribute_columns:
+              - WORKER_ID
+              - THREAD_ID
+              - SERVICE_STATE
+        collection_interval: 5s
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  # Resource detection
+  resourcedetection:
+    detectors: [env, system, docker]
+    timeout: 5s
+    override: false
+
+  # Semantic conventions
+  resource/semantic_conventions:
+    attributes:
+      - key: db.system
+        value: mysql
+        action: upsert
+      - key: db.connection_string
+        value: "mysql://${env:MYSQL_PRIMARY_ENDPOINT}"
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT:production}
+        action: upsert
+      - key: service.namespace
+        value: "database"
+        action: upsert
+      - key: service.name
+        value: mysql-replication-monitor
+        action: insert
+      - key: service.version
+        value: "2.0.0"
+        action: insert
+
+  # Replication health analysis
+  transform/replication_health:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Calculate replication health score
+          - set(attributes["replication.health_score"], 100)
+          
+          # Deduct points for lag
+          - set(attributes["replication.health_score"], 
+                attributes["replication.health_score"] - Min(attributes["value"], 50))
+            where metric.name == "mysql.replication.slave.seconds_behind_master" and attributes["value"] > 0
+          
+          # Deduct points for stopped threads
+          - set(attributes["replication.health_score"], 
+                attributes["replication.health_score"] - 30)
+            where metric.name == "mysql.replication.slave.io_running" and attributes["value"] != "Yes"
+          
+          - set(attributes["replication.health_score"], 
+                attributes["replication.health_score"] - 30)
+            where metric.name == "mysql.replication.slave.sql_running" and attributes["value"] != "Yes"
+          
+          # Set severity based on health score
+          - set(attributes["replication.severity"], "critical")
+            where attributes["replication.health_score"] < 50
+          - set(attributes["replication.severity"], "warning")
+            where attributes["replication.health_score"] >= 50 and attributes["replication.health_score"] < 80
+          - set(attributes["replication.severity"], "healthy")
+            where attributes["replication.health_score"] >= 80
+
+  # Alert generation for replication issues
+  transform/replication_alerts:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Generate alert for high lag
+          - set(attributes["alert.type"], "replication_lag")
+            where metric.name == "mysql.replication.slave.seconds_behind_master" and value > ${env:REPLICATION_LAG_THRESHOLD:300}
+          - set(attributes["alert.severity"], "critical")
+            where attributes["alert.type"] == "replication_lag" and value > 600
+          - set(attributes["alert.message"], 
+                "Replication lag is " + string(value) + " seconds")
+            where attributes["alert.type"] == "replication_lag"
+          
+          # Generate alert for stopped replication
+          - set(attributes["alert.type"], "replication_stopped")
+            where (metric.name == "mysql.replication.slave.io_running" or 
+                   metric.name == "mysql.replication.slave.sql_running") and 
+                   value != "Yes"
+          - set(attributes["alert.severity"], "critical")
+            where attributes["alert.type"] == "replication_stopped"
+          - set(attributes["alert.message"], 
+                "Replication thread " + metric.name + " is not running")
+            where attributes["alert.type"] == "replication_stopped"
+
+  attributes:
+    actions:
+      - key: module
+        value: replication-monitor
+        action: insert
+      - key: monitor.version
+        value: "2.0.0"
+        action: insert
+
+  # Filter to separate alerts
+  filter/alerts:
+    metrics:
+      include:
+        match_type: strict
+        attributes:
+          - key: alert.type
+            value: "replication_lag|replication_stopped"
+
+exporters:
+  # Prometheus exporter
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: mysql_replication
+    const_labels:
+      monitor: "replication"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Logging exporter
+  logging:
+    loglevel: info
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # OTLP exporter for cross-module communication
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT:localhost:4317}
+    tls:
+      insecure: true
+
+  # Alert forwarding to alert-manager
+  otlp/alerts:
+    endpoint: ${env:ALERT_MANAGER_ENDPOINT:alert-manager:8089}
+    tls:
+      insecure: true
+
+  # Debug file export
+  file/debug:
+    path: /tmp/replication-monitor-debug.json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    check_collector_pipeline:
+      enabled: true
+      interval: "5m"
+      exporter_failure_threshold: 5
+
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    # Main metrics pipeline
+    metrics:
+      receivers: [mysql/primary, mysql/replica, sqlquery/primary, sqlquery/replica]
+      processors: [
+        memory_limiter, 
+        batch, 
+        resourcedetection,
+        resource/semantic_conventions, 
+        transform/replication_health,
+        attributes
+      ]
+      exporters: [prometheus, logging, otlp]
+    
+    # Alerts pipeline
+    metrics/alerts:
+      receivers: [mysql/primary, mysql/replica, sqlquery/replica]
+      processors: [
+        memory_limiter,
+        batch,
+        transform/replication_alerts,
+        filter/alerts,
+        attributes
+      ]
+      exporters: [otlp/alerts, logging]
+    
+    # Debug pipeline
+    metrics/debug:
+      receivers: [mysql/replica, sqlquery/replica]
+      processors: [memory_limiter, batch]
+      exporters: [file/debug]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:info}
+      development: false
+      encoding: json
+      sampling:
+        initial: 10
+        thereafter: 100
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

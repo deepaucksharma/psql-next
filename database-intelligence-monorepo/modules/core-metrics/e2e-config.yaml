@@ -1,0 +1,231 @@
+# E2E Configuration for Core Metrics Module
+# This file defines expected metrics, dashboards, and alerts for validation
+
+# Service endpoints (defaults if not specified)
+prometheus_url: http://localhost:9090
+grafana_url: http://localhost:3000
+alertmanager_url: http://localhost:9093
+
+# Custom endpoints specific to this module
+custom_endpoints:
+  metrics_api: http://localhost:8080/metrics
+  health_check: http://localhost:8080/health
+
+# Expected metrics that should be collected
+expected_metrics:
+  # Core MySQL metrics
+  mysql_up:
+    type: gauge
+    description: "MySQL server is up and running"
+    required: true
+    min_value: 0
+    max_value: 1
+    labels:
+      - instance
+      - job
+    
+  mysql_global_status_uptime:
+    type: counter
+    description: "MySQL server uptime in seconds"
+    required: true
+    min_value: 0
+    freshness_threshold: 30
+    
+  mysql_global_status_threads_connected:
+    type: gauge
+    description: "Number of currently open connections"
+    required: true
+    min_value: 0
+    max_value: 10000
+    
+  mysql_global_status_threads_running:
+    type: gauge
+    description: "Number of threads that are not sleeping"
+    required: true
+    min_value: 0
+    max_value: 1000
+    
+  mysql_global_status_queries:
+    type: counter
+    description: "Total number of queries executed"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_slow_queries:
+    type: counter
+    description: "Total number of slow queries"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_questions:
+    type: counter
+    description: "Total number of statements executed by clients"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_bytes_sent:
+    type: counter
+    description: "Total bytes sent to all clients"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_bytes_received:
+    type: counter
+    description: "Total bytes received from all clients"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_innodb_buffer_pool_pages_total:
+    type: gauge
+    description: "Total number of pages in InnoDB buffer pool"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_innodb_buffer_pool_pages_free:
+    type: gauge
+    description: "Free pages in InnoDB buffer pool"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_innodb_row_lock_waits:
+    type: counter
+    description: "Number of times InnoDB had to wait for a row lock"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_innodb_row_lock_time:
+    type: counter
+    description: "Total time spent in acquiring row locks in milliseconds"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_table_locks_waited:
+    type: counter
+    description: "Number of times had to wait for a table lock"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_created_tmp_tables:
+    type: counter
+    description: "Number of internal temporary tables created"
+    required: true
+    min_value: 0
+    
+  mysql_global_status_created_tmp_disk_tables:
+    type: counter
+    description: "Number of internal on-disk temporary tables created"
+    required: true
+    min_value: 0
+
+# Expected Grafana dashboards
+expected_dashboards:
+  core-metrics:
+    title: "MySQL Core Metrics Dashboard"
+    required: true
+    panels:
+      - "MySQL Uptime"
+      - "Current Connections"
+      - "Query Rate"
+      - "Slow Query Rate"
+      - "Network Traffic"
+      - "InnoDB Buffer Pool Usage"
+      - "Lock Wait Time"
+      - "Temporary Tables"
+      
+  performance-overview:
+    title: "MySQL Performance Overview"
+    required: true
+    panels:
+      - "QPS (Queries Per Second)"
+      - "Thread Activity"
+      - "Buffer Pool Hit Rate"
+      - "Lock Contention"
+      - "Query Response Time"
+
+# Expected alert rules
+expected_alerts:
+  mysql_down:
+    name: "MySQLDown"
+    severity: critical
+    required: true
+    expression: 'mysql_up == 0'
+    for: 1m
+    labels:
+      severity: critical
+      service: mysql
+      module: core-metrics
+    annotations:
+      summary: "MySQL server is down"
+      description: "MySQL server {{ $labels.instance }} has been down for more than 1 minute"
+      
+  high_connection_count:
+    name: "MySQLHighConnectionCount"
+    severity: warning
+    required: true
+    expression: 'mysql_global_status_threads_connected > 800'
+    for: 5m
+    labels:
+      severity: warning
+      service: mysql
+      module: core-metrics
+    annotations:
+      summary: "High number of MySQL connections"
+      description: "MySQL has {{ $value }} connections (threshold: 800)"
+      
+  high_slow_query_rate:
+    name: "MySQLHighSlowQueryRate"
+    severity: warning
+    required: true
+    expression: 'rate(mysql_global_status_slow_queries[5m]) > 10'
+    for: 10m
+    labels:
+      severity: warning
+      service: mysql
+      module: core-metrics
+    annotations:
+      summary: "High rate of slow queries"
+      description: "MySQL is executing {{ $value }} slow queries per second"
+      
+  innodb_buffer_pool_low:
+    name: "InnoDBBufferPoolLow"
+    severity: warning
+    required: true
+    expression: '(mysql_global_status_innodb_buffer_pool_pages_free / mysql_global_status_innodb_buffer_pool_pages_total) < 0.1'
+    for: 15m
+    labels:
+      severity: warning
+      service: mysql
+      module: core-metrics
+    annotations:
+      summary: "InnoDB buffer pool has low free pages"
+      description: "InnoDB buffer pool has less than 10% free pages"
+      
+  high_lock_wait_time:
+    name: "MySQLHighLockWaitTime"
+    severity: warning
+    required: false
+    expression: 'rate(mysql_global_status_innodb_row_lock_time[5m]) > 1000'
+    for: 10m
+    labels:
+      severity: warning
+      service: mysql
+      module: core-metrics
+    annotations:
+      summary: "High InnoDB row lock wait time"
+      description: "InnoDB is spending {{ $value }}ms per second waiting for row locks"
+
+# Additional validation settings
+validation_settings:
+  # How long to wait for metrics to appear (seconds)
+  metric_wait_time: 30
+  
+  # Minimum number of data points required for validation
+  min_data_points: 3
+  
+  # Freshness threshold for all metrics (seconds)
+  default_freshness_threshold: 60
+  
+  # Custom validation scripts (optional)
+  custom_validators:
+    - validate_mysql_connection.py
+    - check_metric_consistency.py

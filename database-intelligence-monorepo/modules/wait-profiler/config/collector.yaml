@@ -1,0 +1,175 @@
+receivers:
+  sqlquery/wait_events:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    collection_interval: 5s
+    queries:
+      - sql: |
+          SELECT 
+            EVENT_NAME,
+            COUNT_STAR as wait_count,
+            SUM_TIMER_WAIT/1000000000000 as total_wait_sec,
+            AVG_TIMER_WAIT/1000000000000 as avg_wait_sec,
+            MAX_TIMER_WAIT/1000000000000 as max_wait_sec
+          FROM performance_schema.events_waits_summary_global_by_event_name
+          WHERE COUNT_STAR > 0
+            AND EVENT_NAME NOT LIKE 'idle%'
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 50
+        metrics:
+          - metric_name: mysql.wait.count
+            value_column: wait_count
+            attribute_columns: [EVENT_NAME]
+          - metric_name: mysql.wait.time.total
+            value_column: total_wait_sec
+            attribute_columns: [EVENT_NAME]
+          - metric_name: mysql.wait.time.avg
+            value_column: avg_wait_sec
+            attribute_columns: [EVENT_NAME]
+          - metric_name: mysql.wait.time.max
+            value_column: max_wait_sec
+            attribute_columns: [EVENT_NAME]
+  
+  sqlquery/mutex_waits:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    collection_interval: 10s
+    queries:
+      - sql: |
+          SELECT 
+            OBJECT_NAME as mutex_name,
+            COUNT_STAR as wait_count,
+            SUM_TIMER_WAIT/1000000000000 as total_wait_sec,
+            AVG_TIMER_WAIT/1000000000000 as avg_wait_sec
+          FROM performance_schema.events_waits_summary_by_instance
+          WHERE OBJECT_NAME IS NOT NULL
+            AND COUNT_STAR > 0
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 20
+        metrics:
+          - metric_name: mysql.mutex.wait.count
+            value_column: wait_count
+            attribute_columns: [mutex_name]
+          - metric_name: mysql.mutex.wait.time
+            value_column: total_wait_sec
+            attribute_columns: [mutex_name]
+  
+  sqlquery/io_waits:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    collection_interval: 10s
+    queries:
+      - sql: |
+          SELECT 
+            FILE_NAME,
+            EVENT_NAME,
+            COUNT_STAR as io_count,
+            SUM_TIMER_WAIT/1000000000000 as total_io_wait_sec,
+            COUNT_READ as read_count,
+            COUNT_WRITE as write_count,
+            SUM_NUMBER_OF_BYTES_READ as bytes_read,
+            SUM_NUMBER_OF_BYTES_WRITE as bytes_written
+          FROM performance_schema.file_summary_by_event_name
+          WHERE COUNT_STAR > 0
+            AND FILE_NAME IS NOT NULL
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 30
+        metrics:
+          - metric_name: mysql.io.wait.count
+            value_column: io_count
+            attribute_columns: [FILE_NAME, EVENT_NAME]
+          - metric_name: mysql.io.wait.time
+            value_column: total_io_wait_sec
+            attribute_columns: [FILE_NAME, EVENT_NAME]
+          - metric_name: mysql.io.bytes.read
+            value_column: bytes_read
+            attribute_columns: [FILE_NAME]
+          - metric_name: mysql.io.bytes.write
+            value_column: bytes_written
+            attribute_columns: [FILE_NAME]
+  
+  sqlquery/lock_waits:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    collection_interval: 5s
+    queries:
+      - sql: |
+          SELECT 
+            OBJECT_SCHEMA,
+            OBJECT_NAME,
+            INDEX_NAME,
+            LOCK_TYPE,
+            LOCK_MODE,
+            COUNT(*) as lock_count
+          FROM performance_schema.data_locks
+          WHERE OBJECT_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+          GROUP BY OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE
+        metrics:
+          - metric_name: mysql.lock.active.count
+            value_column: lock_count
+            attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE]
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+  
+  attributes:
+    actions:
+      - key: module
+        value: wait-profiler
+        action: insert
+      - key: mysql.endpoint
+        value: ${env:MYSQL_ENDPOINT}
+        action: insert
+  
+  transform/wait_categorization:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["wait_category"], 
+                Case(
+                  IsMatch(attributes["EVENT_NAME"], "wait/io/.*"), "io",
+                  IsMatch(attributes["EVENT_NAME"], "wait/lock/.*"), "lock",
+                  IsMatch(attributes["EVENT_NAME"], "wait/synch/mutex/.*"), "mutex",
+                  IsMatch(attributes["EVENT_NAME"], "wait/synch/cond/.*"), "condition",
+                  IsMatch(attributes["EVENT_NAME"], "wait/synch/rwlock/.*"), "rwlock",
+                  "other"
+                )) where attributes["EVENT_NAME"] != nil
+          - set(attributes["severity"], 
+                Case(
+                  attributes["avg_wait_sec"] > 1, "critical",
+                  attributes["avg_wait_sec"] > 0.1, "warning",
+                  "normal"
+                )) where attributes["avg_wait_sec"] != nil
+
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:OTEL_SERVICE_NAME}
+        action: upsert
+
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:${env:EXPORT_PORT}"
+    namespace: mysql
+    const_labels:
+      module: wait-profiler
+  
+  logging:
+    loglevel: info
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  pipelines:
+    metrics:
+      receivers: [sqlquery/wait_events, sqlquery/mutex_waits, sqlquery/io_waits, sqlquery/lock_waits]
+      processors: [batch, attributes, transform/wait_categorization, resource]
+      exporters: [prometheus, logging]
+  
+  extensions: [health_check]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133

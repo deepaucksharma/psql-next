@@ -1,0 +1,300 @@
+# Cross-Signal Correlator Module Configuration
+# Implements trace, log, and metric correlation from master-enhanced.yaml
+
+receivers:
+  # OTLP receiver for traces correlation
+  otlp/traces:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        
+  # File log receiver for slow query logs
+  filelog/slow_query:
+    include: [/var/log/mysql/slow.log]
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '# Time: (?P<timestamp>\d{6}\s+\d{1,2}:\d{2}:\d{2})'
+      - type: regex_parser
+        regex: '# Query_time: (?P<query_time>[\d.]+)\s+Lock_time: (?P<lock_time>[\d.]+)'
+      - type: regex_parser
+        regex: '# Rows_sent: (?P<rows_sent>\d+)\s+Rows_examined: (?P<rows_examined>\d+)'
+      - type: add
+        field: attributes.metric_name
+        value: mysql.slowlog.query_time
+        
+  # Prometheus receiver for metrics correlation
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'metrics-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['core-metrics:8081', 'sql-intelligence:8082', 'wait-profiler:8083']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_.*'
+              action: keep
+
+connectors:
+  # Convert logs to metrics
+  count:
+    logs:
+      mysql.slowlog.count:
+        description: Count of slow queries from logs
+        conditions:
+          - IsMatch(attributes["metric_name"], "mysql.slowlog.*")
+        attributes:
+          - key: query_digest
+            default_value: "unknown"
+            
+  # Forward spans to metrics for exemplars
+  spanmetrics:
+    dimensions:
+      - name: query_hash
+      - name: db_schema
+      - name: service.name
+      - name: span.kind
+      - name: db.operation
+      - name: db.system
+    exemplars:
+      enabled: true
+    metrics_flush_interval: 15s
+    histogram:
+      explicit:
+        buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+    dimension_key_cache_size: 10000
+    aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+    send_batch_max_size: 2000
+    
+  # Resource detection and enrichment
+  resourcedetection:
+    detectors: [env, system, docker, ec2, gcp, azure]
+    timeout: 5s
+    override: false
+    system:
+      hostname_sources: ["os", "dns"]
+      
+  # Semantic conventions
+  resource/semantic_conventions:
+    attributes:
+      - key: service.name
+        value: cross-signal-correlator
+        action: upsert
+      - key: service.namespace
+        value: database-intelligence
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT:production}
+        action: upsert
+        
+  # Trace-to-metrics correlation
+  transform/trace_correlation:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          # Extract database operation details
+          - set(attributes["db.query_hash"], 
+                Hash(attributes["db.statement"]))
+            where attributes["db.statement"] != nil
+          - set(attributes["db.query_type"], 
+                Case(
+                  IsMatch(attributes["db.statement"], "(?i)^SELECT.*"), "SELECT",
+                  IsMatch(attributes["db.statement"], "(?i)^INSERT.*"), "INSERT",
+                  IsMatch(attributes["db.statement"], "(?i)^UPDATE.*"), "UPDATE",
+                  IsMatch(attributes["db.statement"], "(?i)^DELETE.*"), "DELETE",
+                  "OTHER"
+                ))
+            where attributes["db.statement"] != nil
+          # Add correlation IDs
+          - set(attributes["correlation.trace_id"], trace_id)
+          - set(attributes["correlation.span_id"], span_id)
+          
+  # Log-to-metrics enrichment
+  transform/log_enrichment:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Parse slow query log attributes
+          - set(attributes["query_duration_ms"], 
+                attributes["query_time"] * 1000)
+            where attributes["query_time"] != nil
+          - set(attributes["lock_duration_ms"], 
+                attributes["lock_time"] * 1000)
+            where attributes["lock_time"] != nil
+          # Add severity based on duration
+          - set(severity_text, "ERROR")
+            where attributes["query_duration_ms"] > 5000
+          - set(severity_text, "WARN")
+            where attributes["query_duration_ms"] > 1000 and attributes["query_duration_ms"] <= 5000
+          - set(severity_text, "INFO")
+            where attributes["query_duration_ms"] <= 1000
+            
+  # Metric exemplar enrichment
+  transform/exemplar_enrichment:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Add trace context to metrics for exemplars
+          - set(attributes["exemplar.trace_id"], 
+                attributes["correlation.trace_id"])
+            where attributes["correlation.trace_id"] != nil
+          - set(attributes["exemplar.span_id"], 
+                attributes["correlation.span_id"])
+            where attributes["correlation.span_id"] != nil
+          # Add query context
+          - set(attributes["exemplar.query_hash"], 
+                attributes["db.query_hash"])
+            where attributes["db.query_hash"] != nil
+            
+  # Attributes processor for consistent labeling
+  attributes/correlation:
+    actions:
+      - key: correlation.enabled
+        value: "true"
+        action: insert
+      - key: module
+        value: cross-signal-correlator
+        action: insert
+        
+  # Group by trace for correlation
+  groupbytrace:
+    wait_duration: 10s
+    num_traces: 100000
+    num_workers: 4
+
+exporters:
+  # Prometheus exporter with exemplar support
+  prometheus:
+    endpoint: "0.0.0.0:8890"
+    namespace: signal_correlation
+    const_labels:
+      module: cross-signal-correlator
+    enable_open_metrics: true
+    add_metric_suffixes: false
+    resource_to_telemetry_conversion:
+      enabled: true
+      
+  # OTLP exporter for forwarding correlated data
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT:localhost:4317}
+    tls:
+      insecure: true
+      
+  # Logging exporter
+  logging:
+    loglevel: info
+    sampling_initial: 10
+    sampling_thereafter: 100
+    
+  # Debug file export
+  file/correlation:
+    path: /tmp/correlation-debug.json
+    format: json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    # Traces pipeline for correlation
+    traces:
+      receivers: [otlp/traces]
+      processors: [
+        memory_limiter, 
+        batch, 
+        resourcedetection,
+        resource/semantic_conventions, 
+        transform/trace_correlation,
+        groupbytrace,
+        attributes/correlation
+      ]
+      exporters: [otlp, spanmetrics, logging]
+      
+    # Logs to metrics pipeline
+    logs:
+      receivers: [filelog/slow_query]
+      processors: [
+        memory_limiter, 
+        batch, 
+        resource/semantic_conventions,
+        transform/log_enrichment,
+        attributes/correlation
+      ]
+      exporters: [count, logging]
+      
+    # Metrics from logs
+    metrics/from_logs:
+      receivers: [count]
+      processors: [
+        memory_limiter, 
+        batch, 
+        attributes/correlation
+      ]
+      exporters: [prometheus, otlp]
+      
+    # Metrics from spans (exemplars)
+    metrics/from_spans:
+      receivers: [spanmetrics]
+      processors: [
+        memory_limiter, 
+        batch, 
+        transform/exemplar_enrichment,
+        attributes/correlation
+      ]
+      exporters: [prometheus, otlp]
+      
+    # Federated metrics with correlation
+    metrics/federated:
+      receivers: [prometheus]
+      processors: [
+        memory_limiter,
+        batch,
+        resource/semantic_conventions,
+        attributes/correlation
+      ]
+      exporters: [prometheus, otlp]
+      
+    # Debug pipeline
+    metrics/debug:
+      receivers: [spanmetrics, count]
+      processors: [batch]
+      exporters: [file/correlation]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:info}
+      initial_fields:
+        service: cross-signal-correlator
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

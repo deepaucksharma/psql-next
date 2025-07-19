@@ -1,0 +1,237 @@
+# E2E Configuration for SQL Intelligence Module
+# This file defines expected metrics, dashboards, and alerts for validation
+
+# Service endpoints (defaults if not specified)
+prometheus_url: http://localhost:9090
+grafana_url: http://localhost:3000
+alertmanager_url: http://localhost:9093
+
+# Custom endpoints specific to this module
+custom_endpoints:
+  sql_analysis_api: http://localhost:8080/api/sql-analysis
+  query_recommendations: http://localhost:8080/api/recommendations
+  health_check: http://localhost:8080/health
+
+# Expected metrics that should be collected
+expected_metrics:
+  # SQL Intelligence specific metrics
+  sql_intelligence_enabled:
+    type: gauge
+    description: "Whether SQL intelligence is currently enabled"
+    required: true
+    min_value: 0
+    max_value: 1
+    
+  sql_queries_analyzed_total:
+    type: counter
+    description: "Total number of SQL queries analyzed"
+    required: true
+    min_value: 0
+    labels:
+      - query_type
+      - database
+    
+  sql_query_analysis_duration_seconds:
+    type: histogram
+    description: "Time taken to analyze SQL queries"
+    required: true
+    labels:
+      - query_type
+    
+  sql_query_complexity_score:
+    type: histogram
+    description: "Complexity score distribution of analyzed queries"
+    required: true
+    min_value: 0
+    max_value: 100
+    
+  sql_recommendations_generated_total:
+    type: counter
+    description: "Total number of optimization recommendations generated"
+    required: true
+    labels:
+      - recommendation_type
+      - severity
+    
+  sql_index_suggestions_total:
+    type: counter
+    description: "Total number of index suggestions made"
+    required: true
+    labels:
+      - table_name
+      - suggestion_type
+    
+  sql_query_patterns_detected:
+    type: gauge
+    description: "Number of distinct query patterns detected"
+    required: true
+    min_value: 0
+    
+  sql_slow_query_predictor_accuracy:
+    type: gauge
+    description: "Accuracy of slow query prediction model"
+    required: false
+    min_value: 0
+    max_value: 1
+    
+  sql_query_optimization_impact_seconds:
+    type: histogram
+    description: "Estimated time saved by query optimizations"
+    required: false
+    
+  sql_full_table_scans_detected_total:
+    type: counter
+    description: "Number of full table scans detected"
+    required: true
+    labels:
+      - table_name
+    
+  sql_missing_indexes_detected:
+    type: gauge
+    description: "Current number of missing indexes detected"
+    required: true
+    labels:
+      - table_name
+    
+  sql_query_cache_hit_ratio:
+    type: gauge
+    description: "Query result cache hit ratio"
+    required: false
+    min_value: 0
+    max_value: 1
+
+# Expected Grafana dashboards
+expected_dashboards:
+  sql-intelligence:
+    title: "SQL Intelligence Dashboard"
+    required: true
+    panels:
+      - "Query Analysis Overview"
+      - "Query Complexity Distribution"
+      - "Top Slow Queries"
+      - "Optimization Recommendations"
+      - "Index Suggestions"
+      - "Query Pattern Analysis"
+      - "Full Table Scan Detection"
+      
+  query-optimization:
+    title: "Query Optimization Insights"
+    required: true
+    panels:
+      - "Optimization Impact"
+      - "Before/After Query Performance"
+      - "Missing Index Analysis"
+      - "Query Cache Effectiveness"
+      - "Query Plan Analysis"
+      
+  sql-patterns:
+    title: "SQL Pattern Analysis"
+    required: false
+    panels:
+      - "Common Query Patterns"
+      - "Anti-Pattern Detection"
+      - "Query Evolution Over Time"
+      - "Schema Usage Patterns"
+
+# Expected alert rules
+expected_alerts:
+  sql_intelligence_down:
+    name: "SQLIntelligenceDown"
+    severity: critical
+    required: true
+    expression: 'sql_intelligence_enabled == 0'
+    for: 5m
+    labels:
+      severity: critical
+      service: sql-intelligence
+      module: sql-intelligence
+    annotations:
+      summary: "SQL Intelligence service is down"
+      description: "The SQL Intelligence service has been down for more than 5 minutes"
+      
+  high_query_complexity:
+    name: "HighQueryComplexity"
+    severity: warning
+    required: true
+    expression: 'histogram_quantile(0.95, sql_query_complexity_score) > 80'
+    for: 15m
+    labels:
+      severity: warning
+      service: sql-intelligence
+      module: sql-intelligence
+    annotations:
+      summary: "High query complexity detected"
+      description: "95th percentile of query complexity is above 80"
+      
+  excessive_full_table_scans:
+    name: "ExcessiveFullTableScans"
+    severity: warning
+    required: true
+    expression: 'rate(sql_full_table_scans_detected_total[5m]) > 10'
+    for: 10m
+    labels:
+      severity: warning
+      service: sql-intelligence
+      module: sql-intelligence
+    annotations:
+      summary: "Excessive full table scans detected"
+      description: "More than 10 full table scans per minute detected"
+      
+  many_missing_indexes:
+    name: "ManyMissingIndexes"
+    severity: warning
+    required: true
+    expression: 'sum(sql_missing_indexes_detected) > 20'
+    for: 30m
+    labels:
+      severity: warning
+      service: sql-intelligence
+      module: sql-intelligence
+    annotations:
+      summary: "Many missing indexes detected"
+      description: "{{ $value }} missing indexes detected across all tables"
+      
+  slow_query_analysis:
+    name: "SlowQueryAnalysis"
+    severity: warning
+    required: false
+    expression: 'histogram_quantile(0.95, sql_query_analysis_duration_seconds) > 5'
+    for: 15m
+    labels:
+      severity: warning
+      service: sql-intelligence
+      module: sql-intelligence
+    annotations:
+      summary: "Query analysis is running slowly"
+      description: "95th percentile of query analysis duration is over 5 seconds"
+      
+  low_cache_hit_ratio:
+    name: "LowQueryCacheHitRatio"
+    severity: info
+    required: false
+    expression: 'sql_query_cache_hit_ratio < 0.5'
+    for: 30m
+    labels:
+      severity: info
+      service: sql-intelligence
+      module: sql-intelligence
+    annotations:
+      summary: "Low query cache hit ratio"
+      description: "Query cache hit ratio is below 50%"
+
+# Additional validation settings
+validation_settings:
+  # How long to wait for metrics to appear (seconds)
+  metric_wait_time: 60
+  
+  # Minimum number of data points required for validation
+  min_data_points: 5
+  
+  # Freshness threshold for all metrics (seconds)
+  default_freshness_threshold: 120
+  
+  # Custom validation scripts (optional)
+  custom_validators:
+    - validate_sql_parser.py
+    - check_recommendation_engine.py
+    - verify_index_analysis.py

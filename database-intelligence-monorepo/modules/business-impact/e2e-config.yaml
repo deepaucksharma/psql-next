@@ -1,0 +1,288 @@
+# E2E Configuration for Business Impact Module
+# This file defines expected metrics, dashboards, and alerts for validation
+
+# Service endpoints (defaults if not specified)
+prometheus_url: http://localhost:9090
+grafana_url: http://localhost:3000
+alertmanager_url: http://localhost:9093
+
+# Custom endpoints specific to this module
+custom_endpoints:
+  business_impact_api: http://localhost:8080/api/business-impact
+  cost_analysis_api: http://localhost:8080/api/cost-analysis
+  sla_monitoring_api: http://localhost:8080/api/sla
+  health_check: http://localhost:8080/health
+
+# Expected metrics that should be collected
+expected_metrics:
+  # Business Impact specific metrics
+  business_impact_enabled:
+    type: gauge
+    description: "Whether business impact monitoring is enabled"
+    required: true
+    min_value: 0
+    max_value: 1
+    
+  business_transaction_success_rate:
+    type: gauge
+    description: "Success rate of business transactions"
+    required: true
+    min_value: 0
+    max_value: 1
+    labels:
+      - transaction_type
+      - business_unit
+      - priority
+    
+  business_transaction_duration_seconds:
+    type: histogram
+    description: "Duration of business transactions"
+    required: true
+    labels:
+      - transaction_type
+      - business_unit
+      - priority
+    
+  business_revenue_impact_dollars:
+    type: gauge
+    description: "Estimated revenue impact in dollars"
+    required: true
+    min_value: 0
+    labels:
+      - impact_type
+      - business_unit
+    
+  business_cost_per_query_dollars:
+    type: gauge
+    description: "Estimated cost per query in dollars"
+    required: true
+    min_value: 0
+    labels:
+      - query_category
+      - resource_type
+    
+  business_sla_compliance_ratio:
+    type: gauge
+    description: "SLA compliance ratio"
+    required: true
+    min_value: 0
+    max_value: 1
+    labels:
+      - sla_type
+      - business_unit
+    
+  business_downtime_cost_dollars_total:
+    type: counter
+    description: "Total estimated cost of downtime in dollars"
+    required: true
+    min_value: 0
+    labels:
+      - incident_severity
+      - business_unit
+    
+  business_user_experience_score:
+    type: gauge
+    description: "User experience score based on performance metrics"
+    required: true
+    min_value: 0
+    max_value: 100
+    labels:
+      - application
+      - user_segment
+    
+  business_capacity_utilization_ratio:
+    type: gauge
+    description: "Database capacity utilization from business perspective"
+    required: true
+    min_value: 0
+    max_value: 1
+    labels:
+      - resource_type
+    
+  business_peak_load_ratio:
+    type: gauge
+    description: "Current load compared to peak business hours"
+    required: false
+    min_value: 0
+    labels:
+      - time_period
+    
+  business_customer_impact_score:
+    type: gauge
+    description: "Score indicating customer impact level"
+    required: false
+    min_value: 0
+    max_value: 100
+    labels:
+      - impact_category
+      - customer_tier
+    
+  business_efficiency_score:
+    type: gauge
+    description: "Database efficiency score from business perspective"
+    required: true
+    min_value: 0
+    max_value: 100
+
+# Expected Grafana dashboards
+expected_dashboards:
+  business-impact-overview:
+    title: "Business Impact Overview"
+    required: true
+    panels:
+      - "Revenue Impact Analysis"
+      - "SLA Compliance Status"
+      - "Business Transaction Performance"
+      - "Cost Analysis"
+      - "User Experience Score"
+      - "Downtime Cost Tracker"
+      - "Capacity Planning"
+      
+  cost-optimization:
+    title: "Database Cost Optimization"
+    required: true
+    panels:
+      - "Cost per Query Trends"
+      - "Resource Utilization vs Cost"
+      - "Query Cost Distribution"
+      - "Cost Saving Opportunities"
+      - "Infrastructure Cost Breakdown"
+      - "ROI Analysis"
+      
+  sla-monitoring:
+    title: "SLA Monitoring Dashboard"
+    required: true
+    panels:
+      - "SLA Compliance by Service"
+      - "SLA Breach History"
+      - "Response Time vs SLA"
+      - "Availability vs SLA"
+      - "Business Hour Performance"
+      - "SLA Risk Assessment"
+      
+  customer-impact:
+    title: "Customer Impact Analysis"
+    required: false
+    panels:
+      - "Customer Experience Metrics"
+      - "Impact by Customer Tier"
+      - "Transaction Success Rates"
+      - "Performance by Geography"
+
+# Expected alert rules
+expected_alerts:
+  business_impact_down:
+    name: "BusinessImpactMonitoringDown"
+    severity: critical
+    required: true
+    expression: 'business_impact_enabled == 0'
+    for: 5m
+    labels:
+      severity: critical
+      service: business-impact
+      module: business-impact
+    annotations:
+      summary: "Business impact monitoring is down"
+      description: "Business impact monitoring service has been down for more than 5 minutes"
+      
+  sla_breach_critical:
+    name: "SLABreachCritical"
+    severity: critical
+    required: true
+    expression: 'business_sla_compliance_ratio{sla_type="availability"} < 0.99'
+    for: 5m
+    labels:
+      severity: critical
+      service: business-impact
+      module: business-impact
+    annotations:
+      summary: "Critical SLA breach detected"
+      description: "SLA compliance for {{ $labels.sla_type }} is {{ $value }} (threshold: 0.99)"
+      
+  high_revenue_impact:
+    name: "HighRevenueImpact"
+    severity: critical
+    required: true
+    expression: 'business_revenue_impact_dollars > 10000'
+    for: 5m
+    labels:
+      severity: critical
+      service: business-impact
+      module: business-impact
+    annotations:
+      summary: "High revenue impact detected"
+      description: "Estimated revenue impact is ${{ $value }}"
+      
+  low_transaction_success_rate:
+    name: "LowTransactionSuccessRate"
+    severity: warning
+    required: true
+    expression: 'business_transaction_success_rate{priority="high"} < 0.95'
+    for: 10m
+    labels:
+      severity: warning
+      service: business-impact
+      module: business-impact
+    annotations:
+      summary: "Low success rate for high priority transactions"
+      description: "Transaction success rate for {{ $labels.transaction_type }} is {{ $value }}"
+      
+  high_query_cost:
+    name: "HighQueryCost"
+    severity: warning
+    required: true
+    expression: 'business_cost_per_query_dollars > 0.10'
+    for: 15m
+    labels:
+      severity: warning
+      service: business-impact
+      module: business-impact
+    annotations:
+      summary: "High query cost detected"
+      description: "Average query cost for {{ $labels.query_category }} is ${{ $value }}"
+      
+  poor_user_experience:
+    name: "PoorUserExperience"
+    severity: warning
+    required: false
+    expression: 'business_user_experience_score < 70'
+    for: 20m
+    labels:
+      severity: warning
+      service: business-impact
+      module: business-impact
+    annotations:
+      summary: "Poor user experience detected"
+      description: "User experience score for {{ $labels.application }} is {{ $value }}/100"
+      
+  capacity_threshold_reached:
+    name: "CapacityThresholdReached"
+    severity: info
+    required: false
+    expression: 'business_capacity_utilization_ratio > 0.8'
+    for: 30m
+    labels:
+      severity: info
+      service: business-impact
+      module: business-impact
+    annotations:
+      summary: "Capacity threshold reached"
+      description: "{{ $labels.resource_type }} utilization is at {{ $value }}"
+
+# Additional validation settings
+validation_settings:
+  # How long to wait for metrics to appear (seconds)
+  metric_wait_time: 60
+  
+  # Minimum number of data points required for validation
+  min_data_points: 5
+  
+  # Freshness threshold for all metrics (seconds)
+  default_freshness_threshold: 120
+  
+  # Custom validation scripts (optional)
+  custom_validators:
+    - validate_business_metrics.py
+    - check_cost_calculations.py
+    - verify_sla_tracking.py
+    - test_revenue_impact.py
