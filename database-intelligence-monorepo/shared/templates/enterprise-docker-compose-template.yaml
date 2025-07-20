@@ -1,0 +1,134 @@
+version: '3.8'
+
+services:
+  # MySQL Test Database (standardized across all modules)
+  mysql-test:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    ports:
+      - "3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ptest"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - db-intelligence
+    restart: unless-stopped
+
+  # Module Container (to be customized per module)
+  MODULE_NAME:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # Module Identity
+      MODULE_NAME: ${MODULE_NAME}
+      EXPORT_PORT: ${EXPORT_PORT}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME}
+      SERVICE_VERSION: ${SERVICE_VERSION:-2.0.0}
+      ENTITY_TYPE: ${ENTITY_TYPE:-MYSQL_INSTANCE}
+      
+      # MySQL Configuration
+      MYSQL_ENDPOINT: mysql-test:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: test
+      MYSQL_DATABASE: testdb
+      
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      
+      # Environment Configuration
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      CLUSTER_NAME: ${CLUSTER_NAME:-database-intelligence-cluster}
+      HOSTNAME: ${HOSTNAME}
+      
+      # Performance Configuration
+      COLLECTION_INTERVAL: ${COLLECTION_INTERVAL:-10s}
+      MEMORY_LIMIT_PERCENT: ${MEMORY_LIMIT_PERCENT:-80}
+      MEMORY_SPIKE_PERCENT: ${MEMORY_SPIKE_PERCENT:-30}
+      
+      # Batch Processing
+      BATCH_TIMEOUT_STANDARD: ${BATCH_TIMEOUT_STANDARD:-10s}
+      BATCH_SIZE_STANDARD: ${BATCH_SIZE_STANDARD:-1000}
+      BATCH_TIMEOUT_CRITICAL: ${BATCH_TIMEOUT_CRITICAL:-2s}
+      BATCH_SIZE_CRITICAL: ${BATCH_SIZE_CRITICAL:-100}
+      
+      # Queue Configuration
+      QUEUE_SIZE_STANDARD: ${QUEUE_SIZE_STANDARD:-10000}
+      QUEUE_SIZE_CRITICAL: ${QUEUE_SIZE_CRITICAL:-5000}
+      
+      # Debugging
+      DEBUG_VERBOSITY: ${DEBUG_VERBOSITY:-basic}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      
+      # Federation
+      FEDERATION_TARGETS: ${FEDERATION_TARGETS:-localhost:8081}
+      
+      # Health Monitoring
+      HEALTH_CHECK_INTERVAL: ${HEALTH_CHECK_INTERVAL:-30s}
+      EXPORTER_FAILURE_THRESHOLD: ${EXPORTER_FAILURE_THRESHOLD:-3}
+      
+    ports:
+      - "${EXPORT_PORT}:${EXPORT_PORT}"        # Module metrics
+      - "13133:13133"                          # Health check
+      - "1777:1777"                            # pprof
+      - "55679:55679"                          # zpages
+      - "8888:8888"                            # Internal telemetry
+    
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+    
+    volumes:
+      - ./config:/etc/otel:ro
+      - ./logs:/tmp/logs
+      - queue_storage:/tmp/${MODULE_NAME}-queue-standard
+      - queue_critical:/tmp/${MODULE_NAME}-queue-critical
+    
+    networks:
+      - db-intelligence
+    
+    restart: unless-stopped
+    
+    # Resource limits for production
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    
+    # Health check that works without curl
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 13133 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  mysql_data:
+    driver: local
+  queue_storage:
+    driver: local
+  queue_critical:
+    driver: local
+
+networks:
+  db-intelligence:
+    driver: bridge
+    name: database-intelligence-network

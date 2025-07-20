@@ -1,0 +1,288 @@
+# Business Impact - Consolidated Configuration
+# Configuration-based business impact scoring with comprehensive metrics
+
+receivers:
+  # OTLP receiver for trace/metric data with SQL information
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  
+  # Federation from sql-intelligence for query metrics
+  prometheus/sql_intelligence:
+    config:
+      scrape_configs:
+        - job_name: 'sql-intelligence-metrics'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['${env:SQL_INTELLIGENCE_ENDPOINT:-sql-intelligence:8082}']
+          metric_relabel_configs:
+            # Only keep metrics that have table information
+            - source_labels: [__name__]
+              regex: '(mysql_query_.*|mysql_statement_.*)'
+              action: keep
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  # Input validation - check for required attributes
+  filter/validate_input:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'attributes["db.sql.table"] != nil or attributes["db.statement"] != nil'
+    logs:
+      log_record:
+        - 'body != nil'
+
+  # Core resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: business-impact
+        action: upsert
+      - key: module
+        value: business-impact
+        action: upsert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+
+  # Extract table name from SQL statement if not present
+  transform/extract_table:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        conditions:
+          - attributes["db.sql.table"] == nil and attributes["db.statement"] != nil
+        statements:
+          # Try to extract table name from common SQL patterns
+          # FROM table_name
+          - set(attributes["db.sql.table"], ExtractPatterns(attributes["db.statement"], "(?i)FROM\\s+([a-zA-Z0-9_]+)"))
+          # INSERT INTO table_name
+          - set(attributes["db.sql.table"], ExtractPatterns(attributes["db.statement"], "(?i)INSERT\\s+INTO\\s+([a-zA-Z0-9_]+)")) where attributes["db.sql.table"] == nil
+          # UPDATE table_name
+          - set(attributes["db.sql.table"], ExtractPatterns(attributes["db.statement"], "(?i)UPDATE\\s+([a-zA-Z0-9_]+)")) where attributes["db.sql.table"] == nil
+          # DELETE FROM table_name
+          - set(attributes["db.sql.table"], ExtractPatterns(attributes["db.statement"], "(?i)DELETE\\s+FROM\\s+([a-zA-Z0-9_]+)")) where attributes["db.sql.table"] == nil
+
+  # Business impact scoring based on configuration
+  # Note: In a real implementation, this would load from the business-mappings.yaml file
+  # For now, we'll use a simplified approach with environment variables
+  transform/business_impact:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          # Initialize default values
+          - set(attributes["business_category"], "general")
+          - set(attributes["business_impact_score"], 1.0)
+          - set(attributes["revenue_impact"], "none")
+          
+          # Map known tables to business categories
+          # Revenue tables
+          - set(attributes["business_category"], "revenue") where attributes["db.sql.table"] == "orders"
+          - set(attributes["business_impact_score"], 10.0) where attributes["db.sql.table"] == "orders"
+          - set(attributes["revenue_impact"], "direct") where attributes["db.sql.table"] == "orders"
+          
+          - set(attributes["business_category"], "revenue") where attributes["db.sql.table"] == "payments"
+          - set(attributes["business_impact_score"], 10.0) where attributes["db.sql.table"] == "payments"
+          - set(attributes["revenue_impact"], "direct") where attributes["db.sql.table"] == "payments"
+          
+          - set(attributes["business_category"], "revenue") where attributes["db.sql.table"] == "invoices"
+          - set(attributes["business_impact_score"], 9.0) where attributes["db.sql.table"] == "invoices"
+          - set(attributes["revenue_impact"], "direct") where attributes["db.sql.table"] == "invoices"
+          
+          # Customer tables
+          - set(attributes["business_category"], "customer") where attributes["db.sql.table"] == "users"
+          - set(attributes["business_impact_score"], 8.0) where attributes["db.sql.table"] == "users"
+          - set(attributes["revenue_impact"], "indirect") where attributes["db.sql.table"] == "users"
+          
+          - set(attributes["business_category"], "customer") where attributes["db.sql.table"] == "customer_profiles"
+          - set(attributes["business_impact_score"], 7.0) where attributes["db.sql.table"] == "customer_profiles"
+          - set(attributes["revenue_impact"], "indirect") where attributes["db.sql.table"] == "customer_profiles"
+          
+          # Operations tables
+          - set(attributes["business_category"], "operations") where attributes["db.sql.table"] == "inventory"
+          - set(attributes["business_impact_score"], 7.0) where attributes["db.sql.table"] == "inventory"
+          - set(attributes["revenue_impact"], "indirect") where attributes["db.sql.table"] == "inventory"
+          
+          - set(attributes["business_category"], "operations") where attributes["db.sql.table"] == "products"
+          - set(attributes["business_impact_score"], 6.0) where attributes["db.sql.table"] == "products"
+          - set(attributes["revenue_impact"], "indirect") where attributes["db.sql.table"] == "products"
+          
+          # Apply operation multipliers
+          - set(attributes["operation_multiplier"], 2.0) where attributes["db.operation"] == "DELETE" and attributes["business_category"] == "revenue"
+          - set(attributes["operation_multiplier"], 1.5) where attributes["db.operation"] == "UPDATE" and attributes["business_category"] == "revenue"
+          - set(attributes["operation_multiplier"], 1.2) where attributes["db.operation"] == "INSERT" and attributes["business_category"] == "revenue"
+          - set(attributes["operation_multiplier"], 1.0) where attributes["db.operation"] == "SELECT"
+          - set(attributes["operation_multiplier"], 1.0) where attributes["operation_multiplier"] == nil
+          
+          # Apply multiplier to score
+          - set(attributes["business_impact_score"], attributes["business_impact_score"] * attributes["operation_multiplier"])
+          
+          # Add SLA impact for slow queries
+          - set(attributes["sla_impact"], "critical") where name == "mysql_query_duration_milliseconds" and value > 5000
+          - set(attributes["sla_additional_score"], 2.0) where attributes["sla_impact"] == "critical"
+          - set(attributes["sla_impact"], "warning") where name == "mysql_query_duration_milliseconds" and value > 2000 and value <= 5000
+          - set(attributes["sla_additional_score"], 1.0) where attributes["sla_impact"] == "warning"
+          - set(attributes["sla_impact"], "normal") where attributes["sla_impact"] == nil
+          - set(attributes["sla_additional_score"], 0.0) where attributes["sla_additional_score"] == nil
+          
+          # Add SLA score to business impact
+          - set(attributes["business_impact_score"], attributes["business_impact_score"] + attributes["sla_additional_score"])
+          
+          # Cap at maximum score
+          - set(attributes["business_impact_score"], 15.0) where attributes["business_impact_score"] > 15.0
+          
+          # Set criticality based on final score
+          - set(attributes["business_criticality"], "CRITICAL") where attributes["business_impact_score"] >= 10.0
+          - set(attributes["business_criticality"], "HIGH") where attributes["business_impact_score"] >= 7.0 and attributes["business_impact_score"] < 10.0
+          - set(attributes["business_criticality"], "MEDIUM") where attributes["business_impact_score"] >= 4.0 and attributes["business_impact_score"] < 7.0
+          - set(attributes["business_criticality"], "LOW") where attributes["business_impact_score"] < 4.0
+
+  # Generate business impact metrics
+  transform/generate_metrics:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        conditions:
+          - attributes["business_impact_score"] != nil
+        statements:
+          # Create business impact score metric
+          - set(name, "business_impact_score")
+          - set(unit, "score")
+          - set(value, attributes["business_impact_score"])
+
+  # New Relic attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-business-impact
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+
+  # Entity synthesis
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_BUSINESS_IMPACT"
+        action: insert
+      - key: entity.guid
+        value: Concat(["BUSINESS|", attributes["environment"], "|", attributes["db.sql.table"]], "")
+        action: insert
+      - key: entity.name
+        value: Concat(["business-impact-", attributes["db.sql.table"]], "")
+        action: insert
+
+  # Routing processor to send critical metrics to priority pipeline
+  routing:
+    from_attribute: "business_criticality"
+    table:
+      - value: "CRITICAL"
+        exporters: [otlphttp/newrelic_critical, prometheus, file/critical_alerts]
+      - value: "HIGH"
+        exporters: [otlphttp/newrelic_critical, prometheus]
+    default_exporters: [otlphttp/newrelic_standard, prometheus]
+
+exporters:
+  # Standard New Relic exporter
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # Critical metrics exporter with higher priority
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: none  # Faster processing
+    timeout: 10s       # Shorter timeout
+    retry_on_failure:
+      enabled: true
+      initial_interval: 2s
+      max_interval: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 10  # More consumers
+      queue_size: 5000
+
+  # Prometheus exporter
+  prometheus:
+    endpoint: 0.0.0.0:8085
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # File exporter for critical business alerts
+  file/critical_alerts:
+    path: /tmp/business-reports/critical-alerts.json
+    rotation:
+      max_megabytes: 10
+      max_days: 7
+      max_backups: 5
+    format: json
+
+  # Debug exporter
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  # Single pipeline with routing at the end
+  pipelines:
+    metrics:
+      receivers: [otlp, prometheus/sql_intelligence]
+      processors: [
+        memory_limiter,
+        filter/validate_input,
+        batch,
+        resource,
+        transform/extract_table,
+        transform/business_impact,
+        transform/generate_metrics,
+        attributes/newrelic,
+        attributes/entity_synthesis,
+        routing
+      ]
+      exporters: [otlphttp/newrelic_standard, prometheus, debug]
+
+  extensions: [zpages, pprof]
+
+extensions:
+  zpages:
+    endpoint: 0.0.0.0:55679
+    
+  pprof:
+    endpoint: 0.0.0.0:6060
+
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["/tmp/logs/collector.log"]

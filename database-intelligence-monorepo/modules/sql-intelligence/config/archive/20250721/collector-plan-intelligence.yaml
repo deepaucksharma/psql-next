@@ -1,0 +1,443 @@
+# SQL Intelligence - Query Plan Analysis Configuration
+# Implements SolarWinds Plan Explorer equivalent capabilities
+
+receivers:
+  # MySQL connection
+  mysql:
+    endpoint: ${env:MYSQL_ENDPOINT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    collection_interval: 10s
+    transport: tcp
+
+  # Query Plan Extraction
+  sqlquery/plan_extractor:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    queries:
+      # Comprehensive plan capture with EXPLAIN equivalent
+      - sql: |
+          WITH plan_analysis AS (
+            SELECT 
+              ess.THREAD_ID,
+              ess.EVENT_ID,
+              ess.DIGEST,
+              ess.DIGEST_TEXT,
+              ess.SQL_TEXT,
+              ess.CURRENT_SCHEMA,
+              ess.OBJECT_NAME,
+              ess.TIMER_WAIT/1000000000.0 as EXEC_TIME_MS,
+              ess.LOCK_TIME/1000000000.0 as LOCK_TIME_MS,
+              ess.ROWS_SENT,
+              ess.ROWS_EXAMINED,
+              ess.ROWS_AFFECTED,
+              ess.SELECT_FULL_JOIN,
+              ess.SELECT_FULL_RANGE_JOIN,
+              ess.SELECT_RANGE,
+              ess.SELECT_RANGE_CHECK,
+              ess.SELECT_SCAN,
+              ess.SORT_MERGE_PASSES,
+              ess.SORT_RANGE,
+              ess.SORT_ROWS,
+              ess.SORT_SCAN,
+              ess.NO_INDEX_USED,
+              ess.NO_GOOD_INDEX_USED,
+              ess.CREATED_TMP_DISK_TABLES,
+              ess.CREATED_TMP_TABLES,
+              -- Calculate selectivity
+              CASE 
+                WHEN ess.ROWS_EXAMINED > 0 
+                THEN ess.ROWS_SENT / ess.ROWS_EXAMINED 
+                ELSE 1 
+              END as SELECTIVITY,
+              -- Efficiency score
+              CASE
+                WHEN ess.NO_INDEX_USED = 'YES' THEN 0
+                WHEN ess.NO_GOOD_INDEX_USED = 'YES' THEN 20
+                WHEN ess.SELECT_FULL_JOIN > 0 THEN 30
+                WHEN ess.SELECT_SCAN > 0 THEN 50
+                WHEN ess.SELECT_RANGE > 0 THEN 80
+                ELSE 100
+              END as INDEX_EFFICIENCY_SCORE,
+              -- Extract table names from query
+              SUBSTRING_INDEX(SUBSTRING_INDEX(ess.DIGEST_TEXT, 'FROM', -1), ' ', 2) as PRIMARY_TABLE,
+              -- Execution frequency
+              ess.COUNT_STAR as EXECUTION_COUNT,
+              ess.SUM_TIMER_WAIT/1000000000.0 as TOTAL_TIME_MS,
+              -- Performance percentiles
+              ess.MIN_TIMER_WAIT/1000000000.0 as MIN_TIME_MS,
+              ess.AVG_TIMER_WAIT/1000000000.0 as AVG_TIME_MS,
+              ess.MAX_TIMER_WAIT/1000000000.0 as MAX_TIME_MS,
+              ess.QUANTILE_95/1000000000.0 as P95_TIME_MS,
+              ess.QUANTILE_99/1000000000.0 as P99_TIME_MS,
+              -- Resource usage
+              ess.SUM_ROWS_SENT as TOTAL_ROWS_SENT,
+              ess.SUM_ROWS_EXAMINED as TOTAL_ROWS_EXAMINED,
+              ess.SUM_CREATED_TMP_DISK_TABLES as TOTAL_TMP_DISK_TABLES,
+              ess.SUM_CREATED_TMP_TABLES as TOTAL_TMP_TABLES,
+              ess.SUM_SELECT_FULL_JOIN as TOTAL_FULL_JOINS,
+              ess.SUM_SELECT_SCAN as TOTAL_FULL_SCANS,
+              -- Variance analysis
+              ess.STD_TIMER_WAIT/1000000000.0 as STDDEV_TIME_MS,
+              CASE 
+                WHEN ess.AVG_TIMER_WAIT > 0 
+                THEN (ess.STD_TIMER_WAIT / ess.AVG_TIMER_WAIT) 
+                ELSE 0 
+              END as COEFFICIENT_OF_VARIATION,
+              -- Last execution
+              ess.LAST_SEEN,
+              ess.FIRST_SEEN
+            FROM performance_schema.events_statements_summary_by_digest ess
+            WHERE ess.DIGEST IS NOT NULL
+              AND ess.COUNT_STAR > 10
+              AND ess.LAST_SEEN > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+          )
+          SELECT * FROM plan_analysis
+          ORDER BY TOTAL_TIME_MS DESC
+          LIMIT 100
+        metrics:
+          - metric_name: mysql.plan.intelligence
+            value_column: "EXEC_TIME_MS"
+            data_type: gauge
+            attribute_columns:
+              - DIGEST
+              - DIGEST_TEXT
+              - PRIMARY_TABLE
+              - ROWS_SENT
+              - ROWS_EXAMINED
+              - SELECTIVITY
+              - INDEX_EFFICIENCY_SCORE
+              - NO_INDEX_USED
+              - NO_GOOD_INDEX_USED
+              - EXECUTION_COUNT
+              - AVG_TIME_MS
+              - P95_TIME_MS
+              - P99_TIME_MS
+              - COEFFICIENT_OF_VARIATION
+        collection_interval: 30s
+
+      # Table and Index Statistics
+      - sql: |
+          SELECT 
+            t.TABLE_SCHEMA,
+            t.TABLE_NAME,
+            t.ENGINE,
+            t.TABLE_ROWS,
+            t.AVG_ROW_LENGTH,
+            t.DATA_LENGTH,
+            t.INDEX_LENGTH,
+            t.DATA_FREE,
+            t.AUTO_INCREMENT,
+            t.CREATE_TIME,
+            t.UPDATE_TIME,
+            t.CHECK_TIME,
+            -- Calculate table size in MB
+            ROUND((t.DATA_LENGTH + t.INDEX_LENGTH) / 1024 / 1024, 2) as TABLE_SIZE_MB,
+            -- Index to data ratio
+            CASE 
+              WHEN t.DATA_LENGTH > 0 
+              THEN ROUND(t.INDEX_LENGTH / t.DATA_LENGTH, 2) 
+              ELSE 0 
+            END as INDEX_DATA_RATIO,
+            -- Count indexes
+            (SELECT COUNT(DISTINCT INDEX_NAME) 
+             FROM information_schema.STATISTICS s 
+             WHERE s.TABLE_SCHEMA = t.TABLE_SCHEMA 
+               AND s.TABLE_NAME = t.TABLE_NAME) as INDEX_COUNT,
+            -- List all indexes
+            (SELECT GROUP_CONCAT(
+              CONCAT(INDEX_NAME, '(', COLUMN_NAME, ')')
+              ORDER BY SEQ_IN_INDEX SEPARATOR ', '
+            ) FROM information_schema.STATISTICS s
+            WHERE s.TABLE_SCHEMA = t.TABLE_SCHEMA 
+              AND s.TABLE_NAME = t.TABLE_NAME
+            GROUP BY s.TABLE_SCHEMA, s.TABLE_NAME) as INDEX_LIST,
+            -- Statistics age
+            TIMESTAMPDIFF(HOUR, t.UPDATE_TIME, NOW()) as STATS_AGE_HOURS
+          FROM information_schema.TABLES t
+          WHERE t.TABLE_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys')
+            AND t.TABLE_TYPE = 'BASE TABLE'
+        metrics:
+          - metric_name: mysql.table.statistics
+            value_column: "TABLE_ROWS"
+            data_type: gauge
+            attribute_columns:
+              - TABLE_SCHEMA
+              - TABLE_NAME
+              - ENGINE
+              - TABLE_SIZE_MB
+              - INDEX_DATA_RATIO
+              - INDEX_COUNT
+              - INDEX_LIST
+              - STATS_AGE_HOURS
+        collection_interval: 300s  # Every 5 minutes
+
+      # Index Usage Statistics
+      - sql: |
+          WITH index_stats AS (
+            SELECT 
+              OBJECT_SCHEMA,
+              OBJECT_NAME as TABLE_NAME,
+              INDEX_NAME,
+              COUNT_STAR as ACCESS_COUNT,
+              COUNT_READ as READ_COUNT,
+              COUNT_WRITE as WRITE_COUNT,
+              COUNT_FETCH as FETCH_COUNT,
+              COUNT_INSERT as INSERT_COUNT,
+              COUNT_UPDATE as UPDATE_COUNT,
+              COUNT_DELETE as DELETE_COUNT,
+              -- Calculate read/write ratio
+              CASE 
+                WHEN COUNT_WRITE > 0 
+                THEN ROUND(COUNT_READ / COUNT_WRITE, 2) 
+                ELSE COUNT_READ 
+              END as READ_WRITE_RATIO,
+              -- Access efficiency
+              CASE 
+                WHEN COUNT_STAR > 0 
+                THEN ROUND(COUNT_FETCH / COUNT_STAR * 100, 2) 
+                ELSE 0 
+              END as FETCH_EFFICIENCY
+            FROM performance_schema.table_io_waits_summary_by_index_usage
+            WHERE OBJECT_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys')
+              AND INDEX_NAME IS NOT NULL
+          )
+          SELECT * FROM index_stats
+          WHERE ACCESS_COUNT > 0
+          ORDER BY ACCESS_COUNT DESC
+        metrics:
+          - metric_name: mysql.index.usage
+            value_column: "ACCESS_COUNT"
+            data_type: gauge
+            attribute_columns:
+              - OBJECT_SCHEMA
+              - TABLE_NAME
+              - INDEX_NAME
+              - READ_COUNT
+              - WRITE_COUNT
+              - READ_WRITE_RATIO
+              - FETCH_EFFICIENCY
+        collection_interval: 60s
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+  # Plan Intelligence Analysis
+  transform/plan_intelligence:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Plan change detection (simplified without previous state)
+          - set(attributes["plan.hash"], 
+                Hash(Concat([
+                  attributes["INDEX_EFFICIENCY_SCORE"],
+                  attributes["NO_INDEX_USED"],
+                  attributes["NO_GOOD_INDEX_USED"],
+                  attributes["SELECTIVITY"]
+                ], ":")))
+            where metric.name == "mysql.plan.intelligence"
+          
+          # Identify problematic queries
+          - set(attributes["query.is_problematic"], 
+                attributes["INDEX_EFFICIENCY_SCORE"] < 50 OR
+                attributes["SELECTIVITY"] < 0.1 OR
+                attributes["AVG_TIME_MS"] > 1000 OR
+                attributes["COEFFICIENT_OF_VARIATION"] > 2)
+            where metric.name == "mysql.plan.intelligence"
+          
+          # Calculate query cost
+          - set(attributes["query.cost_score"], 
+                (attributes["TOTAL_ROWS_EXAMINED"] / 1000) * 
+                (attributes["AVG_TIME_MS"] / 100) * 
+                (attributes["EXECUTION_COUNT"] / 100))
+            where metric.name == "mysql.plan.intelligence" and
+                  attributes["TOTAL_ROWS_EXAMINED"] != nil
+          
+          # Missing index detection
+          - set(attributes["index.recommendation_type"], 
+                Case(
+                  attributes["NO_INDEX_USED"] == "YES", "CREATE_INDEX",
+                  attributes["NO_GOOD_INDEX_USED"] == "YES", "OPTIMIZE_INDEX",
+                  attributes["INDEX_EFFICIENCY_SCORE"] < 30, "REVIEW_INDEX",
+                  "NONE"
+                ))
+            where metric.name == "mysql.plan.intelligence"
+          
+          # Performance tier classification
+          - set(attributes["query.performance_tier"], 
+                Case(
+                  attributes["AVG_TIME_MS"] < 10 AND attributes["INDEX_EFFICIENCY_SCORE"] > 80, "optimal",
+                  attributes["AVG_TIME_MS"] < 100 AND attributes["INDEX_EFFICIENCY_SCORE"] > 50, "good",
+                  attributes["AVG_TIME_MS"] < 1000, "acceptable",
+                  attributes["AVG_TIME_MS"] < 5000, "slow",
+                  "critical"
+                ))
+            where metric.name == "mysql.plan.intelligence"
+          
+          # Statistics freshness analysis
+          - set(attributes["stats.is_stale"], 
+                attributes["STATS_AGE_HOURS"] > 168)  # 7 days
+            where metric.name == "mysql.table.statistics" and
+                  attributes["STATS_AGE_HOURS"] != nil
+          
+          # Index effectiveness scoring
+          - set(attributes["index.effectiveness"], 
+                Case(
+                  attributes["FETCH_EFFICIENCY"] > 90 AND attributes["READ_WRITE_RATIO"] > 10, "excellent",
+                  attributes["FETCH_EFFICIENCY"] > 70 AND attributes["READ_WRITE_RATIO"] > 5, "good",
+                  attributes["FETCH_EFFICIENCY"] > 50, "fair",
+                  attributes["FETCH_EFFICIENCY"] > 0, "poor",
+                  "unused"
+                ))
+            where metric.name == "mysql.index.usage" and
+                  attributes["FETCH_EFFICIENCY"] != nil
+
+  # Generate Recommendations
+  transform/recommendations:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Create actionable recommendations
+          - set(attributes["recommendation.text"], 
+                Case(
+                  attributes["index.recommendation_type"] == "CREATE_INDEX",
+                  Concat([
+                    "CREATE INDEX ON ", attributes["PRIMARY_TABLE"],
+                    " - Query examines ", string(attributes["ROWS_EXAMINED"]),
+                    " rows but returns only ", string(attributes["ROWS_SENT"]),
+                    " (", string(Round(attributes["SELECTIVITY"] * 100, 2)), "% selectivity)"
+                  ], ""),
+                  
+                  attributes["index.recommendation_type"] == "OPTIMIZE_INDEX",
+                  "Review existing indexes - suboptimal index usage detected",
+                  
+                  attributes["stats.is_stale"] == true,
+                  Concat(["UPDATE STATISTICS for ", attributes["TABLE_NAME"], 
+                         " - last updated ", string(attributes["STATS_AGE_HOURS"]), " hours ago"], ""),
+                  
+                  attributes["query.performance_tier"] == "critical",
+                  "URGENT: Query performance critical - consider rewrite or optimization",
+                  
+                  ""
+                ))
+          
+          # Calculate recommendation priority
+          - set(attributes["recommendation.priority"], 
+                Case(
+                  attributes["query.performance_tier"] == "critical", 100,
+                  attributes["query.performance_tier"] == "slow" AND attributes["query.cost_score"] > 1000, 80,
+                  attributes["index.recommendation_type"] == "CREATE_INDEX", 70,
+                  attributes["stats.is_stale"] == true, 50,
+                  10
+                ))
+
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-plan-intelligence
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: eventType
+        value: "MySQLPlanIntelligence"
+        action: insert
+
+  # Entity synthesis
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_INSTANCE"
+        action: insert
+      - key: entity.guid
+        value: "MYSQL|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT}"
+        action: insert
+
+  resource:
+    attributes:
+      - key: service.name
+        value: sql-plan-intelligence
+        action: upsert
+
+exporters:
+  # New Relic OTLP exporter
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+
+  # High-priority for critical queries
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none
+    timeout: 10s
+
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  pipelines:
+    # Main plan intelligence pipeline
+    metrics/plan_intelligence:
+      receivers: [sqlquery/plan_extractor]
+      processors: [
+        memory_limiter, 
+        batch, 
+        transform/plan_intelligence,
+        transform/recommendations,
+        attributes/newrelic,
+        attributes/entity_synthesis,
+        resource
+      ]
+      exporters: [otlphttp/newrelic, debug]
+    
+    # Critical query pipeline
+    metrics/critical:
+      receivers: [sqlquery/plan_extractor]
+      processors: [
+        memory_limiter,
+        batch,
+        transform/plan_intelligence,
+        attributes/newrelic,
+        resource
+      ]
+      exporters: [otlphttp/newrelic_critical]
+
+  # WARNING: DO NOT ADD health_check to extensions list!
+
+  # Health checks are validation-only, not production features.
+
+  extensions: [pprof]  # NO health_check here!
+extensions:
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
+  
+  pprof:
+    endpoint: 0.0.0.0:1777

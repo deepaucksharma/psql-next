@@ -1,0 +1,108 @@
+{
+  "name": "MySQL Intelligence - Test Dashboard",
+  "description": "Simple test dashboard to verify functionality",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Basic Metrics",
+      "description": "Basic MySQL and system metrics",
+      "widgets": [
+        {
+          "title": "MySQL Metric Count",
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "height": 3,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "query": "SELECT count(*) as 'MySQL Metrics' FROM Metric WHERE metricName LIKE 'mysql.%' SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "System Metrics Count",
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "height": 3,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "query": "SELECT count(*) as 'System Metrics' FROM Metric WHERE metricName LIKE 'system.%' SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "OpenTelemetry Data Flow",
+          "visualization": {
+            "id": "viz.line"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "height": 3,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "query": "SELECT count(*) FROM Metric WHERE instrumentation.provider = 'opentelemetry' TIMESERIES SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Available Metrics by Type",
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "height": 3,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "query": "SELECT count(*) FROM Metric WHERE instrumentation.provider = 'opentelemetry' FACET CASE WHEN metricName LIKE 'mysql.%' THEN 'MySQL' WHEN metricName LIKE 'system.%' THEN 'System' ELSE 'Other' END SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Recent Metric Activity",
+          "visualization": {
+            "id": "viz.table"
+          },
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "height": 3,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "query": "SELECT metricName, latest(timestamp) as 'Last Seen', count(*) as 'Count' FROM Metric WHERE instrumentation.provider = 'opentelemetry' FACET metricName LIMIT 20 SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

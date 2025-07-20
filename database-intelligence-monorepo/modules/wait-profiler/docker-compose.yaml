@@ -13,10 +13,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    volumes:
-      - ./src/init.sql:/docker-entrypoint-initdb.d/init.sql
     
   wait-profiler:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
     build: .
     environment:
       MODULE_NAME: wait-profiler
@@ -25,12 +28,38 @@ services:
       MYSQL_PASSWORD: test
       EXPORT_PORT: 8083
       OTEL_SERVICE_NAME: wait-profiler
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      ENVIRONMENT: production
+      CLUSTER_NAME: database-intelligence-cluster
     ports:
-      - "8083:8083"
-      - "8891:8889"
+      - "8083:8083"      # Module metrics
+      - "8891:8889"      # OTLP gRPC debug
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
     depends_on:
       mysql-test:
         condition: service_healthy
     volumes:
-      - ./config:/etc/otel
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
+      - ./config:/etc/otel:ro
+      - ./logs:/tmp/logs
+      - wait_profiler_queue_standard:/tmp/wait-profiler-queue-standard
+      - wait_profiler_queue_critical:/tmp/wait-profiler-queue-critical
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-enterprise-working.yaml}"]
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+volumes:
+  wait_profiler_queue_standard:
+    driver: local
+  wait_profiler_queue_critical:
+    driver: local

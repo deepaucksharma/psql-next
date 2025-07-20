@@ -1,0 +1,4 @@
+# Requirements for Database Intelligence Validation Framework
+requests>=2.31.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.0

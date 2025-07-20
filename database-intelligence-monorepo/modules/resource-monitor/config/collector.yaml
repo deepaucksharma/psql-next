@@ -1,5 +1,9 @@
+# Resource Monitor - Consolidated Configuration
+# Comprehensive system resource monitoring with circuit breaker pattern
+# WARNING: Health checks intentionally removed - use shared/validation/health-check-all.sh
+
 receivers:
-  # Host metrics receiver for system resource monitoring
+  # Host metrics receiver for comprehensive system resource monitoring
   hostmetrics:
     collection_interval: 10s
     scrapers:
@@ -101,29 +105,82 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
-  # Batch processor to optimize data flow
-  batch:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+
+  # Batch processor for standard metrics
+  batch/standard:
     timeout: 10s
     send_batch_size: 1024
     send_batch_max_size: 2048
 
-  # Memory limiter to prevent OOM
-  memory_limiter:
-    check_interval: 1s
-    limit_mib: 512
-    spike_limit_mib: 128
+  # Batch processor for critical metrics
+  batch/critical:
+    timeout: 2s
+    send_batch_size: 100
+    send_batch_max_size: 500
 
   # Resource processor to add metadata
-  resource:
+  resource/standard:
     attributes:
       - key: service.name
-        value: "resource-monitor"
-        action: insert
+        value: resource-monitor
+        action: upsert
+      - key: service.version
+        value: 2.0.0
+        action: upsert
       - key: deployment.environment
         value: ${env:ENVIRONMENT}
+        action: upsert
+
+  # Core attributes for resource monitor
+  attributes/resource_monitor:
+    actions:
+      - key: module
+        value: resource-monitor
         action: insert
       - key: monitor.type
-        value: "system-resources"
+        value: system-resources
+        action: insert
+      - key: cluster.name
+        value: ${env:CLUSTER_NAME}
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: tier
+        value: infrastructure
+        action: insert
+      - key: host.name
+        action: insert
+        from_attribute: host.name
+      - key: collection.timestamp
+        action: insert
+        value: ${env:HOSTNAME}
+
+  # Resource monitoring thresholds
+  attributes/thresholds:
+    actions:
+      - key: threshold.cpu.warning
+        value: ${env:CPU_THRESHOLD_WARNING:-70}
+        action: insert
+      - key: threshold.cpu.critical
+        value: ${env:CPU_THRESHOLD_CRITICAL:-85}
+        action: insert
+      - key: threshold.memory.warning
+        value: ${env:MEMORY_THRESHOLD_WARNING:-75}
+        action: insert
+      - key: threshold.memory.critical
+        value: ${env:MEMORY_THRESHOLD_CRITICAL:-90}
+        action: insert
+      - key: threshold.disk.warning
+        value: ${env:DISK_THRESHOLD_WARNING:-80}
+        action: insert
+      - key: threshold.disk.critical
+        value: ${env:DISK_THRESHOLD_CRITICAL:-95}
         action: insert
 
   # Filter processor for MySQL-specific processes
@@ -137,56 +194,80 @@ processors:
           - key: process.name
             value: ".*mysql.*"
 
-  # Attributes processor to enrich metrics
-  attributes:
-    actions:
-      - key: host.name
-        action: insert
-        from_attribute: host.name
-      - key: collection.timestamp
-        action: insert
-        value: ${env:HOSTNAME}
-      - key: module
-        value: resource-monitor
-        action: insert
+  # Filter for critical resource thresholds
+  filter/critical:
+    error_mode: ignore
+    metrics:
+      include:
+        match_type: regexp
+        metric_names:
+          - "system\\.cpu\\.utilization"
+          - "system\\.memory\\.utilization"
+          - "system\\.disk\\.io_time"
+          - "system\\.filesystem\\.utilization"
 
-  # New Relic specific attributes
-  attributes/newrelic:
+  # New Relic specific attributes for standard pipeline
+  attributes/newrelic_standard:
     actions:
       - key: newrelic.source
         value: opentelemetry
         action: insert
       - key: instrumentation.name
-        value: mysql-otel-collector
+        value: mysql-resource-monitor
         action: insert
       - key: instrumentation.version
-        value: "2.0.0"
+        value: 2.0.0
         action: insert
       - key: instrumentation.provider
         value: opentelemetry
         action: insert
-      - key: environment
-        value: ${env:ENVIRONMENT}
+      - key: pipeline.type
+        value: standard
+        action: insert
+
+  # New Relic specific attributes for critical pipeline
+  attributes/newrelic_critical:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-resource-monitor
+        action: insert
+      - key: instrumentation.version
+        value: 2.0.0
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: pipeline.type
+        value: critical
+        action: insert
+      - key: priority
+        value: high
+        action: insert
+      - key: alert.enabled
+        value: "true"
         action: insert
 
   # Entity synthesis for New Relic One
   attributes/entity_synthesis:
     actions:
       - key: entity.type
-        value: "HOST"
+        value: HOST
         action: insert
       - key: entity.guid
-        value: "HOST|${env:CLUSTER_NAME}|${env:HOSTNAME}"
+        value: HOST|${env:CLUSTER_NAME}|${env:HOSTNAME}
         action: insert
       - key: entity.name
-        value: "${env:HOSTNAME}"
+        value: ${env:HOSTNAME}
         action: insert
       - key: newrelic.entity.synthesis
         value: "true"
         action: insert
 
 exporters:
-  # Primary New Relic OTLP exporter for standard metrics
+  # Standard New Relic exporter for all resource metrics
   otlphttp/newrelic_standard:
     endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
     headers:
@@ -196,50 +277,64 @@ exporters:
     retry_on_failure:
       enabled: true
       initial_interval: 5s
-      max_interval: 30s
+      max_interval: 60s
       max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 20000
+
+  # Critical New Relic exporter for resource alerts
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: none
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 2s
+      max_interval: 20s
+      max_elapsed_time: 120s
     sending_queue:
       enabled: true
       num_consumers: 5
       queue_size: 10000
 
-  # High-priority exporter for critical resource metrics
-  otlphttp/newrelic_critical:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
-    headers:
-      api-key: ${env:NEW_RELIC_LICENSE_KEY}
-      X-Priority: critical
-    compression: none  # No compression for lower latency
-    timeout: 10s
-    retry_on_failure:
-      enabled: true
-      initial_interval: 1s
-      max_interval: 10s
-      max_elapsed_time: 60s
+  # Prometheus exporter for local monitoring
+  prometheus:
+    endpoint: "0.0.0.0:${env:EXPORT_PORT:-8088}"
+    namespace: resource_monitor
+    const_labels:
+      module: resource-monitor
+      cluster: ${env:CLUSTER_NAME}
 
   # Debug exporter for development
   debug:
-    verbosity: detailed
+    verbosity: basic
     sampling_initial: 5
     sampling_thereafter: 200
 
   # File exporter for persistent storage
-  file:
-    path: /tmp/resource-metrics.json
+  file/resource_metrics:
+    path: /tmp/resource-metrics/metrics.json
     rotation:
       max_megabytes: 100
       max_days: 7
-      max_backups: 3
+      max_backups: 10
+    format: json
+
+  # OTLP for forwarding to other systems
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT:-localhost:4317}
+    tls:
+      insecure: true
 
 extensions:
-  # Health check extension
-  health_check:
-    endpoint: 0.0.0.0:13133
-    path: "/"
-    check_collector_pipeline:
-      enabled: true
-      interval: 5s
-      exporter_failure_threshold: 5
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
 
   # Performance profiler
   pprof:
@@ -250,37 +345,61 @@ extensions:
     endpoint: 0.0.0.0:55679
 
 service:
-  extensions: [health_check, pprof, zpages]
+  # WARNING: DO NOT ADD health_check to extensions list!
+  # Health checks are validation-only, not production features.
+  extensions: [pprof, zpages]  # NO health_check here!
   
   pipelines:
-    # Main metrics pipeline
-    metrics:
+    # Main metrics pipeline for all system resources
+    metrics/system:
       receivers: [hostmetrics, otlp]
-      processors: [memory_limiter, batch, resource, attributes, attributes/newrelic, attributes/entity_synthesis]
-      exporters: [otlphttp/newrelic_standard, file]
+      processors: [
+        memory_limiter,
+        batch/standard,
+        attributes/resource_monitor,
+        attributes/thresholds,
+        resource/standard,
+        attributes/newrelic_standard,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_standard, prometheus, file/resource_metrics]
     
     # MySQL-specific metrics pipeline
     metrics/mysql:
-      receivers: [hostmetrics]
-      processors: [memory_limiter, filter/mysql, batch, resource, attributes/newrelic, attributes/entity_synthesis]
-      exporters: [otlphttp/newrelic_standard]
+      receivers: [hostmetrics, prometheus]
+      processors: [
+        memory_limiter,
+        filter/mysql,
+        batch/standard,
+        attributes/resource_monitor,
+        resource/standard,
+        attributes/newrelic_standard,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_standard, otlp]
     
     # Critical resource metrics (CPU/Memory pressure)
     metrics/critical:
       receivers: [hostmetrics]
-      processors: [memory_limiter, batch, resource, attributes/newrelic, attributes/entity_synthesis]
+      processors: [
+        memory_limiter,
+        filter/critical,
+        batch/critical,
+        attributes/resource_monitor,
+        attributes/thresholds,
+        resource/standard,
+        attributes/newrelic_critical,
+        attributes/entity_synthesis
+      ]
       exporters: [otlphttp/newrelic_critical]
     
     # Debug pipeline for troubleshooting
     metrics/debug:
       receivers: [hostmetrics]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, batch/standard]
       exporters: [debug]
 
   telemetry:
     logs:
       level: info
-      output_paths: ["stdout", "/tmp/otel-collector.log"]
-    metrics:
-      level: detailed
-      address: 0.0.0.0:8889
+      output_paths: ["stdout"]

@@ -1,0 +1,282 @@
+# Enterprise-Grade OpenTelemetry Collector Template
+# This template provides standardized patterns for all database intelligence modules
+# Features: Circuit Breakers, Persistent Queues, Multi-Pipeline Architecture, Entity Synthesis
+
+receivers:
+  # Primary MySQL receiver with optimized settings
+  mysql:
+    endpoint: ${env:MYSQL_ENDPOINT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    collection_interval: ${env:COLLECTION_INTERVAL:-10s}
+    transport: tcp
+    initial_delay: 5s
+    timeout: 30s
+
+  # Federation receiver for cross-module metrics
+  prometheus/federation:
+    config:
+      scrape_configs:
+        - job_name: 'module-federation'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['${env:FEDERATION_TARGETS:-localhost:8081,localhost:8082}']
+          metrics_path: /metrics
+
+processors:
+  # Enterprise memory management with circuit breaker integration
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: ${env:MEMORY_LIMIT_PERCENT:-80}
+    spike_limit_percentage: ${env:MEMORY_SPIKE_PERCENT:-30}
+
+  # Optimized batching for different pipeline priorities
+  batch/standard:
+    timeout: ${env:BATCH_TIMEOUT_STANDARD:-10s}
+    send_batch_size: ${env:BATCH_SIZE_STANDARD:-1000}
+    send_batch_max_size: 1500
+
+  batch/critical:
+    timeout: ${env:BATCH_TIMEOUT_CRITICAL:-2s}
+    send_batch_size: ${env:BATCH_SIZE_CRITICAL:-100}
+    send_batch_max_size: 200
+
+  # Standardized module attributes
+  attributes/module:
+    actions:
+      - key: module
+        value: ${env:MODULE_NAME}
+        action: insert
+      - key: mysql.endpoint
+        value: ${env:MYSQL_ENDPOINT}
+        action: insert
+      - key: cluster.name
+        value: ${env:CLUSTER_NAME}
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Standardized resource attributes
+  resource/standard:
+    attributes:
+      - key: service.name
+        value: ${env:OTEL_SERVICE_NAME}
+        action: upsert
+      - key: service.version
+        value: ${env:SERVICE_VERSION:-2.0.0}
+        action: upsert
+      - key: service.instance.id
+        value: ${env:HOSTNAME}-${env:MODULE_NAME}
+        action: upsert
+
+  # New Relic specific attributes (standardized)
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: ${env:SERVICE_VERSION:-2.0.0}
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+
+  # Standardized entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: ${env:ENTITY_TYPE:-MYSQL_INSTANCE}
+        action: insert
+      - key: entity.guid
+        value: ${env:ENTITY_TYPE:-MYSQL}|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT}
+        action: insert
+      - key: entity.name
+        value: ${env:MYSQL_ENDPOINT}
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+
+  # Module-specific transform processor (to be customized per module)
+  transform/module_specific:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - set(description, "Enhanced by ${env:MODULE_NAME} module") where name matches "mysql.*"
+
+exporters:
+  # Primary New Relic OTLP exporter (standard pipeline)
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+      randomization_factor: 0.1
+      multiplier: 1.5
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: ${env:QUEUE_SIZE_STANDARD:-10000}
+      persistent_storage_enabled: true
+      storage_id: file_storage/standard
+
+  # Critical New Relic OTLP exporter (high priority, no compression)
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-NR-Priority: "high"
+    compression: none
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 2s
+      max_interval: 20s
+      max_elapsed_time: 120s
+      randomization_factor: 0.05
+      multiplier: 2.0
+    sending_queue:
+      enabled: true
+      num_consumers: 3
+      queue_size: ${env:QUEUE_SIZE_CRITICAL:-5000}
+      persistent_storage_enabled: true
+      storage_id: file_storage/critical
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:-basic}
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # Prometheus exporter for federation
+  prometheus:
+    endpoint: "0.0.0.0:${env:EXPORT_PORT}"
+    namespace: ${env:MODULE_NAME}
+    const_labels:
+      module: ${env:MODULE_NAME}
+      cluster: ${env:CLUSTER_NAME}
+
+  # File exporter for persistent storage and backup
+  file/backup:
+    path: /tmp/${env:MODULE_NAME}-metrics.jsonl
+    rotation:
+      max_megabytes: 100
+      max_days: 7
+      max_backups: 3
+
+extensions:
+  # Health check with comprehensive pipeline monitoring
+  health_check:
+    endpoint: 0.0.0.0:13133
+    check_collector_pipeline:
+      enabled: true
+      interval: 30s
+      exporter_failure_threshold: 3
+
+  # Performance profiling
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  # Z-pages for debugging
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+  # Persistent storage for queues
+  file_storage/standard:
+    directory: /tmp/${env:MODULE_NAME}-queue-standard
+    timeout: 10s
+    compaction:
+      directory: /tmp/${env:MODULE_NAME}-queue-standard-compact
+      on_start: true
+      on_rebound: true
+      rebound_needed_threshold_mib: 100
+      rebound_trigger_threshold_mib: 10
+
+  file_storage/critical:
+    directory: /tmp/${env:MODULE_NAME}-queue-critical
+    timeout: 5s
+    compaction:
+      directory: /tmp/${env:MODULE_NAME}-queue-critical-compact
+      on_start: true
+      on_rebound: true
+      rebound_needed_threshold_mib: 50
+      rebound_trigger_threshold_mib: 5
+
+service:
+  extensions: [health_check, pprof, zpages, file_storage/standard, file_storage/critical]
+  
+  pipelines:
+    # Standard pipeline for regular metrics
+    metrics/standard:
+      receivers: [mysql]
+      processors: [
+        memory_limiter,
+        batch/standard,
+        attributes/module,
+        resource/standard,
+        attributes/newrelic,
+        attributes/entity_synthesis,
+        transform/module_specific
+      ]
+      exporters: [otlphttp/newrelic_standard, prometheus, file/backup]
+
+    # Critical pipeline for high-priority alerts
+    metrics/critical:
+      receivers: [mysql]
+      processors: [
+        memory_limiter,
+        batch/critical,
+        attributes/module,
+        resource/standard,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_critical]
+
+    # Debug pipeline for troubleshooting
+    metrics/debug:
+      receivers: [mysql]
+      processors: [memory_limiter, attributes/module]
+      exporters: [debug]
+
+    # Federation pipeline for cross-module correlation
+    metrics/federation:
+      receivers: [prometheus/federation]
+      processors: [
+        memory_limiter,
+        batch/standard,
+        attributes/module,
+        resource/standard
+      ]
+      exporters: [otlphttp/newrelic_standard]
+
+  # Telemetry configuration
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      development: false
+      encoding: json
+      disable_caller: false
+      disable_stacktrace: false
+      output_paths: ["stdout", "/tmp/${env:MODULE_NAME}-otel.log"]
+      error_output_paths: ["stderr"]
+    
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      
+    resource:
+      service.name: otelcol-contrib
+      service.version: 0.130.0

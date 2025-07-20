@@ -213,9 +213,10 @@ exporters:
       max_backups: 3
 
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
-    
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
   pprof:
     endpoint: 0.0.0.0:1777
     
@@ -223,8 +224,9 @@ extensions:
     endpoint: 0.0.0.0:55679
 
 service:
-  extensions: [health_check, pprof, zpages]
-  
+  # WARNING: DO NOT ADD health_check to extensions list!
+  # Health checks are validation-only, not production features.
+  extensions: [pprof, zpages]  # NO health_check here!
   pipelines:
     # Traces pipeline for correlation
     traces:
@@ -295,6 +297,3 @@ service:
       level: ${env:LOG_LEVEL:info}
       initial_fields:
         service: cross-signal-correlator
-    metrics:
-      level: detailed
-      address: 0.0.0.0:8888

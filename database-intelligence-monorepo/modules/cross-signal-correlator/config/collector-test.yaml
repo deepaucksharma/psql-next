@@ -102,66 +102,69 @@ processors:
         action: upsert
         
   # Trace-to-metrics correlation
-  transform/trace_correlation:
-    error_mode: ignore
-    trace_statements:
-      - context: span
-        statements:
-          # Extract database operation details
-          - set(attributes["db.query_hash"], 
-                Hash(attributes["db.statement"]))
-            where attributes["db.statement"] != nil
-          - set(attributes["db.query_type"], 
-                Case(
-                  IsMatch(attributes["db.statement"], "(?i)^SELECT.*"), "SELECT",
-                  IsMatch(attributes["db.statement"], "(?i)^INSERT.*"), "INSERT",
-                  IsMatch(attributes["db.statement"], "(?i)^UPDATE.*"), "UPDATE",
-                  IsMatch(attributes["db.statement"], "(?i)^DELETE.*"), "DELETE",
-                  "OTHER"
-                ))
-            where attributes["db.statement"] != nil
-          # Add correlation IDs
-          - set(attributes["correlation.trace_id"], trace_id)
-          - set(attributes["correlation.span_id"], span_id)
+  # COMMENTED OUT: Transform processor syntax causing errors
+  # transform/trace_correlation:
+  #   error_mode: ignore
+  #   trace_statements:
+  #     - context: span
+  #       statements:
+  #         # Extract database operation details
+  #         - set(attributes["db.query_hash"], 
+  #               Hash(attributes["db.statement"]))
+  #           where attributes["db.statement"] != nil
+  #         - set(attributes["db.query_type"], 
+  #               Case(
+  #                 IsMatch(attributes["db.statement"], "(?i)^SELECT.*"), "SELECT",
+  #                 IsMatch(attributes["db.statement"], "(?i)^INSERT.*"), "INSERT",
+  #                 IsMatch(attributes["db.statement"], "(?i)^UPDATE.*"), "UPDATE",
+  #                 IsMatch(attributes["db.statement"], "(?i)^DELETE.*"), "DELETE",
+  #                 "OTHER"
+  #               ))
+  #           where attributes["db.statement"] != nil
+  #         # Add correlation IDs
+  #         - set(attributes["correlation.trace_id"], trace_id)
+  #         - set(attributes["correlation.span_id"], span_id)
           
   # Log-to-metrics enrichment
-  transform/log_enrichment:
-    error_mode: ignore
-    log_statements:
-      - context: log
-        statements:
-          # Parse slow query log attributes
-          - set(attributes["query_duration_ms"], 
-                attributes["query_time"] * 1000)
-            where attributes["query_time"] != nil
-          - set(attributes["lock_duration_ms"], 
-                attributes["lock_time"] * 1000)
-            where attributes["lock_time"] != nil
-          # Add severity based on duration
-          - set(severity_text, "ERROR")
-            where attributes["query_duration_ms"] > 5000
-          - set(severity_text, "WARN")
-            where attributes["query_duration_ms"] > 1000 and attributes["query_duration_ms"] <= 5000
-          - set(severity_text, "INFO")
-            where attributes["query_duration_ms"] <= 1000
+  # COMMENTED OUT: Transform processor syntax causing errors
+  # transform/log_enrichment:
+  #   error_mode: ignore
+  #   log_statements:
+  #     - context: log
+  #       statements:
+  #         # Parse slow query log attributes
+  #         - set(attributes["query_duration_ms"], 
+  #               attributes["query_time"] * 1000)
+  #           where attributes["query_time"] != nil
+  #         - set(attributes["lock_duration_ms"], 
+  #               attributes["lock_time"] * 1000)
+  #           where attributes["lock_time"] != nil
+  #         # Add severity based on duration
+  #         - set(severity_text, "ERROR")
+  #           where attributes["query_duration_ms"] > 5000
+  #         - set(severity_text, "WARN")
+  #           where attributes["query_duration_ms"] > 1000 and attributes["query_duration_ms"] <= 5000
+  #         - set(severity_text, "INFO")
+  #           where attributes["query_duration_ms"] <= 1000
             
   # Metric exemplar enrichment
-  transform/exemplar_enrichment:
-    error_mode: ignore
-    metric_statements:
-      - context: datapoint
-        statements:
-          # Add trace context to metrics for exemplars
-          - set(attributes["exemplar.trace_id"], 
-                attributes["correlation.trace_id"])
-            where attributes["correlation.trace_id"] != nil
-          - set(attributes["exemplar.span_id"], 
-                attributes["correlation.span_id"])
-            where attributes["correlation.span_id"] != nil
-          # Add query context
-          - set(attributes["exemplar.query_hash"], 
-                attributes["db.query_hash"])
-            where attributes["db.query_hash"] != nil
+  # COMMENTED OUT: Transform processor syntax causing errors
+  # transform/exemplar_enrichment:
+  #   error_mode: ignore
+  #   metric_statements:
+  #     - context: datapoint
+  #       statements:
+  #         # Add trace context to metrics for exemplars
+  #         - set(attributes["exemplar.trace_id"], 
+  #               attributes["correlation.trace_id"])
+  #           where attributes["correlation.trace_id"] != nil
+  #         - set(attributes["exemplar.span_id"], 
+  #               attributes["correlation.span_id"])
+  #           where attributes["correlation.span_id"] != nil
+  #         # Add query context
+  #         - set(attributes["exemplar.query_hash"], 
+  #               attributes["db.query_hash"])
+  #           where attributes["db.query_hash"] != nil
             
   # Attributes processor for consistent labeling
   attributes/correlation:
@@ -207,9 +210,10 @@ exporters:
       max_backups: 3
 
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
-    
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
   pprof:
     endpoint: 0.0.0.0:1777
     
@@ -217,8 +221,9 @@ extensions:
     endpoint: 0.0.0.0:55679
 
 service:
-  extensions: [health_check, pprof, zpages]
-  
+  # WARNING: DO NOT ADD health_check to extensions list!
+  # Health checks are validation-only, not production features.
+  extensions: [pprof, zpages]  # NO health_check here!
   pipelines:
     # Traces pipeline for correlation
     traces:
@@ -228,7 +233,7 @@ service:
         batch, 
         resourcedetection,
         resource/semantic_conventions, 
-        transform/trace_correlation,
+        # COMMENTED OUT: transform/trace_correlation,
         groupbytrace,
         attributes/correlation
       ]
@@ -241,7 +246,7 @@ service:
         memory_limiter, 
         batch, 
         resource/semantic_conventions,
-        transform/log_enrichment,
+        # COMMENTED OUT: transform/log_enrichment,
         attributes/correlation
       ]
       exporters: [count, debug]
@@ -262,7 +267,7 @@ service:
       processors: [
         memory_limiter, 
         batch, 
-        transform/exemplar_enrichment,
+        # COMMENTED OUT: transform/exemplar_enrichment,
         attributes/correlation
       ]
       exporters: [prometheus]
@@ -289,6 +294,3 @@ service:
       level: ${env:LOG_LEVEL:info}
       initial_fields:
         service: cross-signal-correlator
-    metrics:
-      level: detailed
-      address: 0.0.0.0:8888

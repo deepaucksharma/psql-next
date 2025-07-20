@@ -1,28 +1,100 @@
 version: '3.8'
 
 services:
-  performance-advisor:
-    build: .
-    container_name: performance-advisor
-    ports:
-      - "8087:8087"
-      - "8895:8889"
+  mysql-test:
+    image: mysql:8.0
     environment:
-      - OTEL_SERVICE_NAME=performance-advisor
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=performance-advisor,service.version=1.0.0
-    volumes:
-      - ./config:/etc/otel
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
-    networks:
-      - database-intelligence
-    restart: unless-stopped
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_DATABASE: testdb
+    ports:
+      - "3306"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+  performance-advisor:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
+    build: .
+    env_file:
+      - ../../shared/config/service-endpoints.env
+    environment:
+      MODULE_NAME: performance-advisor
+      MYSQL_ENDPOINT: mysql-test:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: test
+      EXPORT_PORT: 8087
+      OTEL_SERVICE_NAME: performance-advisor
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      ENVIRONMENT: production
+      CLUSTER_NAME: database-intelligence-cluster
+      # Module federation endpoints
+      CORE_METRICS_ENDPOINT: ${CORE_METRICS_ENDPOINT:-core-metrics:8081}
+      SQL_INTELLIGENCE_ENDPOINT: ${SQL_INTELLIGENCE_ENDPOINT:-sql-intelligence:8082}
+      WAIT_PROFILER_ENDPOINT: ${WAIT_PROFILER_ENDPOINT:-wait-profiler:8083}
+      ANOMALY_DETECTOR_ENDPOINT: ${ANOMALY_DETECTOR_ENDPOINT:-anomaly-detector:8084}
+      # Performance advisor thresholds
+      SLOW_QUERY_THRESHOLD_MS: "1000"
+      CONNECTION_POOL_THRESHOLD: "50"
+      CACHE_HIT_RATIO_THRESHOLD: "0.95"
+      LOCK_WAIT_THRESHOLD: "100"
+      MEMORY_USAGE_THRESHOLD: "0.9"
+      ERROR_COUNT_THRESHOLD: "10"
+      REPLICATION_LAG_CRITICAL: "300"
+      REPLICATION_LAG_WARNING: "60"
+      CONFIDENCE_THRESHOLD: "0.8"
+      # Alert manager endpoint
+      ALERT_MANAGER_ENDPOINT: ${ALERT_MANAGER_ENDPOINT:-alert-manager:4317}
+      # Override specific endpoints if needed
+      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector-enterprise-working.yaml}
+    ports:
+      - "8087:8087"      # Prometheus metrics
+      - "8903:8889"      # Internal metrics
+      - "4329:4317"      # OTLP gRPC
+      - "4330:4318"      # OTLP HTTP
+      - "55685:55679"    # ZPages
+      - "1781:1777"      # pprof
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+    volumes:
+      - ./config:/etc/otel:ro
+      - ../../shared/config:/etc/shared:ro
+      - ./logs:/tmp/logs
+      - performance_recommendations:/tmp/performance-recommendations
+      - performance_advisor_queue_standard:/tmp/performance-advisor-queue-standard
+      - performance_advisor_queue_critical:/tmp/performance-advisor-queue-critical
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    networks:
+      - db-intelligence
+
+volumes:
+  performance_recommendations:
+    driver: local
+  performance_advisor_queue_standard:
+    driver: local
+  performance_advisor_queue_critical:
+    driver: local
 
 networks:
-  database-intelligence:
-    external: true
+  db-intelligence:
+    driver: bridge

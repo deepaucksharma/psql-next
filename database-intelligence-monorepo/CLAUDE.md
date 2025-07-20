@@ -1,32 +1,38 @@
-# CLAUDE.md - Database Intelligence MySQL Monorepo
+# CLAUDE.md
 
-This file provides guidance to Claude Code when working with this monorepo project.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-This is a modular MySQL monitoring system built as a monorepo with 8 independent, composable modules based on OpenTelemetry Collector.
+This is a modular MySQL monitoring system built as a monorepo with 11 independent, composable modules based on OpenTelemetry Collector. The system provides comprehensive database monitoring including metrics collection, query analysis, wait profiling, anomaly detection, business impact scoring, replication monitoring, performance advising, and resource tracking.
 
 ## Repository Structure
 
 ```
 database-intelligence-monorepo/
-├── modules/              # Independent monitoring modules
-│   ├── core-metrics/     # Basic MySQL metrics (port 8081)
-│   ├── sql-intelligence/ # Query analysis (port 8082)
-│   ├── wait-profiler/    # Wait event profiling (port 8083)
-│   ├── anomaly-detector/ # Anomaly detection (port 8084)
-│   ├── business-impact/  # Business scoring (port 8085)
-│   ├── replication-monitor/ # Replication health (port 8086)
-│   ├── performance-advisor/ # Recommendations (port 8087)
-│   └── resource-monitor/ # System resources (port 8088)
-├── shared/               # Shared resources
-├── integration/          # Integration testing
-└── Makefile             # Root orchestration
+├── modules/                    # Independent monitoring modules
+│   ├── core-metrics/          # Basic MySQL metrics (port 8081)
+│   ├── sql-intelligence/      # Query analysis (port 8082)
+│   ├── wait-profiler/         # Wait event profiling (port 8083)
+│   ├── anomaly-detector/      # Anomaly detection (port 8084)
+│   ├── business-impact/       # Business scoring (port 8085)
+│   ├── replication-monitor/   # Replication health (port 8086)
+│   ├── performance-advisor/   # Recommendations (port 8087)
+│   ├── resource-monitor/      # System resources (port 8088)
+│   ├── alert-manager/         # Alert aggregation (port 8089)
+│   ├── canary-tester/         # Synthetic monitoring (port 8090)
+│   └── cross-signal-correlator/ # Trace/log/metric correlation (port 8099)
+├── shared/                    # Shared resources
+│   ├── validation/           # Health check scripts (validation-only)
+│   ├── config/              # Shared configurations
+│   └── newrelic/            # New Relic dashboards and configs
+├── integration/             # Integration testing
+└── Makefile                # Root orchestration
 ```
 
 ## Key Commands
 
-### Quick Start
+### Build and Run
 ```bash
 # Build all modules in parallel
 make build
@@ -43,11 +49,8 @@ make run-business     # business-impact + performance-advisor
 # Run all modules
 make run-all
 
-# Check health
-make health
-
-# View help
-make help
+# Run with enhanced configurations
+make run-enhanced
 ```
 
 ### Module-Specific Operations
@@ -65,172 +68,189 @@ make run-wait-profiler
 make logs-anomaly-detector
 ```
 
-## Module Details
+### Testing and Validation
+```bash
+# Test all modules in parallel
+make test
 
-### Core Metrics (8081)
-- Basic MySQL metrics collection
-- Connection, thread, operation metrics
-- Foundation for other modules
+# Test individual module
+make quick-test-core-metrics
 
-### SQL Intelligence (8082)
-- Query performance analysis
-- Slow query detection
-- Index usage analysis
-- Table I/O statistics
+# Validate modules (health checks are validation-only)
+./shared/validation/health-check-all.sh
 
-### Wait Profiler (8083)
-- Wait event analysis
-- Mutex contention tracking
-- I/O wait profiling
-- Lock wait monitoring
+# Run integration tests
+make integration
+```
 
-### Anomaly Detector (8084)
-- Statistical anomaly detection
-- Consumes metrics from other modules
-- Z-score based detection
-- Alert generation
+## Module Port Assignments
 
-### Business Impact (8085)
-- Business value scoring
-- Revenue impact detection
-- SLA assessment
-- Query categorization
+- Core Metrics: 8081 (Prometheus metrics)
+- SQL Intelligence: 8082 (Prometheus metrics)
+- Wait Profiler: 8083 (Prometheus metrics)
+- Anomaly Detector: 8084 (Prometheus metrics)
+- Business Impact: 8085 (Prometheus metrics)
+- Replication Monitor: 8086 (Prometheus metrics)
+- Performance Advisor: 8087 (Prometheus metrics)
+- Resource Monitor: 8088 (Prometheus metrics)
+- Alert Manager: 8089 (Prometheus metrics)
+- Canary Tester: 8090 (Prometheus metrics)
+- Cross-Signal Correlator: 8099 (Prometheus metrics)
 
-### Replication Monitor (8086)
-- Master-slave replication health
-- Lag monitoring
-- GTID tracking
-- Thread status
-
-### Performance Advisor (8087)
-- Automated recommendations
-- Missing index detection
-- Connection pool sizing
-- Cache optimization advice
-
-### Resource Monitor (8088)
-- Host metrics collection
-- CPU, memory, disk, network
-- MySQL process monitoring
-
-## Architecture Principles
+## Architecture and Communication
 
 ### Module Independence
 - Each module has its own docker-compose.yaml
 - Can run standalone or integrated
 - Own test suite and configuration
-- Communicates via Prometheus metrics or OTLP
+- Modules communicate via Prometheus federation or OTLP
 
 ### Communication Patterns
-1. **Prometheus Federation**: Modules expose metrics that others can scrape
-2. **OTLP Forward**: Modules can send metrics to others via OTLP
+1. **Prometheus Federation**: Modules expose metrics on their designated ports that others can scrape
+2. **OTLP Forward**: Modules can send metrics to others via OTLP (ports 4317/4318)
 3. **File Export**: Shared metrics via file system (for debugging)
 
-### Development Workflow
-1. Choose module to work on
-2. Use module's Makefile
-3. Test in isolation
-4. Test with dependencies
-5. Run integration tests
+### Configuration Files
+- Each module's main config: `modules/<name>/config/collector.yaml`
+- Enhanced configs available: `collector-enhanced.yaml`
+- Enterprise configs: `collector-enterprise.yaml`
+- Functional configs (fixed versions): `collector-functional.yaml`
 
-## Testing
+## Environment Configuration
 
-### Module Testing
+### Key Environment Variables
 ```bash
-# Test individual module
-cd modules/core-metrics
-make test
+# MySQL Connection
+MYSQL_ENDPOINT=mysql:3306
+MYSQL_USER=root
+MYSQL_PASSWORD=test
 
-# Quick test from root
-make quick-test-core-metrics
+# New Relic Integration
+NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net:4318
+NEW_RELIC_LICENSE_KEY=<your-key>
+NEW_RELIC_ACCOUNT_ID=<your-account>
 
-# Test all modules in parallel
-make test
+# Module Configuration
+ENVIRONMENT=production
+CLUSTER_NAME=database-intelligence-cluster
+
+# Module Federation Endpoints
+CORE_METRICS_ENDPOINT=core-metrics:8081
+SQL_INTELLIGENCE_ENDPOINT=sql-intelligence:8082
+WAIT_PROFILER_ENDPOINT=wait-profiler:8083
 ```
 
-### Integration Testing
-```bash
-# Run full integration suite
-make integration
+### Service Endpoints
+- Internal communication uses Docker service names
+- External access uses localhost with module ports
+- Federation endpoints defined in `shared/config/service-endpoints.env`
 
-# Performance testing
-make perf-test
+## OpenTelemetry Collector Patterns
+
+### Standard Pipeline Structure
+```yaml
+service:
+  pipelines:
+    metrics:
+      receivers: [mysql, prometheus, otlp]
+      processors: [
+        memory_limiter,    # Always first
+        batch,
+        attributes,
+        resource,
+        transform/<specific>,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic, prometheus, debug]
 ```
 
-## Environment Variables
+### Common Processors
+- `memory_limiter`: Resource protection (always first)
+- `batch`: Optimize throughput
+- `attributes`: Add module metadata
+- `resource`: Service identification
+- `transform/*`: Module-specific logic
+- `attributes/newrelic`: New Relic integration
+- `attributes/entity_synthesis`: Entity GUID generation
 
-### Common Variables
-- `MYSQL_ENDPOINT`: MySQL connection (default: mysql-test:3306)
-- `MYSQL_USER`: MySQL username (default: root)
-- `MYSQL_PASSWORD`: MySQL password (default: test)
-- `EXPORT_PORT`: Module's metrics port
+## ⚠️ Health Check Policy
 
-### Module-Specific
-- `METRICS_ENDPOINT`: For modules consuming from others
-- `ANOMALY_THRESHOLD_*`: Anomaly detection thresholds
-- `ENABLE_*`: Feature flags
+**CRITICAL**: Health check endpoints (port 13133) are intentionally REMOVED from production.
+
+- **Do NOT** add health_check extension to configs
+- **Do NOT** expose port 13133 in Docker
+- **Do NOT** add health targets to Makefiles
+- **For validation**: Use `./shared/validation/health-check-all.sh`
+- **For monitoring**: Use Prometheus metrics endpoints (8081-8099)
+
+All collector.yaml files contain WARNING comments about this policy.
+
+## Development Workflow
+
+1. Choose module to work on: `cd modules/<module>`
+2. Modify configuration: `config/collector.yaml`
+3. Test locally: `make test`
+4. Run in isolation: `docker-compose up`
+5. Test with dependencies: Use root Makefile
+6. Run integration tests: `make integration`
 
 ## Troubleshooting
 
-### Module Not Starting
+### Check Module Status
 ```bash
-# Check logs
+# View logs
 make logs-<module>
 
-# Verify dependencies
-cd modules/anomaly-detector
-make check-dependencies
+# Check running containers
+docker ps | grep <module>
 
-# Check port conflicts
-netstat -an | grep <port>
-```
-
-### No Metrics
-```bash
-# Check module health
+# Verify metrics endpoint
 curl http://localhost:<port>/metrics
-
-# Verify configuration
-docker-compose exec <module> cat /etc/otel/collector.yaml
 ```
 
-### Integration Issues
-```bash
-# Check network connectivity
-docker network ls
-docker network inspect database-intelligence-monorepo_db-intelligence
+### Common Issues
+- Port conflicts: Check netstat for port usage
+- No metrics: Verify MySQL connection and credentials
+- Module not starting: Check Docker logs and config syntax
+- Federation issues: Verify endpoint connectivity
 
-# Verify service discovery
-docker-compose exec <module> nslookup <other-module>
-```
+## New Relic Integration
 
-## Important Notes
+All modules include:
+- OTLP HTTP exporter configuration
+- Entity synthesis for proper entity mapping
+- Instrumentation metadata
+- Environment and cluster tagging
 
-1. **Parallel Operations**: The root Makefile supports parallel builds/tests with `-j` flag
-2. **Module Ports**: Each module has a dedicated port (8081-8088)
-3. **Health Checks**: All modules expose health endpoints on port 13133
-4. **Metrics Format**: Prometheus exposition format on module ports
-5. **Configuration**: Each module's config is in `modules/<name>/config/collector.yaml`
+Dashboard templates available in `shared/newrelic/dashboards/`
 
-## CI/CD Helpers
+## CI/CD Support
 
 ```bash
-# CI build
-make ci-build
-
-# CI test
-make ci-test
-
-# CI integration
-make ci-integration
+make ci-build      # CI-friendly build
+make ci-test       # CI-friendly test
+make ci-integration # CI integration tests
 ```
 
-## Docker Management
+## Module-Specific Notes
 
-```bash
-# Clean up resources
-make docker-clean
+### anomaly-detector
+- Uses z-score based detection
+- Federates metrics from all other modules
+- Configurable baselines via environment variables
 
-# Remove all module containers
-make clean
-```
+### business-impact
+- Configuration-based scoring (business-mappings.yaml)
+- No longer uses regex matching
+- Single pipeline architecture
+
+### replication-monitor
+- Requires primary/replica endpoints
+- Monitors GTID and traditional replication
+- Converts string states to numeric values
+
+### wait-profiler
+- Comprehensive wait event collection
+- Thread-level analysis
+- Lock wait details with blocking info

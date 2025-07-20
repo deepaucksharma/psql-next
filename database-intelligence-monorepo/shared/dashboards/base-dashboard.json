@@ -379,7 +379,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\"}[${interval}])",
+          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
@@ -444,7 +444,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "mysql_global_status_threads_connected{instance=~\"${instance}\"}",
+          "expr": "mysql_global_status_threads_connected{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
@@ -536,7 +536,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(mysql_global_status_connection_errors_total{instance=~\"${instance}\"}[${interval}]) / rate(mysql_global_status_connections{instance=~\"${instance}\"}[${interval}]) * 100",
+          "expr": "rate(mysql_global_status_connection_errors_total{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}]) / rate(mysql_global_status_connections{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}]) * 100",
           "refId": "A"
         }
       ],

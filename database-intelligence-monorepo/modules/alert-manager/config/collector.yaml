@@ -11,6 +11,37 @@ receivers:
             - "*"
           allowed_headers:
             - "*"
+  
+  # Prometheus federation receiver to pull metrics from other modules
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'anomaly-detector-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['${env:ANOMALY_DETECTOR_ENDPOINT}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '(anomaly_alert|anomaly_score_.*|anomaly_detected)'
+              action: keep
+              
+        - job_name: 'core-metrics-federation'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['${env:CORE_METRICS_ENDPOINT}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_(connections_current|threads_running|cpu_percent|memory_.*|disk_.*|errors_total)'
+              action: keep
+              
+        - job_name: 'performance-advisor-federation'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['${env:PERFORMANCE_ADVISOR_ENDPOINT}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'db\.performance\.recommendation\..*'
+              action: keep
 
 processors:
   # Memory limiter to prevent OOM
@@ -136,15 +167,11 @@ exporters:
       max_interval: 30s
 
 extensions:
-  # Health check extension
-  health_check:
-    endpoint: 0.0.0.0:13134
-    path: /health
-    check_collector_pipeline:
-      enabled: true
-      interval: 10s
-      exporter_failure_threshold: 5
-
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
+  
   # Performance profiler
   pprof:
     endpoint: 0.0.0.0:1777
@@ -156,10 +183,12 @@ extensions:
     size_mib: 128
 
 service:
-  extensions: [health_check, pprof, memory_ballast]
+  # WARNING: DO NOT ADD health_check to extensions list!
+  # Health checks are validation-only, not production features.
+  extensions: [pprof, memory_ballast]  # NO health_check here!
   
   pipelines:
-    # Main alert processing pipeline
+    # Main alert processing pipeline - receives alerts via OTLP
     metrics/alerts:
       receivers: [otlp]
       processors:
@@ -172,9 +201,22 @@ service:
         - batch
       exporters: [webhook, file, prometheus, otlp/upstream]
     
+    # Federation pipeline - pulls metrics from other modules
+    metrics/federation:
+      receivers: [prometheus]
+      processors:
+        - memory_limiter
+        - filter
+        - transform
+        - groupbyattrs
+        - attributes
+        - resource
+        - batch
+      exporters: [webhook, file, prometheus]
+    
     # Debug pipeline for troubleshooting
     metrics/debug:
-      receivers: [otlp]
+      receivers: [otlp, prometheus]
       processors: [memory_limiter, batch]
       exporters: [debug]
   
@@ -183,6 +225,3 @@ service:
       level: ${env:OTEL_LOG_LEVEL:-info}
       initial_fields:
         service: alert-manager
-    metrics:
-      level: detailed
-      address: 0.0.0.0:8888

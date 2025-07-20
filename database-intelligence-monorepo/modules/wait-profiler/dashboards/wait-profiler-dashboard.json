@@ -79,7 +79,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (event_name) (rate(mysql_perf_schema_events_waits_seconds_total{instance=~\"${instance}\"}[${interval}])))",
+          "expr": "topk(10, sum by (event_name) (rate(mysql_perf_schema_events_waits_seconds_total{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])))",
           "refId": "A",
           "legendFormat": "{{event_name}}"
         }
@@ -141,7 +141,7 @@
       },
       "targets": [
         {
-          "expr": "avg(mysql_perf_schema_events_waits_seconds_total{instance=~\"${instance}\"})",
+          "expr": "avg(mysql_perf_schema_events_waits_seconds_total{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"})",
           "refId": "A"
         }
       ],
@@ -207,7 +207,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (event_name, object_name) (rate(mysql_perf_schema_events_waits_total{instance=~\"${instance}\"}[${interval}]))",
+          "expr": "sum by (event_name, object_name) (rate(mysql_perf_schema_events_waits_total{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}]))",
           "refId": "A"
         }
       ],
@@ -256,7 +256,7 @@
       },
       "targets": [
         {
-          "expr": "topk(20, sum by (event_name, object_name, object_schema) (mysql_perf_schema_events_waits_seconds_total{instance=~\"${instance}\"}))",
+          "expr": "topk(20, sum by (event_name, object_name, object_schema) (mysql_perf_schema_events_waits_seconds_total{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}))",
           "format": "table",
           "refId": "A"
         }
@@ -454,7 +454,7 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -484,11 +484,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "100 - (avg(irate(node_cpu_seconds_total{mode=\"idle\",instance=~\"${instance}\"}[${interval}])) * 100)",
+          "expr": "mysql_global_status_innodb_row_lock_current_waits{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
-      "title": "CPU Usage",
+      "title": "Current Row Lock Waits",
       "type": "timeseries"
     },
     "memory_usage": {
@@ -546,7 +546,7 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "ms"
         },
         "overrides": []
       },
@@ -576,11 +576,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "100 * (1 - ((node_memory_MemAvailable_bytes{instance=~\"${instance}\"}) / (node_memory_MemTotal_bytes{instance=~\"${instance}\"})))",
+          "expr": "mysql_global_status_innodb_row_lock_time_avg{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
-      "title": "Memory Usage",
+      "title": "Average Row Lock Time",
       "type": "timeseries"
     },
     "query_rate": {
@@ -664,7 +664,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\"}[${interval}])",
+          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
@@ -729,7 +729,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "mysql_global_status_threads_connected{instance=~\"${instance}\"}",
+          "expr": "mysql_global_status_threads_connected{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
@@ -791,7 +791,7 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -821,11 +821,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(mysql_global_status_connection_errors_total{instance=~\"${instance}\"}[${interval}]) / rate(mysql_global_status_connections{instance=~\"${instance}\"}[${interval}]) * 100",
+          "expr": "rate(mysql_global_status_innodb_row_lock_waits{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
-      "title": "Error Rate",
+      "title": "Row Lock Wait Rate",
       "type": "timeseries"
     }
   },

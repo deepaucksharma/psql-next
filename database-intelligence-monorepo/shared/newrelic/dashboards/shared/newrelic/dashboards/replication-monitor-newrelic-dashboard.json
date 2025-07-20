@@ -1,0 +1,123 @@
+{
+  "name": "MySQL Replication Monitor - New Relic",
+  "description": "MySQL replication health and performance monitoring via OpenTelemetry",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Replication Health",
+      "description": "Master-replica replication monitoring",
+      "widgets": [
+        {
+          "title": "Replication Status Overview",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT uniqueCount(entity.guid) as 'Total Instances', filter(uniqueCount(entity.guid), WHERE mysql.replication.slave.io_running = 'Yes') as 'IO Running', filter(uniqueCount(entity.guid), WHERE mysql.replication.slave.sql_running = 'Yes') as 'SQL Running' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' SINCE 5 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Replication Lag Status",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.gauge"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.replica.time_behind_source) as 'Avg Lag (sec)' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' AND mysql.replica.time_behind_source IS NOT NULL SINCE 5 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 5,
+                "alertSeverity": "WARNING"
+              },
+              {
+                "value": 30,
+                "alertSeverity": "CRITICAL"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Replication Lag Trends",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 8,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.replica.time_behind_source) as 'Replication Lag (sec)', max(mysql.replica.time_behind_source) as 'Max Lag (sec)' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' AND mysql.replica.time_behind_source IS NOT NULL FACET entity.name TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "GTID Progress",
+          "layout": {
+            "column": 9,
+            "row": 4,
+            "width": 4,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT uniqueCount(mysql.replication.gtid.executed) as 'GTID Sets', latest(mysql.replication.gtid.executed) as 'Latest GTID' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' AND mysql.replication.gtid.executed IS NOT NULL SINCE 5 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Replica Status Details",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(entity.name) as 'Instance', latest(mysql.replication.slave.io_running) as 'IO Thread', latest(mysql.replication.slave.sql_running) as 'SQL Thread', latest(mysql.replica.time_behind_source) as 'Lag (sec)', latest(mysql.replication.gtid.executed) as 'GTID Position' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' FACET entity.guid SINCE 5 minutes ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

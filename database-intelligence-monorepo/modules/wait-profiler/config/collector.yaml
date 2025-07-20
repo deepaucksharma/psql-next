@@ -1,70 +1,114 @@
+# Wait Profiler - Consolidated Configuration
+# Comprehensive wait event analysis with SolarWinds DPA-style capabilities
+
 receivers:
+  # Global wait events overview
   sqlquery/wait_events:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 5s
     queries:
       - sql: |
           SELECT 
             EVENT_NAME,
             COUNT_STAR as wait_count,
-            SUM_TIMER_WAIT/1000000000000 as total_wait_sec,
-            AVG_TIMER_WAIT/1000000000000 as avg_wait_sec,
-            MAX_TIMER_WAIT/1000000000000 as max_wait_sec
+            SUM_TIMER_WAIT/1000000000 as total_wait_ms,
+            AVG_TIMER_WAIT/1000000000 as avg_wait_ms,
+            MAX_TIMER_WAIT/1000000000 as max_wait_ms,
+            MIN_TIMER_WAIT/1000000000 as min_wait_ms
           FROM performance_schema.events_waits_summary_global_by_event_name
           WHERE COUNT_STAR > 0
             AND EVENT_NAME NOT LIKE 'idle%'
           ORDER BY SUM_TIMER_WAIT DESC
-          LIMIT 50
+          LIMIT 100
         metrics:
           - metric_name: mysql.wait.count
             value_column: wait_count
             attribute_columns: [EVENT_NAME]
-          - metric_name: mysql.wait.time.total
-            value_column: total_wait_sec
+          - metric_name: mysql.wait.time_ms
+            value_column: total_wait_ms
             attribute_columns: [EVENT_NAME]
-          - metric_name: mysql.wait.time.avg
-            value_column: avg_wait_sec
+          - metric_name: mysql.wait.time_avg_ms
+            value_column: avg_wait_ms
             attribute_columns: [EVENT_NAME]
-          - metric_name: mysql.wait.time.max
-            value_column: max_wait_sec
+          - metric_name: mysql.wait.time_max_ms
+            value_column: max_wait_ms
+            attribute_columns: [EVENT_NAME]
+          - metric_name: mysql.wait.time_min_ms
+            value_column: min_wait_ms
             attribute_columns: [EVENT_NAME]
   
-  sqlquery/mutex_waits:
+  # Thread-level wait analysis
+  sqlquery/thread_waits:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 10s
     queries:
       - sql: |
           SELECT 
-            OBJECT_NAME as mutex_name,
+            t.THREAD_ID,
+            t.PROCESSLIST_ID,
+            t.PROCESSLIST_USER,
+            t.PROCESSLIST_HOST,
+            t.PROCESSLIST_DB,
+            t.PROCESSLIST_COMMAND,
+            t.PROCESSLIST_STATE,
+            w.EVENT_NAME,
+            w.TIMER_WAIT/1000000000 as wait_ms
+          FROM performance_schema.threads t
+          JOIN performance_schema.events_waits_current w ON t.THREAD_ID = w.THREAD_ID
+          WHERE t.PROCESSLIST_ID IS NOT NULL
+            AND w.TIMER_WAIT > 0
+        metrics:
+          - metric_name: mysql.thread.current_wait_ms
+            value_column: wait_ms
+            attribute_columns: [THREAD_ID, PROCESSLIST_USER, PROCESSLIST_HOST, PROCESSLIST_DB, PROCESSLIST_COMMAND, PROCESSLIST_STATE, EVENT_NAME]
+  
+  # Mutex contention analysis
+  sqlquery/mutex_waits:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 10s
+    queries:
+      - sql: |
+          SELECT 
+            SUBSTRING_INDEX(OBJECT_NAME, '/', -1) as mutex_name,
+            OBJECT_NAME as full_mutex_name,
             COUNT_STAR as wait_count,
-            SUM_TIMER_WAIT/1000000000000 as total_wait_sec,
-            AVG_TIMER_WAIT/1000000000000 as avg_wait_sec
+            SUM_TIMER_WAIT/1000000000 as total_wait_ms,
+            AVG_TIMER_WAIT/1000000000 as avg_wait_ms,
+            MAX_TIMER_WAIT/1000000000 as max_wait_ms
           FROM performance_schema.events_waits_summary_by_instance
           WHERE OBJECT_NAME IS NOT NULL
             AND COUNT_STAR > 0
+            AND OBJECT_NAME LIKE '%mutex%'
           ORDER BY SUM_TIMER_WAIT DESC
-          LIMIT 20
+          LIMIT 50
         metrics:
-          - metric_name: mysql.mutex.wait.count
+          - metric_name: mysql.wait.mutex.count
             value_column: wait_count
-            attribute_columns: [mutex_name]
-          - metric_name: mysql.mutex.wait.time
-            value_column: total_wait_sec
-            attribute_columns: [mutex_name]
+            attribute_columns: [mutex_name, full_mutex_name]
+          - metric_name: mysql.wait.mutex.time_ms
+            value_column: total_wait_ms
+            attribute_columns: [mutex_name, full_mutex_name]
+          - metric_name: mysql.wait.mutex.time_avg_ms
+            value_column: avg_wait_ms
+            attribute_columns: [mutex_name, full_mutex_name]
   
+  # File I/O wait analysis
   sqlquery/io_waits:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 10s
     queries:
       - sql: |
           SELECT 
-            FILE_NAME,
+            SUBSTRING_INDEX(FILE_NAME, '/', -1) as file_name,
+            FILE_NAME as full_path,
             EVENT_NAME,
             COUNT_STAR as io_count,
-            SUM_TIMER_WAIT/1000000000000 as total_io_wait_sec,
+            SUM_TIMER_WAIT/1000000000 as total_io_wait_ms,
+            AVG_TIMER_WAIT/1000000000 as avg_io_wait_ms,
             COUNT_READ as read_count,
             COUNT_WRITE as write_count,
             SUM_NUMBER_OF_BYTES_READ as bytes_read,
@@ -73,24 +117,34 @@ receivers:
           WHERE COUNT_STAR > 0
             AND FILE_NAME IS NOT NULL
           ORDER BY SUM_TIMER_WAIT DESC
-          LIMIT 30
+          LIMIT 50
         metrics:
-          - metric_name: mysql.io.wait.count
+          - metric_name: mysql.wait.io.count
             value_column: io_count
-            attribute_columns: [FILE_NAME, EVENT_NAME]
-          - metric_name: mysql.io.wait.time
-            value_column: total_io_wait_sec
-            attribute_columns: [FILE_NAME, EVENT_NAME]
-          - metric_name: mysql.io.bytes.read
+            attribute_columns: [file_name, full_path, EVENT_NAME]
+          - metric_name: mysql.wait.io.time_ms
+            value_column: total_io_wait_ms
+            attribute_columns: [file_name, full_path, EVENT_NAME]
+          - metric_name: mysql.wait.io.time_avg_ms
+            value_column: avg_io_wait_ms
+            attribute_columns: [file_name, full_path, EVENT_NAME]
+          - metric_name: mysql.io.read.count
+            value_column: read_count
+            attribute_columns: [file_name, full_path]
+          - metric_name: mysql.io.write.count
+            value_column: write_count
+            attribute_columns: [file_name, full_path]
+          - metric_name: mysql.io.bytes_read
             value_column: bytes_read
-            attribute_columns: [FILE_NAME]
-          - metric_name: mysql.io.bytes.write
+            attribute_columns: [file_name, full_path]
+          - metric_name: mysql.io.bytes_written
             value_column: bytes_written
-            attribute_columns: [FILE_NAME]
+            attribute_columns: [file_name, full_path]
   
+  # Lock wait analysis
   sqlquery/lock_waits:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 5s
     queries:
       - sql: |
@@ -100,17 +154,88 @@ receivers:
             INDEX_NAME,
             LOCK_TYPE,
             LOCK_MODE,
+            LOCK_STATUS,
             COUNT(*) as lock_count
           FROM performance_schema.data_locks
           WHERE OBJECT_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
-          GROUP BY OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE
+          GROUP BY OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE, LOCK_STATUS
         metrics:
-          - metric_name: mysql.lock.active.count
+          - metric_name: mysql.lock.active_count
             value_column: lock_count
-            attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE]
+            attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE, LOCK_STATUS]
+  
+  # Lock wait details with blocking info
+  sqlquery/lock_wait_details:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 5s
+    queries:
+      - sql: |
+          SELECT 
+            REQUESTING_ENGINE_LOCK_ID,
+            REQUESTING_ENGINE_TRANSACTION_ID,
+            REQUESTING_THREAD_ID,
+            BLOCKING_ENGINE_LOCK_ID,
+            BLOCKING_ENGINE_TRANSACTION_ID,
+            BLOCKING_THREAD_ID
+          FROM performance_schema.data_lock_waits
+        metrics:
+          - metric_name: mysql.lock.wait.active
+            value_column: "1"
+            attribute_columns: [REQUESTING_ENGINE_LOCK_ID, REQUESTING_THREAD_ID, BLOCKING_ENGINE_LOCK_ID, BLOCKING_THREAD_ID]
+
+  # Statement wait analysis
+  sqlquery/statement_waits:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 15s
+    queries:
+      - sql: |
+          SELECT 
+            DIGEST,
+            DIGEST_TEXT,
+            SUM_LOCK_TIME/1000000000 as total_lock_time_ms,
+            AVG_LOCK_TIME/1000000000 as avg_lock_time_ms,
+            MAX_LOCK_TIME/1000000000 as max_lock_time_ms
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE DIGEST_TEXT IS NOT NULL
+            AND SUM_LOCK_TIME > 0
+          ORDER BY SUM_LOCK_TIME DESC
+          LIMIT 50
+        metrics:
+          - metric_name: mysql.statement.lock_time_ms
+            value_column: total_lock_time_ms
+            attribute_columns: [DIGEST, DIGEST_TEXT]
+          - metric_name: mysql.statement.lock_time_avg_ms
+            value_column: avg_lock_time_ms
+            attribute_columns: [DIGEST, DIGEST_TEXT]
+          - metric_name: mysql.statement.lock_time_max_ms
+            value_column: max_lock_time_ms
+            attribute_columns: [DIGEST, DIGEST_TEXT]
+
+  # Pull metrics from other modules
+  prometheus/core_metrics:
+    config:
+      scrape_configs:
+        - job_name: 'core-metrics-federation'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['${env:CORE_METRICS_ENDPOINT:-core-metrics:8081}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_.*'
+              action: keep
+
+  # OTLP receiver for external metrics
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
 
 processors:
-  # Memory management
+  # Memory management - always first
   memory_limiter:
     check_interval: 5s
     limit_percentage: 80
@@ -119,7 +244,9 @@ processors:
   batch:
     timeout: 5s
     send_batch_size: 1000
+    send_batch_max_size: 1500
   
+  # Core attributes
   attributes:
     actions:
       - key: module
@@ -128,7 +255,28 @@ processors:
       - key: mysql.endpoint
         value: ${env:MYSQL_ENDPOINT}
         action: insert
+      - key: cluster.name
+        value: ${env:CLUSTER_NAME}
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: tier
+        value: intelligence
+        action: insert
   
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:OTEL_SERVICE_NAME}
+        action: upsert
+      - key: service.version
+        value: "2.0.0"
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+
   # New Relic specific attributes
   attributes/newrelic:
     actions:
@@ -136,16 +284,13 @@ processors:
         value: opentelemetry
         action: insert
       - key: instrumentation.name
-        value: mysql-otel-collector
+        value: mysql-wait-profiler
         action: insert
       - key: instrumentation.version
         value: "2.0.0"
         action: insert
       - key: instrumentation.provider
         value: opentelemetry
-        action: insert
-      - key: environment
-        value: ${env:ENVIRONMENT}
         action: insert
 
   # Entity synthesis for New Relic One
@@ -164,43 +309,32 @@ processors:
         value: "true"
         action: insert
   
-  transform/wait_categorization:
+  # Wait event categorization and analysis
+  transform/wait_analysis:
+    error_mode: ignore
     metric_statements:
-      - context: datapoint
-        statements:
-          - set(attributes["wait_category"], 
-                Case(
-                  IsMatch(attributes["EVENT_NAME"], "wait/io/.*"), "io",
-                  IsMatch(attributes["EVENT_NAME"], "wait/lock/.*"), "lock",
-                  IsMatch(attributes["EVENT_NAME"], "wait/synch/mutex/.*"), "mutex",
-                  IsMatch(attributes["EVENT_NAME"], "wait/synch/cond/.*"), "condition",
-                  IsMatch(attributes["EVENT_NAME"], "wait/synch/rwlock/.*"), "rwlock",
-                  "other"
-                )) where attributes["EVENT_NAME"] != nil
-          - set(attributes["severity"], 
-                Case(
-                  attributes["avg_wait_sec"] > 1, "critical",
-                  attributes["avg_wait_sec"] > 0.1, "warning",
-                  "normal"
-                )) where attributes["avg_wait_sec"] != nil
       - context: metric
         statements:
-          # Add event type for NRQL queries
-          - set(attributes["eventType"], "MySQLWaitProfile")
-          # Mark critical wait metrics for high-value retention
-          - set(attributes["nr.highValue"], true)
-            where name == "mysql.wait.time.total" or 
-                  name == "mysql.lock.active.count"
-
-  resource:
-    attributes:
-      - key: service.name
-        value: ${env:OTEL_SERVICE_NAME}
-        action: upsert
+          # Categorize wait events
+          - set(attributes["wait_category"], "io") where IsMatch(attributes["EVENT_NAME"], "wait/io/.*")
+          - set(attributes["wait_category"], "lock") where IsMatch(attributes["EVENT_NAME"], "wait/lock/.*")
+          - set(attributes["wait_category"], "mutex") where IsMatch(attributes["EVENT_NAME"], "wait/synch/mutex/.*")
+          - set(attributes["wait_category"], "condition") where IsMatch(attributes["EVENT_NAME"], "wait/synch/cond/.*")
+          - set(attributes["wait_category"], "rwlock") where IsMatch(attributes["EVENT_NAME"], "wait/synch/rwlock/.*")
+          - set(attributes["wait_category"], "other") where attributes["wait_category"] == nil and attributes["EVENT_NAME"] != nil
+          
+          # Severity classification based on wait time
+          - set(attributes["severity"], "critical") where name == "mysql.wait.time_avg_ms" and value > 1000
+          - set(attributes["severity"], "warning") where name == "mysql.wait.time_avg_ms" and value > 100 and value <= 1000
+          - set(attributes["severity"], "normal") where attributes["severity"] == nil
+          
+          # Mark high-impact waits
+          - set(attributes["high_impact"], "true") where name == "mysql.wait.time_ms" and value > 10000
+          - set(attributes["needs_investigation"], "true") where name == "mysql.lock.active_count" and value > 10
 
 exporters:
-  # Primary New Relic OTLP exporter for standard metrics
-  otlphttp/newrelic_standard:
+  # Primary New Relic OTLP exporter
+  otlphttp/newrelic:
     endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
     headers:
       api-key: ${env:NEW_RELIC_LICENSE_KEY}
@@ -216,40 +350,58 @@ exporters:
       num_consumers: 5
       queue_size: 10000
 
-  # High-priority exporter for critical wait metrics
-  otlphttp/newrelic_critical:
-    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
-    headers:
-      api-key: ${env:NEW_RELIC_LICENSE_KEY}
-      X-Priority: critical
-    compression: none  # No compression for lower latency
-    timeout: 10s
-    retry_on_failure:
+  # Prometheus exporter for federation
+  prometheus:
+    endpoint: 0.0.0.0:8083
+    namespace: mysql
+    resource_to_telemetry_conversion:
       enabled: true
-      initial_interval: 1s
-      max_interval: 10s
-      max_elapsed_time: 60s
-  
+    metric_expiration: 5m
+    const_labels:
+      module: wait-profiler
+
+  # Debug exporter
   debug:
-    verbosity: detailed
+    verbosity: basic
     sampling_initial: 10
     sampling_thereafter: 100
 
 service:
   pipelines:
+    # Single comprehensive pipeline
     metrics:
-      receivers: [sqlquery/wait_events, sqlquery/mutex_waits, sqlquery/io_waits, sqlquery/lock_waits]
-      processors: [memory_limiter, batch, attributes, attributes/newrelic, attributes/entity_synthesis, transform/wait_categorization, resource]
-      exporters: [otlphttp/newrelic_standard, debug]
-    
-    # Critical wait metrics pipeline
-    metrics/critical:
-      receivers: [sqlquery/lock_waits]
-      processors: [memory_limiter, batch, attributes, attributes/newrelic, attributes/entity_synthesis, transform/wait_categorization, resource]
-      exporters: [otlphttp/newrelic_critical, debug]
-  
-  extensions: [health_check]
+      receivers: [
+        sqlquery/wait_events,
+        sqlquery/thread_waits,
+        sqlquery/mutex_waits,
+        sqlquery/io_waits,
+        sqlquery/lock_waits,
+        sqlquery/lock_wait_details,
+        sqlquery/statement_waits,
+        prometheus/core_metrics,
+        otlp
+      ]
+      processors: [
+        memory_limiter,
+        batch,
+        attributes,
+        resource,
+        transform/wait_analysis,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic, prometheus, debug]
+
+  extensions: [zpages, pprof]
+
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["/tmp/logs/collector.log"]
 
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
+  zpages:
+    endpoint: 0.0.0.0:55679
+    
+  pprof:
+    endpoint: 0.0.0.0:6060

@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  replication-monitor:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
+    build: ../core-metrics  # Use the same base image as core-metrics
+    container_name: replication-monitor-collector
+    env_file:
+      - ../../shared/config/service-endpoints.env
+    environment:
+      MODULE_NAME: replication-monitor
+      MYSQL_PRIMARY_ENDPOINT: mysql-test:3306
+      MYSQL_REPLICA_ENDPOINT: mysql-test:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      EXPORT_PORT: 8086
+      OTEL_SERVICE_NAME: replication-monitor
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      ENVIRONMENT: production
+      CLUSTER_NAME: database-intelligence-cluster
+      # Override specific endpoints if needed
+      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector-mock-replication.yaml}
+    ports:
+      - "8086:8086"      # Prometheus metrics
+      - "8905:8889"      # Internal metrics
+      - "4327:4317"      # OTLP gRPC
+      - "4328:4318"      # OTLP HTTP
+      - "55684:55679"    # ZPages
+      - "1780:1777"      # pprof
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
+    volumes:
+      - ./config:/etc/otel:ro
+      - ../../shared/config:/etc/shared:ro
+      - ./logs:/tmp/logs
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-mock-replication.yaml}"]
+    networks:
+      - db-intelligence
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+networks:
+  db-intelligence:
+    external: true

@@ -2,6 +2,11 @@ version: '3.8'
 
 services:
   cross-signal-correlator:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
     image: otel/opentelemetry-collector-contrib:latest
     container_name: cross-signal-correlator
     command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
@@ -37,23 +42,18 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       
     ports:
-      - "4317:4317"   # OTLP gRPC for traces
-      - "4318:4318"   # OTLP HTTP for traces
+      - "4332:4317"   # OTLP gRPC for traces (unique port)
+      - "4333:4318"   # OTLP HTTP for traces (unique port)
       - "8899:8889"   # Prometheus metrics
-      - "8888:8888"   # Internal metrics
-      - "13137:13137" # Health check (changed from 13133)
+      - "8095:8888"   # Internal metrics (unique port)
       - "1777:1777"   # pprof
       - "55679:55679" # zpages
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
     
     networks:
       - db-intelligence
     
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:13137/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
     
     deploy:
       resources:

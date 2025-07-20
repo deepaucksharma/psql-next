@@ -5,7 +5,7 @@ receivers:
   # Comprehensive SQL query intelligence receiver (from master-enhanced.yaml)
   sqlquery/extreme_intelligence:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: ${env:SQL_INTELLIGENCE_INTERVAL:5s}
     queries:
       # Ultra-comprehensive intelligence query from master-enhanced.yaml
@@ -333,7 +333,7 @@ receivers:
   # Keep existing receivers
   sqlquery/slow_queries:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 15s
     queries:
       - sql: |
@@ -377,7 +377,7 @@ receivers:
   
   sqlquery/table_stats:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 30s
     queries:
       - sql: |
@@ -410,7 +410,7 @@ receivers:
 
   sqlquery/index_usage:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 60s
     queries:
       - sql: |
@@ -500,6 +500,7 @@ processors:
   
   # Enhanced query analysis from master-enhanced.yaml
   transform/query_analysis:
+    error_mode: ignore
     metric_statements:
       - context: datapoint
         statements:
@@ -538,37 +539,37 @@ processors:
           - set(attributes["wait.primary_category"], "other")
             where attributes["wait.primary_category"] == nil and attributes["current_wait_profile"] != ""
 
-  # ML-based features and anomaly scoring from master-enhanced.yaml
-  transform/ml_features:
+  # Statistical features and anomaly scoring from master-enhanced.yaml
+  transform/statistical_features:
     error_mode: ignore
     metric_statements:
       - context: datapoint
         statements:
           # Pattern-based anomaly detection
-          - set(attributes["ml.baseline_deviation"], 
+          - set(attributes["statistics.baseline_deviation"], 
                 (value - attributes["historical_avg_time_ms"]) / Coalesce(attributes["historical_avg_time_ms"], 1))
             where attributes["historical_avg_time_ms"] > 0
             
-          - set(attributes["ml.is_anomaly"], true)
-            where attributes["ml.baseline_deviation"] > 3
+          - set(attributes["statistics.is_anomaly"], true)
+            where attributes["statistics.baseline_deviation"] > 3
             
-          - set(attributes["ml.anomaly_score"], 
-                attributes["ml.baseline_deviation"] * Log10(Coalesce(attributes["historical_exec_count"], 1) + 1))
-            where attributes["ml.is_anomaly"] == true
+          - set(attributes["statistics.anomaly_score"], 
+                attributes["statistics.baseline_deviation"] * Log10(Coalesce(attributes["historical_exec_count"], 1) + 1))
+            where attributes["statistics.is_anomaly"] == true
             
           # Resource pressure correlation
-          - set(attributes["ml.resource_pressure"], 
+          - set(attributes["statistics.resource_pressure"], 
                 (attributes["cpu_usage_percent"] * 0.4 + 
                  attributes["memory_usage_percent"] * 0.3 + 
                  attributes["connection_usage_percent"] * 0.3))
                  
           # Workload classification
-          - set(attributes["ml.workload_type"], "OLTP")
+          - set(attributes["statistics.workload_type"], "OLTP")
             where attributes["current_rows_examined"] < 1000 and attributes["current_exec_time_ms"] < 100
-          - set(attributes["ml.workload_type"], "OLAP")  
+          - set(attributes["statistics.workload_type"], "OLAP")  
             where attributes["current_rows_examined"] > 10000 or attributes["current_exec_time_ms"] > 1000
-          - set(attributes["ml.workload_type"], "MIXED")
-            where attributes["ml.workload_type"] == nil
+          - set(attributes["statistics.workload_type"], "MIXED")
+            where attributes["statistics.workload_type"] == nil
 
   # Business impact calculation from master-enhanced.yaml
   transform/business_impact:
@@ -624,7 +625,7 @@ processors:
             
           # Resource saturation advisory
           - set(attributes["advisor.type"], "resource_saturation")
-            where attributes["ml.resource_pressure"] > 80
+            where attributes["statistics.resource_pressure"] > 80
             
           - set(attributes["advisor.recommendation"],
                 "Scale up: CPU=" + string(attributes["cpu_usage_percent"]) + 
@@ -707,7 +708,7 @@ service:
         attributes/newrelic,
         attributes/entity_synthesis, 
         transform/wait_categorization,
-        transform/ml_features,
+        transform/statistical_features,
         transform/business_impact,
         transform/advanced_advisory,
         resource
@@ -732,11 +733,16 @@ service:
       processors: [batch]
       exporters: [file/debug]
   
-  extensions: [health_check, pprof]
-
+  # WARNING: DO NOT ADD health_check to extensions list!
+  
+  # Health checks are validation-only, not production features.
+  
+  extensions: [pprof]  # NO health_check here!
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
   
   pprof:
     endpoint: 0.0.0.0:1777

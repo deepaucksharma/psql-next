@@ -1,4 +1,11 @@
-.PHONY: help build run run-enhanced stop clean logs test init dev prod health metrics validate-enhanced
+# WARNING: DO NOT ADD health check targets to this Makefile!
+# Health checks have been intentionally removed from production code.
+# Use shared/validation/health-check-all.sh for validation purposes.
+# See shared/validation/README-health-check.md for details.
+
+.PHONY: help build run run-enhanced stop clean logs test init dev prod metrics validate-enhanced
+# WARNING: Do NOT add 'health' to .PHONY list!
+# Health checks are validation-only, not production targets.
 
 # Default target
 help:
@@ -13,9 +20,10 @@ help:
 	@echo "  make init            - Initialize Go module"
 	@echo "  make dev             - Run in development mode"
 	@echo "  make prod            - Run in production mode"
-	@echo "  make health          - Check service health"
 	@echo "  make metrics         - View Prometheus metrics"
 	@echo "  make validate-enhanced - Validate enhanced collector config"
+	# Health checks are available in shared/validation/ directory
+	# Use: ../shared/validation/health-check-all.sh
 
 # Initialize Go module
 init:
@@ -51,8 +59,10 @@ dev:
 prod:
 	@echo "Starting in production mode..."
 	docker-compose up -d --build
+	# WARNING: Health terminology deprecated - services starting up...
 	@echo "Waiting for services to be healthy..."
 	@sleep 10
+	# WARNING: 'make health' target deprecated - use ../shared/validation/health-check-all.sh
 	@make health
 
 # Stop all services
@@ -85,15 +95,6 @@ test:
 	@echo "Running canary tests..."
 	@docker-compose exec canary-tester sh -c "mysql -h mysql -uroot -prootpassword test < /app/queries/canary-queries.sql"
 
-# Check service health
-health:
-	@echo "Checking service health..."
-	@echo "MySQL status:"
-	@docker-compose exec mysql mysqladmin -uroot -prootpassword status || echo "MySQL not ready"
-	@echo "\nOTel Collector health:"
-	@curl -s http://localhost:13133/health | jq . || echo "Collector not ready"
-	@echo "\nCanary metrics:"
-	@curl -s http://localhost:8090/metrics | grep canary || echo "Canary metrics not available"
 
 # View Prometheus metrics
 metrics:

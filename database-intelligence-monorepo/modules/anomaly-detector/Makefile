@@ -1,7 +1,14 @@
 MODULE_NAME = anomaly-detector
 PORT = 8084
 
+# WARNING: DO NOT ADD health check targets to this Makefile!
+# Health checks have been intentionally removed from production code.
+# Use shared/validation/health-check-all.sh for validation purposes.
+# See shared/validation/README-health-check.md for details.
+
 .PHONY: build test run stop logs clean test-unit test-integration status check-dependencies
+# WARNING: Do NOT add 'health' to .PHONY list!
+# Health checks are validation-only, not production targets.
 
 build:
 	docker-compose build

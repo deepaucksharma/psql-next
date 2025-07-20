@@ -1,5 +1,5 @@
 # Enhanced Anomaly Detector Configuration
-# Implements ML-based anomaly detection from master-enhanced.yaml
+# Implements statistical anomaly detection from master-enhanced.yaml
 
 receivers:
   # Prometheus federation receiver to pull metrics from other modules
@@ -53,7 +53,7 @@ processors:
     timeout: 5s
     send_batch_size: 1000
   
-  # ML-based anomaly detection using statistical methods
+  # Statistical anomaly detection using advanced mathematical methods
   transform/anomaly_detection:
     error_mode: ignore
     metric_statements:
@@ -62,7 +62,7 @@ processors:
         statements:
           - set(name, "anomaly_score_connections") where name == "mysql.connections.current"
           - set(attributes["anomaly_type"], "connection_spike") where name == "anomaly_score_connections"
-          - set(attributes["ml.algorithm"], "zscore") where name == "anomaly_score_connections"
+          - set(attributes["statistics.algorithm"], "zscore") where name == "anomaly_score_connections"
           - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_connections" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
           
       # Query latency deviation detection
@@ -70,7 +70,7 @@ processors:
         statements:
           - set(name, "anomaly_score_query_latency") where name == "mysql.query.duration_milliseconds"
           - set(attributes["anomaly_type"], "latency_deviation") where name == "anomaly_score_query_latency"
-          - set(attributes["ml.algorithm"], "mad") where name == "anomaly_score_query_latency"  # Median Absolute Deviation
+          - set(attributes["statistics.algorithm"], "mad") where name == "anomaly_score_query_latency"  # Median Absolute Deviation
           - set(value, (value - attributes["baseline_median"]) / attributes["baseline_mad"]) where name == "anomaly_score_query_latency" and attributes["baseline_mad"] != nil and attributes["baseline_mad"] > 0
           
       # Wait event anomaly detection
@@ -78,7 +78,7 @@ processors:
         statements:
           - set(name, "anomaly_score_wait_events") where name == "mysql.wait.time.total"
           - set(attributes["anomaly_type"], "wait_anomaly") where name == "anomaly_score_wait_events"
-          - set(attributes["ml.algorithm"], "isolation_forest") where name == "anomaly_score_wait_events"
+          - set(attributes["statistics.algorithm"], "isolation_forest") where name == "anomaly_score_wait_events"
           - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_wait_events" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
           
       # Resource usage pattern detection
@@ -86,7 +86,7 @@ processors:
         statements:
           - set(name, "anomaly_score_cpu") where name == "mysql.cpu.percent"
           - set(attributes["anomaly_type"], "resource_usage") where name == "anomaly_score_cpu"
-          - set(attributes["ml.algorithm"], "prophet") where name == "anomaly_score_cpu"
+          - set(attributes["statistics.algorithm"], "prophet") where name == "anomaly_score_cpu"
           - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_cpu" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
           
       # Replication lag anomaly
@@ -94,7 +94,7 @@ processors:
         statements:
           - set(name, "anomaly_score_replication") where name == "mysql.replica.time_behind_source"
           - set(attributes["anomaly_type"], "replication_lag") where name == "anomaly_score_replication"
-          - set(attributes["ml.algorithm"], "changepoint") where name == "anomaly_score_replication"
+          - set(attributes["statistics.algorithm"], "changepoint") where name == "anomaly_score_replication"
           - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_replication" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
           
       # Thread pool anomaly
@@ -102,7 +102,7 @@ processors:
         statements:
           - set(name, "anomaly_score_threads") where name == "mysql.thread.count"
           - set(attributes["anomaly_type"], "thread_pool") where name == "anomaly_score_threads"
-          - set(attributes["ml.algorithm"], "lstm") where name == "anomaly_score_threads"
+          - set(attributes["statistics.algorithm"], "lstm") where name == "anomaly_score_threads"
           - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_threads" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
 
   # Generate alerts based on anomaly scores
@@ -114,24 +114,24 @@ processors:
           # Create alert metric for connection spikes
           - set(name, "anomaly_alert") where name == "anomaly_score_connections" and value > ${env:CONNECTION_SPIKE_THRESHOLD:3}
           - set(attributes["alert_severity"], "high") where name == "anomaly_alert" and attributes["anomaly_type"] == "connection_spike"
-          - set(attributes["ml.anomaly_score"], value) where name == "anomaly_alert"
+          - set(attributes["statistics.anomaly_score"], value) where name == "anomaly_alert"
           - set(value, 1) where name == "anomaly_alert"
           
           # Create alert metric for latency deviations
           - set(name, "anomaly_alert") where name == "anomaly_score_query_latency" and value > ${env:LATENCY_DEVIATION_THRESHOLD:4}
           - set(attributes["alert_severity"], "critical") where name == "anomaly_alert" and attributes["anomaly_type"] == "latency_deviation"
-          - set(attributes["ml.anomaly_score"], value) where name == "anomaly_alert"
+          - set(attributes["statistics.anomaly_score"], value) where name == "anomaly_alert"
           - set(value, 1) where name == "anomaly_alert"
           
           # Create alert metric for wait anomalies
           - set(name, "anomaly_alert") where name == "anomaly_score_wait_events" and value > ${env:WAIT_EVENT_THRESHOLD:3.5}
           - set(attributes["alert_severity"], "medium") where name == "anomaly_alert" and attributes["anomaly_type"] == "wait_anomaly"
-          - set(attributes["ml.anomaly_score"], value) where name == "anomaly_alert"
+          - set(attributes["statistics.anomaly_score"], value) where name == "anomaly_alert"
           - set(value, 1) where name == "anomaly_alert"
           
-          # Mark as ML-detected anomaly
-          - set(attributes["ml.is_anomaly"], true) where name == "anomaly_alert"
-          - set(attributes["ml.confidence"], Min(attributes["ml.anomaly_score"] / 10, 1.0)) where name == "anomaly_alert"
+          # Mark as statistically-detected anomaly
+          - set(attributes["statistics.is_anomaly"], true) where name == "anomaly_alert"
+          - set(attributes["statistics.confidence"], Min(attributes["statistics.anomaly_score"] / 10, 1.0)) where name == "anomaly_alert"
 
   # Enhanced baseline calculation with time-series awareness
   transform/baseline_enrichment:
@@ -157,27 +157,27 @@ processors:
           - set(attributes["baseline_median"], 85) where name == "mysql.query.duration_milliseconds"
           - set(attributes["baseline_mad"], 15) where name == "mysql.query.duration_milliseconds"
 
-  # ML model scoring
-  transform/ml_scoring:
+  # Statistical model scoring
+  transform/statistical_scoring:
     error_mode: ignore
     metric_statements:
       - context: metric
         statements:
-          # Add ML model metadata
-          - set(attributes["ml.model_version"], "v2.0") where name =~ "anomaly_score_.*"
-          - set(attributes["ml.feature_count"], 5) where name =~ "anomaly_score_.*"
-          - set(attributes["ml.training_date"], "2024-01-01") where name =~ "anomaly_score_.*"
+          # Add statistical model metadata
+          - set(attributes["statistics.model_version"], "v2.0") where name =~ "anomaly_score_.*"
+          - set(attributes["statistics.feature_count"], 5) where name =~ "anomaly_score_.*"
+          - set(attributes["statistics.training_date"], "2024-01-01") where name =~ "anomaly_score_.*"
           
           # Workload classification
-          - set(attributes["ml.workload_type"], "transactional") 
+          - set(attributes["statistics.workload_type"], "transactional") 
             where attributes["anomaly_type"] == "connection_spike" and 
-                  attributes["ml.anomaly_score"] > 2
-          - set(attributes["ml.workload_type"], "analytical") 
+                  attributes["statistics.anomaly_score"] > 2
+          - set(attributes["statistics.workload_type"], "analytical") 
             where attributes["anomaly_type"] == "query_latency" and 
-                  attributes["ml.anomaly_score"] > 3
-          - set(attributes["ml.workload_type"], "batch") 
+                  attributes["statistics.anomaly_score"] > 3
+          - set(attributes["statistics.workload_type"], "batch") 
             where attributes["anomaly_type"] == "resource_usage" and 
-                  attributes["ml.anomaly_score"] > 2.5
+                  attributes["statistics.anomaly_score"] > 2.5
 
   attributes:
     actions:
@@ -185,9 +185,9 @@ processors:
         value: anomaly-detector
         action: insert
       - key: detection_method
-        value: ml_enhanced
+        value: statistical_enhanced
         action: insert
-      - key: ml.enabled
+      - key: statistics.enabled
         value: "true"
         action: insert
 
@@ -290,7 +290,7 @@ service:
         batch, 
         transform/baseline_enrichment, 
         transform/anomaly_detection, 
-        transform/ml_scoring,
+        transform/statistical_scoring,
         transform/anomaly_alerts, 
         attributes, 
         attributes/newrelic,
@@ -313,12 +313,16 @@ service:
       ]
       exporters: [otlphttp/newrelic_critical, otlphttp/newrelic_events, file]
   
-  extensions: [health_check, pprof, zpages]
-
+  # WARNING: DO NOT ADD health_check to extensions list!
+  
+  # Health checks are validation-only, not production features.
+  
+  extensions: [pprof, zpages]  # NO health_check here!
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
-    
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
   pprof:
     endpoint: 0.0.0.0:1777
     

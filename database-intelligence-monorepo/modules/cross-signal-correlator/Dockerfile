@@ -1,6 +1,10 @@
 # Cross-Signal Correlator Dockerfile
 FROM otel/opentelemetry-collector-contrib:latest
 
+# WARNING: DO NOT ADD HEALTHCHECK instructions here!
+# Health checks have been intentionally removed from production images.
+# Use shared/validation/health-check-all.sh for validation purposes.
+
 # Install required packages for log parsing
 USER root
 RUN apt-get update && \
@@ -19,7 +23,10 @@ COPY config/collector-enhanced.yaml /etc/otel/collector-enhanced.yaml
 
 USER 10001
 
-EXPOSE 4317 4318 8892 13137 1777 55679
+# Expose ports for OpenTelemetry functionality only
+EXPOSE 4317 4318 8892 1777 55679
+# WARNING: DO NOT expose port 13133 (health check port)!
+# Port 13137 removed as it was likely a health check port
 
 ENTRYPOINT ["/otelcol-contrib"]
 CMD ["--config", "/etc/otel/collector.yaml"]

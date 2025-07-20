@@ -1,4 +1,11 @@
-.PHONY: help build up down restart logs shell clean test health
+# WARNING: DO NOT ADD health check targets to this Makefile!
+# Health checks have been intentionally removed from production code.
+# Use shared/validation/health-check-all.sh for validation purposes.
+# See shared/validation/README-health-check.md for details.
+
+.PHONY: help build up down restart logs shell clean test
+# WARNING: Do NOT add 'health' to .PHONY list!
+# Health checks are validation-only, not production targets.
 
 # Default target
 help:
@@ -11,7 +18,8 @@ help:
 	@echo "  make shell    - Open a shell in the container"
 	@echo "  make clean    - Remove containers and volumes"
 	@echo "  make test     - Test the configuration"
-	@echo "  make health   - Check service health"
+	# Health checks are available in shared/validation/ directory
+	# Use: ../shared/validation/health-check-all.sh
 
 # Build the Docker image
 build:
@@ -22,6 +30,7 @@ up:
 	docker-compose up -d
 	@echo "Performance Advisor started on http://localhost:8087"
 	@echo "Prometheus metrics available at http://localhost:8888/metrics"
+	# WARNING: Health check endpoint deprecated - use ../shared/validation/health-check-all.sh
 	@echo "Health check at http://localhost:13133/"
 
 # Stop the service
@@ -52,10 +61,6 @@ test:
 		otel/opentelemetry-collector-contrib:0.91.0 \
 		validate --config=/etc/otelcol-contrib/collector.yaml
 
-# Check health
-health:
-	@curl -s http://localhost:13133/ > /dev/null && echo "✓ Performance Advisor is healthy" || echo "✗ Performance Advisor is not responding"
-	@curl -s http://localhost:8888/metrics > /dev/null && echo "✓ Prometheus metrics endpoint is healthy" || echo "✗ Prometheus metrics endpoint is not responding"
 
 # View current recommendations
 recommendations:

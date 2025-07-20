@@ -1,7 +1,7 @@
 receivers:
   sqlquery/slow_queries:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 15s
     queries:
       - sql: |
@@ -10,9 +10,9 @@ receivers:
             SCHEMA_NAME,
             DIGEST_TEXT,
             COUNT_STAR as exec_count,
-            SUM_TIMER_WAIT/1000000000000 as total_latency_sec,
-            AVG_TIMER_WAIT/1000000000000 as avg_latency_sec,
-            MAX_TIMER_WAIT/1000000000000 as max_latency_sec,
+            SUM_TIMER_WAIT/1000000000 as total_latency_ms,
+            AVG_TIMER_WAIT/1000000000 as avg_latency_ms,
+            MAX_TIMER_WAIT/1000000000 as max_latency_ms,
             SUM_ROWS_EXAMINED as rows_examined_total,
             SUM_ROWS_SENT as rows_sent_total,
             SUM_NO_INDEX_USED as no_index_used_count,
@@ -21,39 +21,39 @@ receivers:
           WHERE SCHEMA_NAME IS NOT NULL
             AND DIGEST_TEXT NOT LIKE '%performance_schema%'
             AND COUNT_STAR > 0
-          ORDER BY total_latency_sec DESC
+          ORDER BY total_latency_ms DESC
           LIMIT 20
         metrics:
-          - metric_name: mysql.query.exec_count
+          - metric_name: mysql.query.exec_total
             value_column: exec_count
             attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
-          - metric_name: mysql.query.latency.total
-            value_column: total_latency_sec
+          - metric_name: mysql.query.latency_ms
+            value_column: total_latency_ms
             attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
-          - metric_name: mysql.query.latency.avg
-            value_column: avg_latency_sec
+          - metric_name: mysql.query.latency_avg_ms
+            value_column: avg_latency_ms
             attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
-          - metric_name: mysql.query.latency.max
-            value_column: max_latency_sec
+          - metric_name: mysql.query.latency_max_ms
+            value_column: max_latency_ms
             attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
-          - metric_name: mysql.query.rows_examined
+          - metric_name: mysql.query.rows_examined_total
             value_column: rows_examined_total
             attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
-          - metric_name: mysql.query.no_index_used
+          - metric_name: mysql.query.no_index_used_total
             value_column: no_index_used_count
             attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
   
   sqlquery/table_stats:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 30s
     queries:
       - sql: |
           SELECT 
             OBJECT_SCHEMA,
             OBJECT_NAME,
-            SUM_TIMER_READ/1000000000000 as read_latency_sec,
-            SUM_TIMER_WRITE/1000000000000 as write_latency_sec,
+            SUM_TIMER_READ/1000000000 as read_latency_ms,
+            SUM_TIMER_WRITE/1000000000 as write_latency_ms,
             COUNT_READ as read_count,
             COUNT_WRITE as write_count
           FROM performance_schema.table_io_waits_summary_by_table
@@ -61,22 +61,22 @@ receivers:
           ORDER BY (SUM_TIMER_READ + SUM_TIMER_WRITE) DESC
           LIMIT 20
         metrics:
-          - metric_name: mysql.table.io.read_latency
-            value_column: read_latency_sec
+          - metric_name: mysql.table.io.read.latency_ms
+            value_column: read_latency_ms
             attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME]
-          - metric_name: mysql.table.io.write_latency
-            value_column: write_latency_sec
+          - metric_name: mysql.table.io.write.latency_ms
+            value_column: write_latency_ms
             attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME]
-          - metric_name: mysql.table.io.read_count
+          - metric_name: mysql.table.io.read.count
             value_column: read_count
             attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME]
-          - metric_name: mysql.table.io.write_count
+          - metric_name: mysql.table.io.write.count
             value_column: write_count
             attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME]
 
   sqlquery/index_usage:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 60s
     queries:
       - sql: |
@@ -159,8 +159,13 @@ service:
       processors: [memory_limiter, batch, attributes, resource]
       exporters: [prometheus, debug]
   
-  extensions: [health_check]
-
+  # WARNING: DO NOT ADD health_check to extensions list!
+  
+  # Health checks are validation-only, not production features.
+  
+  extensions: []  # NO health_check here!
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.

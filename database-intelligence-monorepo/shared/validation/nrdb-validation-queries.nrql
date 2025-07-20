@@ -1,0 +1,379 @@
+# NRDB Comprehensive Validation Queries for Database Intelligence Monorepo
+# Use these NRQL queries to validate data flow from all 11 modules
+# Execute in New Relic Query Builder or NerdGraph API
+
+# =============================================================================
+# MODULE 1: CORE METRICS (Port 8081)
+# Expected Metrics: mysql_connections_current, mysql_threads_running, mysql_slow_queries_total
+# =============================================================================
+
+-- Validate Core Metrics Data Presence (Last 10 minutes)
+SELECT count(*) as 'Data Points'
+FROM Metric 
+WHERE service.name = 'core-metrics' 
+  AND metricName IN ('mysql_connections_current', 'mysql_threads_running', 'mysql_slow_queries_total')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Core Metrics Data Freshness (Should have data within last 2 minutes)  
+SELECT latest(timestamp) as 'Latest Data', 
+       (now() - latest(timestamp))/1000/60 as 'Minutes Ago'
+FROM Metric 
+WHERE service.name = 'core-metrics' 
+  AND metricName = 'mysql_connections_current'
+SINCE 1 hour ago
+
+-- Validate Core Metrics Attributes
+SELECT count(*) as 'Records'
+FROM Metric 
+WHERE service.name = 'core-metrics'
+  AND mysql.endpoint IS NOT NULL
+  AND entity.type = 'MYSQL_INSTANCE'
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 2: SQL INTELLIGENCE (Port 8082)  
+# Expected Metrics: mysql.query.exec_total, mysql.query.latency_ms, mysql.query.rows_examined_total
+# =============================================================================
+
+-- Validate SQL Intelligence Query Data
+SELECT count(*) as 'Query Records'
+FROM Metric 
+WHERE service.name = 'sql-intelligence'
+  AND metricName IN ('mysql.query.exec_total', 'mysql.query.latency_ms', 'mysql.query.latency_avg_ms')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Query Digest Analysis
+SELECT count(DISTINCT statement_digest) as 'Unique Queries',
+       average(mysql.query.latency_avg_ms) as 'Avg Latency (ms)',
+       max(mysql.query.latency_max_ms) as 'Max Latency (ms)'
+FROM Metric 
+WHERE service.name = 'sql-intelligence'
+  AND metricName = 'mysql.query.latency_avg_ms'
+  AND statement_digest IS NOT NULL
+SINCE 30 minutes ago
+
+-- Validate Index Usage Metrics
+SELECT count(*) as 'Index Records'
+FROM Metric 
+WHERE service.name = 'sql-intelligence'
+  AND metricName = 'mysql.query.no_index_used_total'
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 3: WAIT PROFILER (Port 8083)
+# Expected Metrics: mysql.wait.count, mysql.wait.time_ms, mysql.wait.mutex.count
+# =============================================================================
+
+-- Validate Wait Event Data
+SELECT count(*) as 'Wait Events'
+FROM Metric 
+WHERE service.name = 'wait-profiler'
+  AND metricName IN ('mysql.wait.count', 'mysql.wait.time_ms', 'mysql.wait.time_avg_ms')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Wait Event Categories
+SELECT count(*) as 'Records', 
+       average(mysql.wait.time_avg_ms) as 'Avg Wait Time (ms)'
+FROM Metric 
+WHERE service.name = 'wait-profiler'
+  AND metricName = 'mysql.wait.time_avg_ms'
+  AND EVENT_NAME IS NOT NULL
+FACET EVENT_NAME
+SINCE 30 minutes ago
+
+-- Validate Mutex Wait Analysis
+SELECT count(*) as 'Mutex Events'
+FROM Metric 
+WHERE service.name = 'wait-profiler'
+  AND metricName = 'mysql.wait.mutex.count'
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 4: ANOMALY DETECTOR (Port 8084)
+# Expected Metrics: anomaly_score_cpu, anomaly_score_memory, anomaly_detected
+# =============================================================================
+
+-- Validate Anomaly Detection Data
+SELECT count(*) as 'Anomaly Records'
+FROM Metric 
+WHERE service.name = 'anomaly-detector'
+  AND metricName IN ('anomaly_score_cpu', 'anomaly_score_memory', 'anomaly_score_connections')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Anomaly Alerts Generated
+SELECT count(*) as 'Anomalies Detected',
+       max(anomaly_score_cpu) as 'Max CPU Score',
+       max(anomaly_score_memory) as 'Max Memory Score'
+FROM Metric 
+WHERE service.name = 'anomaly-detector'
+  AND metricName = 'anomaly_detected'
+  AND value = 1
+SINCE 1 hour ago
+
+-- Validate Baseline Data Presence
+SELECT count(*) as 'Baseline Records'
+FROM Metric 
+WHERE service.name = 'anomaly-detector'
+  AND baseline_mean IS NOT NULL
+  AND baseline_stddev IS NOT NULL
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 5: BUSINESS IMPACT (Port 8085)
+# Expected Metrics: business_impact_score, revenue_impact_hourly, sla_impact
+# =============================================================================
+
+-- Validate Business Impact Scoring
+SELECT count(*) as 'Business Records'
+FROM Metric 
+WHERE service.name = 'business-impact'
+  AND metricName IN ('business_impact_score', 'revenue_impact_hourly')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Business Criticality Classification
+SELECT count(*) as 'Records'
+FROM Metric 
+WHERE service.name = 'business-impact'
+  AND business_criticality IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')
+FACET business_criticality
+SINCE 30 minutes ago
+
+-- Validate SLA Impact Metrics
+SELECT count(*) as 'SLA Records',
+       average(sla_impact_score) as 'Avg SLA Impact'
+FROM Metric 
+WHERE service.name = 'business-impact'
+  AND sla_impact IS NOT NULL
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 6: REPLICATION MONITOR (Port 8086)
+# Expected Metrics: mysql_replica_lag, mysql_replication_running, mysql_gtid_executed
+# =============================================================================
+
+-- Validate Replication Health Data
+SELECT count(*) as 'Replication Records'
+FROM Metric 
+WHERE service.name = 'replication-monitor'
+  AND metricName IN ('mysql_replica_lag', 'mysql_replication_running')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Replication Lag Monitoring
+SELECT latest(mysql_replica_lag) as 'Current Lag (sec)',
+       max(mysql_replica_lag) as 'Max Lag (sec)',
+       count(*) as 'Records'
+FROM Metric 
+WHERE service.name = 'replication-monitor'
+  AND metricName = 'mysql_replica_lag'
+SINCE 30 minutes ago
+
+-- Validate Master/Slave Status
+SELECT count(*) as 'Status Records'
+FROM Metric 
+WHERE service.name = 'replication-monitor'
+  AND mysql_replication_running IS NOT NULL
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 7: PERFORMANCE ADVISOR (Port 8087)
+# Expected Metrics: db.performance.recommendation.missing_index, db.performance.recommendation.slow_query
+# =============================================================================
+
+-- Validate Performance Recommendations
+SELECT count(*) as 'Recommendation Records'
+FROM Metric 
+WHERE service.name = 'performance-advisor'
+  AND metricName LIKE 'db.performance.recommendation.%'
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Recommendation Types and Severity
+SELECT count(*) as 'Recommendations'
+FROM Metric 
+WHERE service.name = 'performance-advisor'
+  AND recommendation_type IS NOT NULL
+  AND severity IS NOT NULL
+FACET recommendation_type, severity
+SINCE 1 hour ago
+
+-- Validate Impact Scoring
+SELECT count(*) as 'Scored Recommendations',
+       average(impact_score) as 'Avg Impact Score'
+FROM Metric 
+WHERE service.name = 'performance-advisor'
+  AND impact_score IS NOT NULL
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 8: RESOURCE MONITOR (Port 8088)
+# Expected Metrics: system.cpu.utilization, system.memory.usage, system.disk.io.time
+# =============================================================================
+
+-- Validate Host Resource Metrics
+SELECT count(*) as 'Resource Records'
+FROM Metric 
+WHERE service.name = 'resource-monitor'
+  AND metricName IN ('system.cpu.utilization', 'system.memory.usage', 'system.disk.io.time')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Resource Utilization Trends
+SELECT average(system.cpu.utilization) as 'Avg CPU %',
+       average(system.memory.usage) as 'Avg Memory Usage',
+       count(*) as 'Records'
+FROM Metric 
+WHERE service.name = 'resource-monitor'
+  AND metricName IN ('system.cpu.utilization', 'system.memory.usage')
+SINCE 30 minutes ago
+
+-- Validate Host Identification
+SELECT count(DISTINCT host.name) as 'Unique Hosts'
+FROM Metric 
+WHERE service.name = 'resource-monitor'
+  AND host.name IS NOT NULL
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 9: ALERT MANAGER (Port 8089)
+# Expected Metrics: alert.processed, alert.severity, alert.type
+# =============================================================================
+
+-- Validate Alert Processing
+SELECT count(*) as 'Alert Records'
+FROM Metric 
+WHERE service.name = 'alert-manager'
+  AND metricName IN ('alert.processed', 'alert.severity')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Alert Types and Severity Distribution
+SELECT count(*) as 'Alerts'
+FROM Metric 
+WHERE service.name = 'alert-manager'
+  AND alert.type IS NOT NULL
+  AND alert.severity IS NOT NULL
+FACET alert.type, alert.severity
+SINCE 1 hour ago
+
+-- Validate Alert State Management
+SELECT count(*) as 'State Records'
+FROM Metric 
+WHERE service.name = 'alert-manager'
+  AND alert.state IN ('active', 'resolved', 'acknowledged')
+FACET alert.state
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 10: CANARY TESTER (Port 8090)
+# Expected Metrics: canary.test.success_rate, canary.test.response_time, canary.test.error_count
+# =============================================================================
+
+-- Validate Canary Test Results
+SELECT count(*) as 'Canary Records'
+FROM Metric 
+WHERE service.name = 'canary-tester'
+  AND metricName IN ('canary.test.success_rate', 'canary.test.response_time')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Canary Health Status
+SELECT latest(canary.test.success_rate) as 'Current Success Rate %',
+       average(canary.test.response_time) as 'Avg Response Time (ms)',
+       count(*) as 'Test Records'
+FROM Metric 
+WHERE service.name = 'canary-tester'
+SINCE 30 minutes ago
+
+-- Validate Test Coverage
+SELECT count(DISTINCT test.name) as 'Unique Tests'
+FROM Metric 
+WHERE service.name = 'canary-tester'
+  AND test.name IS NOT NULL
+SINCE 30 minutes ago
+
+# =============================================================================
+# MODULE 11: CROSS-SIGNAL CORRELATOR
+# Expected Metrics: correlation.strength, cross_signal.match_count, exemplar.trace_id
+# =============================================================================
+
+-- Validate Cross-Signal Correlation
+SELECT count(*) as 'Correlation Records'
+FROM Metric 
+WHERE service.name = 'cross-signal-correlator'
+  AND metricName IN ('correlation.strength', 'cross_signal.match_count')
+  AND timestamp > (now() - 10 * 60 * 1000)
+FACET metricName
+
+-- Check Trace-Metric Correlation
+SELECT count(*) as 'Correlated Records'
+FROM Metric 
+WHERE service.name = 'cross-signal-correlator'
+  AND exemplar.trace_id IS NOT NULL
+  AND correlation.strength IS NOT NULL
+SINCE 30 minutes ago
+
+-- Validate Signal Matching
+SELECT average(correlation.strength) as 'Avg Correlation Strength',
+       count(*) as 'Match Records'
+FROM Metric 
+WHERE service.name = 'cross-signal-correlator'
+  AND correlation.strength > 0
+SINCE 30 minutes ago
+
+# =============================================================================
+# COMPREHENSIVE VALIDATION QUERIES
+# =============================================================================
+
+-- Overall Data Flow Health Check (All Modules)
+SELECT count(*) as 'Total Records'
+FROM Metric 
+WHERE service.name IN (
+  'core-metrics', 'sql-intelligence', 'wait-profiler', 'anomaly-detector',
+  'business-impact', 'replication-monitor', 'performance-advisor', 
+  'resource-monitor', 'alert-manager', 'canary-tester', 'cross-signal-correlator'
+)
+AND timestamp > (now() - 10 * 60 * 1000)
+FACET service.name
+
+-- Data Freshness Across All Modules (Should be < 5 minutes)
+SELECT (now() - latest(timestamp))/1000/60 as 'Minutes Since Last Data'
+FROM Metric 
+WHERE service.name IN (
+  'core-metrics', 'sql-intelligence', 'wait-profiler', 'anomaly-detector',
+  'business-impact', 'replication-monitor', 'performance-advisor', 
+  'resource-monitor', 'alert-manager', 'canary-tester', 'cross-signal-correlator'
+)
+FACET service.name
+SINCE 1 hour ago
+
+-- Module Dependency Validation (Check Federation)
+SELECT count(*) as 'Federation Records'
+FROM Metric 
+WHERE service.name = 'anomaly-detector'
+  AND metricName LIKE 'mysql_%'
+  AND federated_from IS NOT NULL
+FACET federated_from
+SINCE 30 minutes ago
+
+-- Entity Synthesis Validation
+SELECT count(DISTINCT entity.guid) as 'Unique Entities'
+FROM Metric 
+WHERE entity.type = 'MYSQL_INSTANCE'
+  AND entity.guid IS NOT NULL
+  AND newrelic.entity.synthesis = 'true'
+SINCE 30 minutes ago
+
+-- New Relic Attribution Check
+SELECT count(*) as 'Attributed Records'
+FROM Metric 
+WHERE newrelic.source = 'opentelemetry'
+  AND instrumentation.name = 'mysql-otel-collector'
+  AND instrumentation.provider = 'opentelemetry'
+FACET service.name
+SINCE 30 minutes ago

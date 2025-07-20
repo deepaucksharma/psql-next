@@ -26,6 +26,15 @@ The Canary Tester module performs continuous synthetic monitoring of MySQL datab
          └──────────────── Metrics ────────────────────────┘
 ```
 
+## ⚠️ Health Check Policy
+
+**IMPORTANT**: Health check endpoints (port 13133) have been intentionally removed from production code.
+
+- **For validation**: Use `shared/validation/health-check-all.sh`
+- **Documentation**: See `shared/validation/README-health-check.md`
+- **Do NOT**: Add health check endpoints back to production configs
+- **Do NOT**: Expose port 13133 in Docker configurations
+
 ## Quick Start
 
 ```bash
@@ -36,10 +45,10 @@ make build
 # Run the canary tester
 make run
 
-# Check health status
-make health
+# Check status (use metrics endpoint)
+curl http://localhost:8090/metrics | grep canary_
 
-# View metrics
+# View all metrics
 make metrics
 
 # Stop services
@@ -173,7 +182,7 @@ Access the following endpoints:
 
 - **Metrics**: http://localhost:8090/metrics
 - **Prometheus**: http://localhost:8888/metrics
-- **Health Check**: http://localhost:13133/health
+- **Health Validation**: Use `shared/validation/health-check-all.sh` script only
 
 ## Troubleshooting
 

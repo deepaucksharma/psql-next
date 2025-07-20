@@ -1,11 +1,13 @@
 FROM otel/opentelemetry-collector-contrib:latest
 
+# WARNING: DO NOT ADD HEALTHCHECK instructions here!
+# Health checks have been intentionally removed from production images.
+# Use shared/validation/health-check-all.sh for validation purposes.
+
 # Copy configuration
 COPY config/collector.yaml /etc/otel/collector.yaml
 
-# Expose metrics port
+# Expose ports for OpenTelemetry functionality only
 EXPOSE 8081
+# WARNING: DO NOT expose port 13133 (health check port)!
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:13133/ || exit 1

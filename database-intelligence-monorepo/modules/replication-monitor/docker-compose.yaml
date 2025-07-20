@@ -8,12 +8,12 @@ services:
     container_name: mysql-master
     hostname: mysql-master
     ports:
-      - "3306:3306"
+      - "${MASTER_PORT:-3306}:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: test_db
-      MYSQL_USER: replication_user
-      MYSQL_PASSWORD: replication_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-test_db}
+      MYSQL_USER: ${MYSQL_REPLICATION_USER:-replication_user}
+      MYSQL_PASSWORD: ${MYSQL_REPLICATION_PASSWORD:-replication_password}
     volumes:
       - ./src/init-master.sql:/docker-entrypoint-initdb.d/init-master.sql
       - master-data:/var/lib/mysql
@@ -31,7 +31,7 @@ services:
     networks:
       - replication-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -43,10 +43,10 @@ services:
     container_name: mysql-replica
     hostname: mysql-replica
     ports:
-      - "8086:3306"
+      - "${REPLICA_PORT:-8086}:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: test_db
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-test_db}
     volumes:
       - ./src/init-replica.sql:/docker-entrypoint-initdb.d/init-replica.sql
       - replica-data:/var/lib/mysql
@@ -69,22 +69,57 @@ services:
     networks:
       - replication-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   collector:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
     image: otel/opentelemetry-collector-contrib:latest
     container_name: replication-collector
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-enterprise-working.yaml}"]
+    environment:
+      MODULE_NAME: replication-monitor
+      MYSQL_MASTER_ENDPOINT: mysql-master:3306
+      MYSQL_REPLICA_ENDPOINT: mysql-replica:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-test_db}
+      EXPORT_PORT: 8086
+      OTEL_SERVICE_NAME: replication-monitor
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      ENVIRONMENT: production
+      CLUSTER_NAME: database-intelligence-cluster
+      # Replication thresholds
+      LAG_THRESHOLD_WARNING: "10"
+      LAG_THRESHOLD_CRITICAL: "60"
+      # Other endpoints
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-localhost:4317}
     volumes:
-      - ./config:/etc/otel
+      - ./config:/etc/otel:ro
+      - ./logs:/tmp/logs
+      - replication_status:/tmp/replication-status
+      - replication_monitor_queue_standard:/tmp/replication-monitor-queue-standard
+      - replication_monitor_queue_critical:/tmp/replication-monitor-queue-critical
     ports:
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
-      - "8888:8888"   # Prometheus metrics
-      - "8894:8889"   # Prometheus exporter
+      - "8086:8086"   # Module export port
+      - "8896:8889"   # Prometheus exporter (matches service-endpoints.env)
+      - "4327:4317"   # OTLP gRPC receiver (unique port)
+      - "4328:4318"   # OTLP HTTP receiver (unique port)
+      - "8093:8888"   # Internal Prometheus metrics (unique port)
+      - "55684:55679" # ZPages
+      - "1780:1777"   # pprof
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
     depends_on:
       mysql-master:
         condition: service_healthy
@@ -92,10 +127,24 @@ services:
         condition: service_healthy
     networks:
       - replication-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
 
 volumes:
   master-data:
   replica-data:
+  replication_status:
+    driver: local
+  replication_monitor_queue_standard:
+    driver: local
+  replication_monitor_queue_critical:
+    driver: local
 
 networks:
   replication-network:

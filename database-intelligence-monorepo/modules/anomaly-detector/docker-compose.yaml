@@ -2,29 +2,121 @@ version: '3.8'
 
 services:
   anomaly-detector:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
     build: .
+    env_file:
+      - ../../shared/config/service-endpoints.env
     environment:
       MODULE_NAME: anomaly-detector
       EXPORT_PORT: 8084
       OTEL_SERVICE_NAME: anomaly-detector
-      # Prometheus federation endpoints for pulling metrics from other modules
-      CORE_METRICS_ENDPOINT: http://host.docker.internal:8081/metrics
-      SQL_INTELLIGENCE_ENDPOINT: http://host.docker.internal:8082/metrics
-      WAIT_PROFILER_ENDPOINT: http://host.docker.internal:8083/metrics
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      ENVIRONMENT: production
+      CLUSTER_NAME: database-intelligence-cluster
+      # Module federation endpoints
+      CORE_METRICS_ENDPOINT: ${CORE_METRICS_ENDPOINT:-core-metrics:8081}
+      SQL_INTELLIGENCE_ENDPOINT: ${SQL_INTELLIGENCE_ENDPOINT:-sql-intelligence:8082}
+      WAIT_PROFILER_ENDPOINT: ${WAIT_PROFILER_ENDPOINT:-wait-profiler:8083}
       # Anomaly detection thresholds
       CONNECTION_SPIKE_THRESHOLD: "2.0"  # 2x standard deviation
       LATENCY_DEVIATION_THRESHOLD: "3.0"  # 3x standard deviation
       WAIT_EVENT_THRESHOLD: "2.5"  # 2.5x standard deviation
       RESOURCE_USAGE_THRESHOLD: "2.0"  # 2x standard deviation
+      # Baseline configuration
+      CONNECTIONS_BASELINE_MEAN: "100"
+      CONNECTIONS_BASELINE_STDDEV: "20"
+      QUERY_DURATION_BASELINE_MEAN: "50"
+      QUERY_DURATION_BASELINE_STDDEV: "15"
+      WAIT_TIME_BASELINE_MEAN: "1000"
+      WAIT_TIME_BASELINE_STDDEV: "300"
+      CPU_BASELINE_MEAN: "50"
+      CPU_BASELINE_STDDEV: "10"
+      BASELINE_LEARNING_WINDOW: "1h"
+      BASELINE_SOURCE: "static"
+      # Alert manager endpoint
+      ALERT_MANAGER_ENDPOINT: ${ALERT_MANAGER_ENDPOINT:-alert-manager:4317}
+      # Scrape interval
+      ANOMALY_SCRAPE_INTERVAL: "10s"
+      ANOMALY_BATCH_TIMEOUT: "5s"
+      ANOMALY_BATCH_SIZE: "1000"
+      # Override specific endpoints if needed
+      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector-functional.yaml}
     ports:
-      - "8084:8084"
-      - "8892:8889"
+      - "8084:8084"      # Prometheus metrics
+      - "8892:8889"      # OTLP gRPC debug
+      - "4319:4317"      # OTLP gRPC
+      - "4320:4318"      # OTLP HTTP
+      - "55681:55679"    # ZPages
+      - "1779:1777"      # pprof
+      - "8894:8888"      # Internal telemetry
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
     volumes:
-      - ./config:/etc/otel
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:13133/"]
-      interval: 30s
-      timeout: 3s
-      start-period: 10s
-      retries: 3
+      - ./config:/etc/otel:ro
+      - ../../shared/config:/etc/shared:ro
+      - ./logs:/tmp/logs
+      - anomaly_alerts:/tmp/anomaly-alerts
+      - anomaly_detector_queue_standard:/tmp/anomaly-detector-queue-standard
+      - anomaly_detector_queue_critical:/tmp/anomaly-detector-queue-critical
+      - anomaly_statistical_models:/tmp/statistical-models
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-enterprise.yaml}"]
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    networks:
+      - db-intelligence
+
+  # Dependencies for federation
+  core-metrics:
+    image: otel/opentelemetry-collector-contrib:latest
+    profiles: ["with-dependencies"]
+    environment:
+      MYSQL_ENDPOINT: mysql-test:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: test
+    command: ["--config", "/etc/otel/collector.yaml"]
+    
+  sql-intelligence:
+    image: otel/opentelemetry-collector-contrib:latest
+    profiles: ["with-dependencies"]
+    environment:
+      MYSQL_ENDPOINT: mysql-test:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: test
+    command: ["--config", "/etc/otel/collector.yaml"]
+    
+  wait-profiler:
+    image: otel/opentelemetry-collector-contrib:latest
+    profiles: ["with-dependencies"]
+    environment:
+      MYSQL_ENDPOINT: mysql-test:3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: test
+    command: ["--config", "/etc/otel/collector.yaml"]
+
+volumes:
+  anomaly_alerts:
+    driver: local
+  anomaly_detector_queue_standard:
+    driver: local
+  anomaly_detector_queue_critical:
+    driver: local
+  anomaly_statistical_models:
+    driver: local
+
+networks:
+  db-intelligence:
+    driver: bridge

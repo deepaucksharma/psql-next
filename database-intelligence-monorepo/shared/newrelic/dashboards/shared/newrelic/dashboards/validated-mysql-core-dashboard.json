@@ -1,0 +1,277 @@
+{
+  "name": "MySQL Core Intelligence - Validated",
+  "description": "Validated MySQL monitoring with confirmed OpenTelemetry metrics",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "MySQL Foundation",
+      "description": "Core MySQL metrics validated for OpenTelemetry",
+      "widgets": [
+        {
+          "title": "MySQL Health Status",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(mysql.global.status.uptime) as 'Uptime (sec)', uniqueCount(entity.guid) as 'Active Instances' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' SINCE 5 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 1,
+                "alertSeverity": "CRITICAL"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Connection Overview",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.global.status.threads_connected) as 'Current Connections', average(mysql.global.status.threads_running) as 'Running Threads' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Performance",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT rate(sum(mysql.global.status.queries), 1 minute) as 'Queries/min' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "InnoDB Buffer Pool Efficiency",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.global.status.innodb_buffer_pool_read_requests - mysql.global.status.innodb_buffer_pool_reads) / average(mysql.global.status.innodb_buffer_pool_read_requests) * 100 as 'Hit Ratio %' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Top MySQL Instances by Load",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(entity.name) as 'Instance', average(mysql.global.status.threads_connected) as 'Avg Connections', rate(sum(mysql.global.status.queries), 1 minute) as 'Queries/min', latest(mysql.global.status.uptime) as 'Uptime' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' FACET entity.guid SINCE 1 hour ago LIMIT 10"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "SQL Intelligence",
+      "description": "Query performance analysis from validated metrics",
+      "widgets": [
+        {
+          "title": "Query Performance Distribution",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.query.latency_avg_ms) as 'Avg Latency (ms)', max(mysql.query.latency_max_ms) as 'Max Latency (ms)' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName LIKE 'mysql.query.%' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Execution Rate",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT rate(sum(mysql.query.exec_total), 1 minute) as 'Executions/min' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName = 'mysql.query.exec_total' SINCE 5 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Slow Query Analysis",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query Pattern', sum(mysql.query.exec_total) as 'Executions', average(mysql.query.latency_avg_ms) as 'Avg Latency (ms)', sum(mysql.query.rows_examined_total) as 'Rows Examined', sum(mysql.query.no_index_used_total) as 'No Index Used' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName IN ('mysql.query.exec_total', 'mysql.query.latency_avg_ms', 'mysql.query.rows_examined_total', 'mysql.query.no_index_used_total') FACET DIGEST, SCHEMA_NAME SINCE 1 hour ago LIMIT 20"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance Monitoring",
+      "description": "Real-time performance insights",
+      "widgets": [
+        {
+          "title": "Database Operations Rate",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT rate(sum(mysql.global.status.com_select), 1 minute) as 'SELECT/min', rate(sum(mysql.global.status.com_insert), 1 minute) as 'INSERT/min', rate(sum(mysql.global.status.com_update), 1 minute) as 'UPDATE/min', rate(sum(mysql.global.status.com_delete), 1 minute) as 'DELETE/min' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Lock Contention",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.global.status.innodb_row_lock_current_waits) as 'Current Lock Waits', rate(sum(mysql.global.status.innodb_row_lock_waits), 1 minute) as 'Lock Waits/min' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "InnoDB Performance",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT rate(sum(mysql.global.status.innodb_rows_read), 1 minute) as 'Rows Read/min', rate(sum(mysql.global.status.innodb_rows_inserted), 1 minute) as 'Rows Inserted/min', rate(sum(mysql.global.status.innodb_rows_updated), 1 minute) as 'Rows Updated/min', rate(sum(mysql.global.status.innodb_rows_deleted), 1 minute) as 'Rows Deleted/min' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' TIMESERIES AUTO"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Entity Health",
+      "description": "MySQL instance health and availability",
+      "widgets": [
+        {
+          "title": "MySQL Instance Status",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 6
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(entity.name) as 'Instance', latest(entity.guid) as 'Entity GUID', latest(mysql.global.status.uptime) as 'Uptime (sec)', latest(mysql.global.status.threads_connected) as 'Current Connections', latest(mysql.global.variables.max_connections) as 'Max Connections', latest(mysql.global.status.threads_connected) / latest(mysql.global.variables.max_connections) * 100 as 'Connection Usage %' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' FACET entity.guid SINCE 5 minutes ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

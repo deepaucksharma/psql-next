@@ -206,8 +206,8 @@ processors:
             where attributes["business_impact_score"] != nil
           # Add anomaly score
           - set(attributes["exemplar.anomaly_score"], 
-                attributes["ml.anomaly_score"])
-            where attributes["ml.anomaly_score"] != nil
+                attributes["statistics.anomaly_score"])
+            where attributes["statistics.anomaly_score"] != nil
             
   # Cross-signal anomaly detection
   transform/cross_signal_anomaly:
@@ -217,12 +217,12 @@ processors:
         statements:
           # Detect correlated anomalies
           - set(attributes["cross_signal.anomaly"], true)
-            where attributes["ml.anomaly_score"] > 3 and 
+            where attributes["statistics.anomaly_score"] > 3 and 
                   attributes["business_impact_score"] > 7
           # Calculate combined risk score
           - set(attributes["cross_signal.risk_score"], 
-                (attributes["ml.anomaly_score"] * attributes["business_impact_score"]) / 10)
-            where attributes["ml.anomaly_score"] != nil and 
+                (attributes["statistics.anomaly_score"] * attributes["business_impact_score"]) / 10)
+            where attributes["statistics.anomaly_score"] != nil and 
                   attributes["business_impact_score"] != nil
           # Mark critical cross-signal issues
           - set(attributes["cross_signal.critical"], true)
@@ -327,9 +327,10 @@ exporters:
       max_backups: 3
 
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
-    
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
   pprof:
     endpoint: 0.0.0.0:1777
     
@@ -337,8 +338,9 @@ extensions:
     endpoint: 0.0.0.0:55679
 
 service:
-  extensions: [health_check, pprof, zpages]
-  
+  # WARNING: DO NOT ADD health_check to extensions list!
+  # Health checks are validation-only, not production features.
+  extensions: [pprof, zpages]  # NO health_check here!
   pipelines:
     # Traces pipeline for correlation
     traces:
@@ -432,6 +434,3 @@ service:
       level: ${env:LOG_LEVEL:info}
       initial_fields:
         service: cross-signal-correlator
-    metrics:
-      level: detailed
-      address: 0.0.0.0:8888

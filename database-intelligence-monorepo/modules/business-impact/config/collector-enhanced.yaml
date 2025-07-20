@@ -129,6 +129,7 @@ processors:
           - set(attributes["critical_table"], false) where !IsMatch(attributes["db.sql.table"], "(?i).*(order|payment|user|customer|transaction|invoice|product|inventory).*")
 
   transform/create_metrics:
+    error_mode: ignore
     metric_statements:
       - context: scope
         statements:
@@ -252,12 +253,8 @@ service:
   telemetry:
     logs:
       level: "info"
-    metrics:
-      level: "detailed"
-      address: 0.0.0.0:8888
 
   pipelines:
-    metrics:
       receivers: [otlp, prometheus]
       processors: 
         - memory_limiter
@@ -284,11 +281,16 @@ service:
         - attributes/entity_synthesis
       exporters: [otlphttp/newrelic_critical, otlphttp/newrelic_events]
 
-  extensions: [health_check, pprof, zpages]
+  # WARNING: DO NOT ADD health_check to extensions list!
 
+  # Health checks are validation-only, not production features.
+
+  extensions: [pprof, zpages]  # NO health_check here!
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
   pprof:
     endpoint: 0.0.0.0:6060
   zpages:

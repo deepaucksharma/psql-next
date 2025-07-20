@@ -13,6 +13,15 @@ Basic MySQL metrics collection module for the Database Intelligence system.
 - Sort operations
 - Table cache status
 
+## ⚠️ Health Check Policy
+
+**IMPORTANT**: Health check endpoints (port 13133) have been intentionally removed from production code.
+
+- **For validation**: Use `shared/validation/health-check-all.sh`
+- **Documentation**: See `shared/validation/README-health-check.md`
+- **Do NOT**: Add health check endpoints back to production configs
+- **Do NOT**: Expose port 13133 in Docker configurations
+
 ## Quick Start
 
 ```bash
@@ -25,7 +34,7 @@ make run
 # View logs
 make logs
 
-# Check metrics
+# Check metrics (production endpoint)
 curl http://localhost:8081/metrics
 
 # Stop the module

@@ -68,7 +68,7 @@ COST_CENTER=engineering
 
 # Feature Flags
 ENABLE_SQL_INTELLIGENCE=true
-ML_FEATURES_ENABLED=true
+STATISTICAL_FEATURES_ENABLED=true
 BUSINESS_CONTEXT_ENABLED=true
 CIRCUIT_FAILURE_THRESHOLD=5
 ROLLOUT_PERCENTAGE=100
@@ -150,7 +150,7 @@ The dashboard includes 8 pages:
 
 2. **SQL Intelligence Analysis**
    - Query wait profiles
-   - ML anomaly detection
+   - Statistical anomaly detection
    - Resource pressure correlation
    - Query pattern recognition
 
@@ -239,10 +239,10 @@ SINCE 1 hour ago
 ```sql
 SELECT 
   count(*) as 'Anomalies',
-  average(ml.anomaly_score) as 'Avg Score'
+  average(statistics.anomaly_score) as 'Avg Score'
 FROM Metric 
-WHERE ml.is_anomaly = true 
-FACET ml.workload_type, anomaly_type 
+WHERE statistics.is_anomaly = true 
+FACET statistics.workload_type, anomaly_type 
 TIMESERIES AUTO
 SINCE 6 hours ago
 ```

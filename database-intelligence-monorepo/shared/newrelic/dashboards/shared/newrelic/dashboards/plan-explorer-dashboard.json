@@ -1,0 +1,570 @@
+{
+  "name": "MySQL Plan Explorer & DPA Intelligence",
+  "description": "SolarWinds Plan Explorer and DPA equivalent capabilities for MySQL",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Query Plan Analysis",
+      "description": "Plan Explorer equivalent - execution plan analysis and optimization",
+      "widgets": [
+        {
+          "title": "Query Performance Overview",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "dataFormatters": [
+              {
+                "name": "AVG_TIME_MS",
+                "precision": 2,
+                "type": "decimal"
+              },
+              {
+                "name": "INDEX_EFFICIENCY_SCORE",
+                "type": "decimal"
+              }
+            ],
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query', latest(INDEX_EFFICIENCY_SCORE) as 'Index Score', latest(NO_INDEX_USED) as 'No Index', latest(SELECTIVITY) as 'Selectivity', average(AVG_TIME_MS) as 'Avg Time (ms)', max(MAX_TIME_MS) as 'Max Time (ms)', sum(EXECUTION_COUNT) as 'Executions', latest(query.performance_tier) as 'Tier' FROM MySQLPlanIntelligence FACET DIGEST SINCE 1 hour ago LIMIT 50"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Effectiveness Heat Map",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.heatmap"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(INDEX_EFFICIENCY_SCORE) FROM MySQLPlanIntelligence FACET PRIMARY_TABLE, hourOf(timestamp) SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Cost Analysis",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.scatter"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT ROWS_EXAMINED as 'Rows Examined', AVG_TIME_MS as 'Avg Time (ms)', query.cost_score as 'Cost Score' FROM MySQLPlanIntelligence WHERE query.cost_score > 0 SINCE 1 hour ago LIMIT 200"
+              }
+            ],
+            "xAxisLeft": {
+              "title": "Rows Examined"
+            },
+            "yAxisLeft": {
+              "title": "Average Time (ms)"
+            }
+          }
+        },
+        {
+          "title": "Missing Index Recommendations",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(recommendation.text) as 'Recommendation', latest(PRIMARY_TABLE) as 'Table', sum(ROWS_EXAMINED) as 'Total Rows Examined', average(SELECTIVITY * 100) as 'Selectivity %', latest(recommendation.priority) as 'Priority' FROM MySQLPlanIntelligence WHERE index.recommendation_type != 'NONE' FACET DIGEST SINCE 24 hours ago LIMIT 20"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Plan Change Detection",
+          "layout": {
+            "column": 1,
+            "row": 11,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT uniqueCount(plan.hash) as 'Unique Plans', count(*) as 'Plan Changes' FROM MySQLPlanIntelligence FACET DIGEST TIMESERIES 1 hour SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Statistics Freshness",
+          "layout": {
+            "column": 7,
+            "row": 11,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(STATS_AGE_HOURS) as 'Stats Age (hours)' FROM MySQLTableStatistics FACET TABLE_NAME WHERE stats.is_stale = true SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "DPA Wait-Time Analysis",
+      "description": "Wait-time methodology for performance analysis",
+      "widgets": [
+        {
+          "title": "Wait Profile Overview",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT sum(TOTAL_WAIT_MS) as 'Total Wait Time' FROM MySQLWaitAnalysis FACET WAIT_CATEGORY SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Wait Anomaly Score",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.gauge"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT max(wait.anomaly_score) as 'Wait Anomaly Score' FROM MySQLWaitAnalysis SINCE 5 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 40,
+                "alertSeverity": "WARNING"
+              },
+              {
+                "value": 70,
+                "alertSeverity": "CRITICAL"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Wait Time Trend by Category",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(TOTAL_WAIT_MS) as 'Wait Time' FROM MySQLWaitAnalysis FACET WAIT_CATEGORY TIMESERIES 1 minute SINCE 2 hours ago"
+              }
+            ],
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Lock Chain Analysis",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(LOCK_CHAINS) as 'Lock Chain', max(MAX_LOCK_WAIT_MS) as 'Max Wait (ms)', sum(BLOCKED_THREADS) as 'Blocked Threads', latest(lock.severity) as 'Severity' FROM MySQLLockChainAnalysis WHERE LOCK_WAIT_COUNT > 0 FACET timestamp SINCE 1 hour ago LIMIT 20"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query-Wait Correlation",
+          "layout": {
+            "column": 1,
+            "row": 11,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query', average(WAIT_PERCENTAGE) as 'Wait %', latest(DOMINANT_WAIT_EVENT) as 'Dominant Wait', latest(query.wait_category) as 'Category', sum(TOTAL_WAIT_TIME_MS) as 'Total Wait (ms)' FROM MySQLQueryWaitCorrelation FACET DIGEST SINCE 1 hour ago LIMIT 30"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Multi-Dimensional Analysis",
+      "description": "Correlate queries, waits, resources, and business impact",
+      "widgets": [
+        {
+          "title": "Query Performance vs Wait Profile Matrix",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 5
+          },
+          "visualization": {
+            "id": "viz.heatmap"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.plan.intelligence) FROM MySQLPlanIntelligence, MySQLWaitAnalysis WHERE DIGEST = STATEMENT_DIGEST FACET query.performance_tier, wait.pattern SINCE 2 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Wait Impact by Business Function",
+          "layout": {
+            "column": 1,
+            "row": 6,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.stacked-bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT sum(wait.impact_score) FROM MySQLWaitAnalysis, MySQLBusiness WHERE AFFECTED_QUERIES LIKE CONCAT('%', DIGEST, '%') FACET business_category, WAIT_CATEGORY SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Resource Pressure Correlation",
+          "layout": {
+            "column": 7,
+            "row": 6,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.scatter"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT wait.anomaly_score as 'Wait Anomaly', mysql.cpu.utilization as 'CPU %', mysql.buffer_pool.usage as 'Buffer Pool %' FROM MySQLWaitAnalysis, Metric WHERE instrumentation.provider = 'opentelemetry' SINCE 30 minutes ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Intelligent Recommendations",
+      "description": "Actionable insights from plan and wait analysis",
+      "widgets": [
+        {
+          "title": "Top Optimization Opportunities",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(recommendation.text) as 'Recommendation', latest(recommendation.priority) as 'Priority', latest(query.cost_score) as 'Cost Impact', latest(wait.impact_score) as 'Wait Impact', latest(business_impact_score) as 'Business Impact' FROM MySQLPlanIntelligence, MySQLWaitAnalysis WHERE recommendation.text != '' FACET DIGEST SINCE 6 hours ago LIMIT 20"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Recommendation Distribution",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) FROM MySQLPlanIntelligence FACET index.recommendation_type WHERE index.recommendation_type != 'NONE' SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Wait-Based Recommendations",
+          "layout": {
+            "column": 7,
+            "row": 5,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) FROM MySQLWaitAnalysis FACET wait.pattern WHERE wait.recommendation != '' SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Estimated Performance Improvement",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "dataFormatters": [
+              {
+                "name": "Total Improvement",
+                "precision": 1,
+                "type": "decimal"
+              }
+            ],
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT sum(index.estimated_improvement) as 'Total Index Improvement %', average(query.efficiency_score) as 'Avg Query Efficiency', percentage(count(*), WHERE stats.is_stale = true) as 'Stale Statistics %' FROM MySQLPlanIntelligence, MySQLTableStatistics SINCE 24 hours ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Index & Statistics Analysis",
+      "description": "Deep dive into index usage and table statistics",
+      "widgets": [
+        {
+          "title": "Index Usage Effectiveness",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(TABLE_NAME) as 'Table', latest(INDEX_NAME) as 'Index', sum(ACCESS_COUNT) as 'Access Count', average(FETCH_EFFICIENCY) as 'Fetch Efficiency %', average(READ_WRITE_RATIO) as 'Read/Write Ratio', latest(index.effectiveness) as 'Effectiveness' FROM MySQLIndexUsage FACET OBJECT_SCHEMA, TABLE_NAME, INDEX_NAME SINCE 1 hour ago LIMIT 50"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Table Size vs Index Ratio",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.scatter"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT TABLE_SIZE_MB as 'Table Size (MB)', INDEX_DATA_RATIO as 'Index/Data Ratio', INDEX_COUNT as 'Number of Indexes' FROM MySQLTableStatistics SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Statistics Freshness by Table",
+          "layout": {
+            "column": 7,
+            "row": 5,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(STATS_AGE_HOURS) as 'Stats Age (hours)' FROM MySQLTableStatistics FACET TABLE_NAME SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Real-Time Monitoring",
+      "description": "Live view of current performance issues",
+      "widgets": [
+        {
+          "title": "Active Wait Events",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT sum(ACTIVE_WAITS) as 'Active Waits' FROM MySQLWaitAnalysis FACET WAIT_CATEGORY TIMESERIES 30 seconds SINCE 15 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Current Lock Status",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(BLOCKED_THREADS) as 'Blocked Threads', latest(BLOCKING_THREADS) as 'Blocking Threads', latest(MAX_LOCK_WAIT_MS) as 'Max Lock Wait (ms)' FROM MySQLLockChainAnalysis SINCE 1 minute ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "WARNING",
+                "value": 1
+              },
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 5
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Execution Heatmap",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.heatmap"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) FROM MySQLPlanIntelligence FACET query.performance_tier, minuteOf(timestamp) SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

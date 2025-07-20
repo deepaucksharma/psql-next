@@ -1,6 +1,11 @@
 # Database Intelligence MySQL - Monorepo Makefile
 # Supports parallel operations for all modules
 
+# WARNING: DO NOT ADD health check targets to this Makefile!
+# Health checks have been intentionally removed from production code.
+# Use shared/validation/health-check-all.sh for validation purposes.
+# See shared/validation/README-health-check.md for details.
+
 MODULES = core-metrics sql-intelligence wait-profiler anomaly-detector \
           business-impact replication-monitor performance-advisor \
           resource-monitor alert-manager canary-tester cross-signal-correlator
@@ -13,6 +18,8 @@ REPLICATION_MODULES = replication-monitor
 ENHANCED_MODULES = cross-signal-correlator alert-manager canary-tester
 
 .PHONY: all build test run stop clean help
+# WARNING: Do NOT add 'health' to .PHONY list!
+# Health checks are validation-only, not production targets.
 
 # Default target
 all: build
@@ -43,11 +50,13 @@ help:
 	@echo "  make stop-<module>  - Stop specific module"
 	@echo ""
 	@echo "Utility commands:"
-	@echo "  make health         - Check health of all modules"
+	@echo "  make validate       - Validate all modules (see shared/validation/)"
 	@echo "  make logs-<module>  - View logs for specific module"
 	@echo "  make integration    - Run integration tests"
 	@echo "  make validate-configs - Validate all configurations"
 	@echo ""
+	# Health checks are available in shared/validation/ directory
+	# Use: ./shared/validation/health-check-all.sh
 	@echo "Available modules: $(MODULES)"
 
 # Build all modules in parallel
@@ -63,18 +72,18 @@ test:
 	@echo "✓ All module tests passed"
 
 # Run all modules
-run-all:
+run-all: validate-env
 	@echo "Starting all modules..."
 	@cd integration && docker-compose -f docker-compose.all.yaml up -d
 	@echo "✓ All modules started"
-	@echo "Run 'make health' to check module status"
+	@echo "Run './shared/validation/health-check-all.sh' to check module status"
 
 # Run all modules with enhanced configurations
 run-enhanced:
 	@echo "Starting all modules with enhanced configurations..."
 	@cd integration && docker-compose -f docker-compose.enhanced.yaml up -d
 	@echo "✓ All modules started with enhanced features"
-	@echo "Run 'make health' to check module status"
+	@echo "Run './shared/validation/health-check-all.sh' to check module status"
 
 # Stop all modules
 stop-all:
@@ -181,8 +190,9 @@ status-%:
 	fi
 
 # Utility commands
-health:
-	@./shared/scripts/health-check.sh
+validate:
+	@echo "Running module validation..."
+	@./shared/validation/health-check-all.sh
 
 integration:
 	@echo "Running integration tests..."
@@ -261,6 +271,10 @@ ci-integration:
 
 ci-validate:
 	@$(MAKE) validate-configs
+
+# Validate environment variables
+validate-env:
+	@./scripts/validate-environment.sh
 
 # Docker cleanup
 docker-clean:

@@ -103,7 +103,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\"}[${interval}])",
+          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
@@ -167,12 +167,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(mysql_perf_schema_events_statements_seconds_bucket{instance=~\"${instance}\"}[${interval}])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(mysql_perf_schema_events_statements_seconds_bucket{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])) by (le))",
           "refId": "A",
           "legendFormat": "p95"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(mysql_perf_schema_events_statements_seconds_bucket{instance=~\"${instance}\"}[${interval}])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(mysql_perf_schema_events_statements_seconds_bucket{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])) by (le))",
           "refId": "B",
           "legendFormat": "p99"
         }
@@ -220,7 +220,7 @@
       },
       "targets": [
         {
-          "expr": "topk(5, sum by (digest_text) (rate(mysql_perf_schema_events_statements_total{instance=~\"${instance}\"}[${interval}])))",
+          "expr": "topk(5, sum by (digest_text) (rate(mysql_perf_schema_events_statements_total{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])))",
           "refId": "A",
           "legendFormat": "{{digest_text}}"
         }
@@ -278,7 +278,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, avg by (digest_text) (mysql_perf_schema_events_statements_seconds_total{instance=~\"${instance}\"}))",
+          "expr": "topk(10, avg by (digest_text) (mysql_perf_schema_events_statements_seconds_total{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}))",
           "format": "table",
           "refId": "A"
         }
@@ -383,7 +383,7 @@
         "name": "query_digest",
         "label": "Query Digest",
         "type": "query",
-        "query": "label_values(mysql_perf_schema_events_statements_total, digest_text)",
+        "query": "label_values(mysql_perf_schema_events_statements_total{instrumentation_provider=\"opentelemetry\"}, digest_text)",
         "multi": true,
         "includeAll": true,
         "current": {
@@ -459,7 +459,7 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -489,11 +489,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "100 - (avg(irate(node_cpu_seconds_total{mode=\"idle\",instance=~\"${instance}\"}[${interval}])) * 100)",
+          "expr": "rate(mysql_global_status_com_select{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
-      "title": "CPU Usage",
+      "title": "SELECT Queries",
       "type": "timeseries"
     },
     "memory_usage": {
@@ -551,7 +551,7 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -581,11 +581,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "100 * (1 - ((node_memory_MemAvailable_bytes{instance=~\"${instance}\"}) / (node_memory_MemTotal_bytes{instance=~\"${instance}\"})))",
+          "expr": "rate(mysql_global_status_com_insert{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}]) + rate(mysql_global_status_com_update{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}]) + rate(mysql_global_status_com_delete{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
-      "title": "Memory Usage",
+      "title": "Write Operations (INSERT/UPDATE/DELETE)",
       "type": "timeseries"
     },
     "query_rate": {
@@ -669,7 +669,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\"}[${interval}])",
+          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
@@ -734,7 +734,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "mysql_global_status_threads_connected{instance=~\"${instance}\"}",
+          "expr": "mysql_global_status_threads_connected{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
@@ -796,7 +796,7 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -826,11 +826,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(mysql_global_status_connection_errors_total{instance=~\"${instance}\"}[${interval}]) / rate(mysql_global_status_connections{instance=~\"${instance}\"}[${interval}]) * 100",
+          "expr": "increase(mysql_global_status_aborted_connects{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
-      "title": "Error Rate",
+      "title": "Aborted Connections",
       "type": "timeseries"
     }
   },

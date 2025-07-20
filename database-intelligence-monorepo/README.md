@@ -1,6 +1,6 @@
 # Database Intelligence MySQL - Monorepo
 
-A modular OpenTelemetry-based MySQL monitoring system organized as a monorepo with independent, composable modules. Now includes all enhanced features from the master-enhanced configuration including cross-signal correlation, circuit breakers, and ML-based analysis.
+A modular OpenTelemetry-based MySQL monitoring system organized as a monorepo with independent, composable modules. Now includes all enhanced features from the master-enhanced configuration including cross-signal correlation, circuit breakers, and statistical analysis.
 
 ## 🚀 Enhanced Features
 
@@ -9,7 +9,7 @@ A modular OpenTelemetry-based MySQL monitoring system organized as a monorepo wi
 - **Circuit Breaker Pattern**: Fault tolerance with fallback mechanisms
 - **Persistent Queues**: File-based storage for reliability
 - **Multi-Tenancy**: Schema-based routing and prioritization
-- **ML-Based Analysis**: Anomaly detection and pattern recognition
+- **Statistical Analysis**: Z-score based anomaly detection and pattern recognition
 - **Synthetic Monitoring**: Canary queries for baseline establishment
 - **Business Impact Scoring**: Revenue and SLA impact assessment
 
@@ -94,7 +94,7 @@ make integration-enhanced
 #### 2. SQL Intelligence (Enhanced Available)
 - Ultra-comprehensive 500-line SQL query
 - Real-time wait analysis
-- ML-based anomaly scoring
+- Statistical anomaly scoring
 - Business impact calculation
 - Advanced advisory recommendations
 
@@ -238,6 +238,16 @@ routing/tenant:
     - value: "analytics"
       exporters: [batch_tenant]
 ```
+
+## ⚠️ Health Check Policy
+
+**IMPORTANT**: Health check endpoints (port 13133) have been intentionally removed from production code.
+
+- **For validation**: Use `shared/validation/health-check-all.sh`
+- **Documentation**: See `shared/validation/README-health-check.md`
+- **Do NOT**: Add health check endpoints back to production configs
+- **Do NOT**: Expose port 13133 in Docker configurations
+- **Do NOT**: Add health check targets to Makefiles
 
 ## Performance Optimization
 

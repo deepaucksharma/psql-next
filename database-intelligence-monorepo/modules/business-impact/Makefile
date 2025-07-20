@@ -1,4 +1,11 @@
-.PHONY: help build up down restart logs clean test health
+# WARNING: DO NOT ADD health check targets to this Makefile!
+# Health checks have been intentionally removed from production code.
+# Use shared/validation/health-check-all.sh for validation purposes.
+# See shared/validation/README-health-check.md for details.
+
+.PHONY: help build up down restart logs clean test
+# WARNING: Do NOT add 'health' to .PHONY list!
+# Health checks are validation-only, not production targets.
 
 # Default target
 help:
@@ -10,7 +17,8 @@ help:
 	@echo "  make logs     - View service logs"
 	@echo "  make clean    - Clean up resources"
 	@echo "  make test     - Run integration tests"
-	@echo "  make health   - Check service health"
+	# Health checks are available in shared/validation/ directory
+	# Use: ../shared/validation/health-check-all.sh
 
 # Build the Docker image
 build:
@@ -42,14 +50,11 @@ clean:
 # Test the module
 test:
 	@echo "Testing OTLP endpoint..."
+	# WARNING: Health check endpoint deprecated - use ../shared/validation/health-check-all.sh
 	@curl -f http://localhost:13133/health || echo "Health check failed"
 	@echo "\nTesting Prometheus metrics..."
 	@curl -s http://localhost:8888/metrics | grep -E "business_impact|business_category" | head -5 || echo "No business metrics found yet"
 
-# Health check
-health:
-	@echo "Checking service health..."
-	@curl -f http://localhost:13133/health && echo "Service is healthy" || echo "Service is unhealthy"
 
 # Send sample metrics for testing
 test-metrics:

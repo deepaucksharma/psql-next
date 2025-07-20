@@ -2,10 +2,17 @@ version: '3.8'
 
 services:
   canary-tester:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
     build: .
     container_name: canary-tester
     ports:
-      - "8090:8090"
+      - "8090:8090"      # Module metrics
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
     environment:
       - MYSQL_HOST=mysql
       - MYSQL_PORT=3306
@@ -42,13 +49,20 @@ services:
       retries: 5
 
   otel-collector:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
     image: otel/opentelemetry-collector-contrib:latest
     container_name: canary-otel-collector
     ports:
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
-      - "8888:8888"   # Prometheus metrics
+      - "4330:4317"   # OTLP gRPC receiver (unique port)
+      - "4331:4318"   # OTLP HTTP receiver (unique port)
+      - "8094:8888"   # Internal Prometheus metrics (unique port)
       - "8898:8889"   # Prometheus metrics
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
     volumes:
       - ./config:/etc/otel
     command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]

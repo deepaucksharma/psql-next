@@ -1,0 +1,187 @@
+receivers:
+  # Pull transaction and query metrics from sql-intelligence
+  prometheus/sql_intelligence:
+    config:
+      scrape_configs:
+        - job_name: 'sql-intelligence-metrics'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['sql-intelligence:8082']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '(mysql_query_.*|mysql_slow_.*|mysql_statement_.*)'
+              action: keep
+  
+  # Pull wait event metrics from wait-profiler
+  prometheus/wait_profiler:
+    config:
+      scrape_configs:
+        - job_name: 'wait-profiler-metrics'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['wait-profiler:8083']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '(mysql_wait_.*|wait_profiler_.*)'
+              action: keep
+  
+  # Pull anomaly scores
+  prometheus/anomaly_detector:
+    config:
+      scrape_configs:
+        - job_name: 'anomaly-detector-metrics'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['anomaly-detector:8084']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '(anomaly_.*|db_anomaly_score)'
+              action: keep
+  
+  # Accept OTLP data
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+  resource:
+    attributes:
+      - key: service.name
+        value: business-impact
+        action: upsert
+      - key: module
+        value: business-impact
+        action: upsert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+
+  # Calculate business impact scores
+  attributes/business_scoring:
+    actions:
+      - key: business.impact.module
+        value: "business-impact-analyzer"
+        action: insert
+      - key: business.analysis.version
+        value: "1.0"
+        action: insert
+      - key: business.sla.threshold_ms
+        value: "1000"
+        action: insert
+      - key: business.revenue.per_transaction
+        value: "10.0"
+        action: insert
+      - key: business.criticality.default
+        value: "medium"
+        action: insert
+
+  # Categorize queries by business function
+  attributes/query_categorization:
+    actions:
+      - key: business.function
+        value: "transaction"
+        action: insert
+      - key: business.priority
+        value: "high"
+        action: insert
+      - key: business.category
+        value: "revenue-generating"
+        action: insert
+
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-business-impact
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_BUSINESS_IMPACT"
+        action: insert
+      - key: entity.guid
+        value: "BUSINESS|${env:CLUSTER_NAME}|business-impact"
+        action: insert
+      - key: entity.name
+        value: "business-impact"
+        action: insert
+
+exporters:
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  prometheus:
+    endpoint: 0.0.0.0:8085
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  pipelines:
+    metrics/sql_intelligence:
+      receivers: [prometheus/sql_intelligence]
+      processors: [memory_limiter, batch, resource, attributes/query_categorization, attributes/business_scoring, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_standard, prometheus, debug]
+    
+    metrics/wait_profiler:
+      receivers: [prometheus/wait_profiler]
+      processors: [memory_limiter, batch, resource, attributes/business_scoring, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_standard, prometheus]
+    
+    metrics/anomaly_detector:
+      receivers: [prometheus/anomaly_detector]
+      processors: [memory_limiter, batch, resource, attributes/business_scoring, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_standard, prometheus]
+    
+    metrics/otlp:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource, attributes/business_scoring, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_standard, prometheus]
+  
+  # WARNING: DO NOT ADD health_check to extensions list!
+  
+  # Health checks are validation-only, not production features.
+  
+  extensions: []  # NO health_check here!
+extensions:
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.

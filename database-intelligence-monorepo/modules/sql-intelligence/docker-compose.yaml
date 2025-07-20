@@ -13,10 +13,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    # volumes:
-    #   - ./src/init.sql:/docker-entrypoint-initdb.d/init.sql  # Commented out to prevent MySQL startup failures
+    volumes:
+      - ./src/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     
   sql-intelligence:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
     build: .
     environment:
       MODULE_NAME: sql-intelligence
@@ -26,12 +31,38 @@ services:
       EXPORT_PORT: 8082
       METRICS_ENDPOINT: ${METRICS_ENDPOINT:-}
       OTEL_SERVICE_NAME: sql-intelligence
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      ENVIRONMENT: production
+      CLUSTER_NAME: database-intelligence-cluster
     ports:
-      - "8082:8082"
-      - "8890:8889"
+      - "8082:8082"      # Module metrics
+      - "8890:8889"      # OTLP gRPC debug
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
     depends_on:
       mysql-test:
         condition: service_healthy
     volumes:
-      - ./config:/etc/otel
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
+      - ./config:/etc/otel:ro
+      - ./logs:/tmp/logs
+      - sql_intelligence_queue_standard:/tmp/sql-intelligence-queue-standard
+      - sql_intelligence_queue_critical:/tmp/sql-intelligence-queue-critical
+    command: ["--config", "/etc/otel/collector.yaml"]
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+volumes:
+  sql_intelligence_queue_standard:
+    driver: local
+  sql_intelligence_queue_critical:
+    driver: local

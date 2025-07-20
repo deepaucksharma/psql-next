@@ -74,7 +74,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_status_uptime{instance=\"$instance\"}",
+          "expr": "mysql_global_status_uptime{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
@@ -152,7 +152,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "up{instance=\"$instance\", job=\"mysql\"}",
+          "expr": "up{instance=\"$instance\", job=\"mysql\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
@@ -244,7 +244,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_status_threads_connected{instance=\"$instance\"}",
+          "expr": "mysql_global_status_threads_connected{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "legendFormat": "Connected",
           "refId": "A"
         },
@@ -254,7 +254,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_status_threads_running{instance=\"$instance\"}",
+          "expr": "mysql_global_status_threads_running{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "legendFormat": "Running",
           "refId": "B"
         },
@@ -264,7 +264,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_status_threads_cached{instance=\"$instance\"}",
+          "expr": "mysql_global_status_threads_cached{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "legendFormat": "Cached",
           "refId": "C"
         }
@@ -332,7 +332,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_status_threads_connected{instance=\"$instance\"}",
+          "expr": "mysql_global_status_threads_connected{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
@@ -391,7 +391,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_variables_max_connections{instance=\"$instance\"}",
+          "expr": "mysql_global_variables_max_connections{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
@@ -458,7 +458,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "increase(mysql_global_status_aborted_connects{instance=\"$instance\"}[5m])",
+          "expr": "increase(mysql_global_status_aborted_connects{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "refId": "A"
         }
       ],
@@ -550,7 +550,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_commands_total{instance=\"$instance\", command=\"select\"}[5m])",
+          "expr": "rate(mysql_global_status_com_select{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "legendFormat": "SELECT",
           "refId": "A"
         },
@@ -560,7 +560,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_commands_total{instance=\"$instance\", command=\"insert\"}[5m])",
+          "expr": "rate(mysql_global_status_com_insert{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "legendFormat": "INSERT",
           "refId": "B"
         },
@@ -570,7 +570,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_commands_total{instance=\"$instance\", command=\"update\"}[5m])",
+          "expr": "rate(mysql_global_status_com_update{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "legendFormat": "UPDATE",
           "refId": "C"
         },
@@ -580,7 +580,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_commands_total{instance=\"$instance\", command=\"delete\"}[5m])",
+          "expr": "rate(mysql_global_status_com_delete{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "legendFormat": "DELETE",
           "refId": "D"
         }
@@ -673,8 +673,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_handlers_total{instance=\"$instance\", handler=\"read_first\"}[5m])",
-          "legendFormat": "Read First",
+          "expr": "rate(mysql_global_status_queries{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
+          "legendFormat": "Total Queries",
           "refId": "A"
         },
         {
@@ -683,8 +683,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_handlers_total{instance=\"$instance\", handler=\"read_key\"}[5m])",
-          "legendFormat": "Read Key",
+          "expr": "rate(mysql_global_status_com_select{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
+          "legendFormat": "SELECT",
           "refId": "B"
         },
         {
@@ -693,8 +693,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_handlers_total{instance=\"$instance\", handler=\"read_next\"}[5m])",
-          "legendFormat": "Read Next",
+          "expr": "rate(mysql_global_status_com_insert{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])"
+          "legendFormat": "INSERT",
           "refId": "C"
         },
         {
@@ -703,8 +703,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_handlers_total{instance=\"$instance\", handler=\"read_rnd\"}[5m])",
-          "legendFormat": "Read Random",
+          "expr": "rate(mysql_global_status_com_update{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])"
+          "legendFormat": "UPDATE",
           "refId": "D"
         },
         {
@@ -713,12 +713,12 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_handlers_total{instance=\"$instance\", handler=\"read_rnd_next\"}[5m])",
-          "legendFormat": "Read Random Next",
+          "expr": "rate(mysql_global_status_com_delete{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])"
+          "legendFormat": "DELETE",
           "refId": "E"
         }
       ],
-      "title": "Handler Statistics (per second)",
+      "title": "Query Operations (per second)",
       "type": "timeseries"
     },
     {
@@ -806,7 +806,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_innodb_rows_read{instance=\"$instance\"}[5m])",
+          "expr": "rate(mysql_global_status_innodb_rows_read{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "legendFormat": "Rows Read",
           "refId": "A"
         },
@@ -816,7 +816,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_innodb_rows_inserted{instance=\"$instance\"}[5m])",
+          "expr": "rate(mysql_global_status_innodb_rows_inserted{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "legendFormat": "Rows Inserted",
           "refId": "B"
         },
@@ -826,7 +826,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_innodb_rows_updated{instance=\"$instance\"}[5m])",
+          "expr": "rate(mysql_global_status_innodb_rows_updated{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "legendFormat": "Rows Updated",
           "refId": "C"
         },
@@ -836,7 +836,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_innodb_rows_deleted{instance=\"$instance\"}[5m])",
+          "expr": "rate(mysql_global_status_innodb_rows_deleted{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "legendFormat": "Rows Deleted",
           "refId": "D"
         }
@@ -929,7 +929,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_status_innodb_buffer_pool_bytes_data{instance=\"$instance\"}",
+          "expr": "mysql_global_status_innodb_buffer_pool_bytes_data{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "legendFormat": "Data",
           "refId": "A"
         },
@@ -939,7 +939,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_status_innodb_buffer_pool_bytes_dirty{instance=\"$instance\"}",
+          "expr": "mysql_global_status_innodb_buffer_pool_bytes_dirty{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "legendFormat": "Dirty",
           "refId": "B"
         }
@@ -1032,7 +1032,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_status_innodb_row_lock_current_waits{instance=\"$instance\"}",
+          "expr": "mysql_global_status_innodb_row_lock_current_waits{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "legendFormat": "Current Waits",
           "refId": "A"
         },
@@ -1042,7 +1042,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(mysql_global_status_innodb_row_lock_waits{instance=\"$instance\"}[5m])",
+          "expr": "rate(mysql_global_status_innodb_row_lock_waits{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}[5m])",
           "legendFormat": "Lock Waits Rate",
           "refId": "B"
         }
@@ -1112,7 +1112,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "(mysql_global_status_open_tables{instance=\"$instance\"} / mysql_global_variables_table_open_cache{instance=\"$instance\"}) * 100",
+          "expr": "(mysql_global_status_open_tables{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"} / mysql_global_variables_table_open_cache{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}) * 100",
           "refId": "A"
         }
       ],
@@ -1204,7 +1204,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "mysql_global_status_innodb_row_lock_time_avg{instance=\"$instance\"}",
+          "expr": "mysql_global_status_innodb_row_lock_time_avg{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}",
           "legendFormat": "Average Lock Time",
           "refId": "A"
         }
@@ -1274,7 +1274,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "(mysql_global_status_innodb_buffer_pool_read_requests{instance=\"$instance\"} - mysql_global_status_innodb_buffer_pool_reads{instance=\"$instance\"}) / mysql_global_status_innodb_buffer_pool_read_requests{instance=\"$instance\"} * 100",
+          "expr": "(mysql_global_status_innodb_buffer_pool_read_requests{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"} - mysql_global_status_innodb_buffer_pool_reads{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"}) / mysql_global_status_innodb_buffer_pool_read_requests{instance=\"$instance\",instrumentation_provider=\"opentelemetry\"} * 100",
           "refId": "A"
         }
       ],
@@ -1321,7 +1321,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(mysql_up, instance)",
+        "definition": "label_values(mysql_global_status_uptime{instrumentation_provider=\"opentelemetry\"}, instance)",
         "hide": 0,
         "includeAll": false,
         "label": "Instance",
@@ -1329,7 +1329,7 @@
         "name": "instance",
         "options": [],
         "query": {
-          "query": "label_values(mysql_up, instance)",
+          "query": "label_values(mysql_global_status_uptime{instrumentation_provider=\"opentelemetry\"}, instance)"
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,

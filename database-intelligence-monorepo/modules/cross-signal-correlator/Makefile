@@ -1,12 +1,19 @@
 # Cross-Signal Correlator Module Makefile
 
+# WARNING: DO NOT ADD health check targets to this Makefile!
+# Health checks have been intentionally removed from production code.
+# Use shared/validation/health-check-all.sh for validation purposes.
+# See shared/validation/README-health-check.md for details.
+
 MODULE_NAME := cross-signal-correlator
 IMAGE_NAME := database-intelligence/$(MODULE_NAME)
 IMAGE_TAG := latest
 EXPORT_PORT := 8892
 HEALTH_PORT := 13137
 
-.PHONY: help build test run stop logs clean health
+.PHONY: help build test run stop logs clean
+# WARNING: Do NOT add 'health' to .PHONY list!
+# Health checks are validation-only, not production targets.
 
 help:
 	@echo "Cross-Signal Correlator Module Commands:"
@@ -16,7 +23,8 @@ help:
 	@echo "  make stop     - Stop the module"
 	@echo "  make logs     - View module logs"
 	@echo "  make clean    - Clean up resources"
-	@echo "  make health   - Check module health"
+	# Health checks are available in shared/validation/ directory
+	# Use: ../shared/validation/health-check-all.sh
 
 build:
 	@echo "Building $(MODULE_NAME) image..."
@@ -53,9 +61,6 @@ clean:
 	docker-compose down -v
 	docker rmi $(IMAGE_NAME):$(IMAGE_TAG) || true
 
-health:
-	@echo "Checking $(MODULE_NAME) health..."
-	@curl -s http://localhost:$(HEALTH_PORT)/health || echo "Health check failed"
 
 metrics:
 	@echo "Fetching $(MODULE_NAME) metrics..."

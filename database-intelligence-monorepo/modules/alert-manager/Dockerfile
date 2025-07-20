@@ -1,17 +1,13 @@
-FROM otel/opentelemetry-collector-contrib:0.91.0
+FROM otel/opentelemetry-collector-contrib:latest
 
-# Create directories for alerts and configurations
-RUN mkdir -p /var/log/alerts /etc/otelcol
-
-# Set up permissions
-RUN chown -R 10001:10001 /var/log/alerts
+# WARNING: DO NOT ADD HEALTHCHECK instructions here!
+# Health checks have been intentionally removed from production images.
+# Use shared/validation/health-check-all.sh for validation purposes.
 
 # Copy configuration
-COPY config/collector.yaml /etc/otelcol/config.yaml
+COPY config/collector.yaml /etc/otel/collector.yaml
 
-# Use the default entrypoint and command
-USER 10001:10001
+# Expose ports for OpenTelemetry functionality only
+EXPOSE 8089
+# WARNING: DO NOT expose port 13133 (health check port)!
 
-EXPOSE 8089 4318 9091 13134
-
-CMD ["--config=/etc/otelcol/config.yaml"]

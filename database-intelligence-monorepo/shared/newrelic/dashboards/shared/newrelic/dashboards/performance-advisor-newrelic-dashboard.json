@@ -1,0 +1,184 @@
+{
+  "name": "MySQL Performance Advisor - New Relic",
+  "description": "Performance insights and optimization recommendations via OpenTelemetry",
+  "permissions": "PUBLIC_READ_WRITE", 
+  "pages": [
+    {
+      "name": "Performance Advisory",
+      "description": "Automated performance recommendations and insights",
+      "widgets": [
+        {
+          "title": "Performance Health Score",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.gauge"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT (100 - (average(mysql.global.status.threads_connected) / average(mysql.global.variables.max_connections) * 100) - (rate(sum(mysql.global.status.slow_queries), 1 minute) / rate(sum(mysql.global.status.queries), 1 minute) * 100)) as 'Performance Score' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' SINCE 5 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 60,
+                "alertSeverity": "CRITICAL"
+              },
+              {
+                "value": 80,
+                "alertSeverity": "WARNING"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Connection Pool Efficiency",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.global.status.threads_connected) / average(mysql.global.variables.max_connections) * 100 as 'Pool Usage %', rate(sum(mysql.global.status.aborted_connects), 1 minute) as 'Failed Connects/min' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' SINCE 5 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Slow Query Impact",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT rate(sum(mysql.global.status.slow_queries), 1 minute) as 'Slow Queries/min', (rate(sum(mysql.global.status.slow_queries), 1 minute) / rate(sum(mysql.global.status.queries), 1 minute)) * 100 as 'Slow Query %' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' SINCE 5 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "InnoDB Performance Metrics",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 8,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average((mysql.global.status.innodb_buffer_pool_read_requests - mysql.global.status.innodb_buffer_pool_reads) / mysql.global.status.innodb_buffer_pool_read_requests * 100) as 'Buffer Pool Hit Ratio %', average(mysql.global.status.innodb_row_lock_current_waits) as 'Current Lock Waits', average(mysql.global.status.innodb_row_lock_time_avg) as 'Avg Lock Time (ms)' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Top Performance Issues",
+          "layout": {
+            "column": 9,
+            "row": 4,
+            "width": 4,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(entity.name) as 'Instance', latest(mysql.global.status.threads_connected) / latest(mysql.global.variables.max_connections) * 100 as 'Connection Usage %', rate(sum(mysql.global.status.slow_queries), 1 minute) as 'Slow Queries/min', average(mysql.global.status.innodb_row_lock_current_waits) as 'Lock Waits' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' FACET entity.guid SINCE 5 minutes ago ORDER BY rate(sum(mysql.global.status.slow_queries), 1 minute) DESC"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Optimization Recommendations",
+      "description": "Data-driven performance optimization suggestions",
+      "widgets": [
+        {
+          "title": "Buffer Pool Optimization",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.global.status.innodb_buffer_pool_bytes_data / 1024 / 1024 / 1024) as 'Data Size (GB)', average(mysql.global.status.innodb_buffer_pool_bytes_dirty / 1024 / 1024 / 1024) as 'Dirty Data (GB)', average((mysql.global.status.innodb_buffer_pool_read_requests - mysql.global.status.innodb_buffer_pool_reads) / mysql.global.status.innodb_buffer_pool_read_requests * 100) as 'Hit Ratio %' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Connection Pool Analysis",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.global.status.threads_connected) as 'Active Connections', average(mysql.global.status.threads_running) as 'Running Threads', rate(sum(mysql.global.status.aborted_connects), 1 minute) as 'Aborted Connects/min' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND entity.type = 'MYSQL_INSTANCE' TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Performance Recommendations",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.markdown"
+          },
+          "rawConfiguration": {
+            "text": "## 🎯 Performance Optimization Recommendations\n\n### Based on Current Metrics Analysis:\n\n#### 🔴 High Priority\n- **Connection Pool**: Monitor connection usage > 80%\n- **Buffer Pool**: Ensure hit ratio > 95%\n- **Slow Queries**: Target < 1% of total queries\n\n#### 🟡 Medium Priority  \n- **Lock Contention**: Monitor row lock waits\n- **Replication Lag**: Keep < 5 seconds\n- **Index Usage**: Optimize queries with no index usage\n\n#### 🟢 Monitoring\n- **Query Patterns**: Regular analysis of top queries\n- **Resource Trends**: Track growth patterns\n- **Performance Baselines**: Establish normal operating ranges\n\n*Recommendations update automatically based on your MySQL metrics flow.*"
+          }
+        }
+      ]
+    }
+  ]
+}

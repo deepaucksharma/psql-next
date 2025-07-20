@@ -1,16 +1,16 @@
 receivers:
   sqlquery/wait_events:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 5s
     queries:
       - sql: |
           SELECT 
             EVENT_NAME,
             COUNT_STAR as wait_count,
-            SUM_TIMER_WAIT/1000000000000 as total_wait_sec,
-            AVG_TIMER_WAIT/1000000000000 as avg_wait_sec,
-            MAX_TIMER_WAIT/1000000000000 as max_wait_sec
+            SUM_TIMER_WAIT/1000000000 as total_wait_ms,
+            AVG_TIMER_WAIT/1000000000 as avg_wait_ms,
+            MAX_TIMER_WAIT/1000000000 as max_wait_ms
           FROM performance_schema.events_waits_summary_global_by_event_name
           WHERE COUNT_STAR > 0
             AND EVENT_NAME NOT LIKE 'idle%'
@@ -20,43 +20,43 @@ receivers:
           - metric_name: mysql.wait.count
             value_column: wait_count
             attribute_columns: [EVENT_NAME]
-          - metric_name: mysql.wait.time.total
-            value_column: total_wait_sec
+          - metric_name: mysql.wait.time_ms
+            value_column: total_wait_ms
             attribute_columns: [EVENT_NAME]
-          - metric_name: mysql.wait.time.avg
-            value_column: avg_wait_sec
+          - metric_name: mysql.wait.time_avg_ms
+            value_column: avg_wait_ms
             attribute_columns: [EVENT_NAME]
-          - metric_name: mysql.wait.time.max
-            value_column: max_wait_sec
+          - metric_name: mysql.wait.time_max_ms
+            value_column: max_wait_ms
             attribute_columns: [EVENT_NAME]
   
   sqlquery/mutex_waits:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 10s
     queries:
       - sql: |
           SELECT 
             OBJECT_NAME as mutex_name,
             COUNT_STAR as wait_count,
-            SUM_TIMER_WAIT/1000000000000 as total_wait_sec,
-            AVG_TIMER_WAIT/1000000000000 as avg_wait_sec
+            SUM_TIMER_WAIT/1000000000 as total_wait_ms,
+            AVG_TIMER_WAIT/1000000000 as avg_wait_ms
           FROM performance_schema.events_waits_summary_by_instance
           WHERE OBJECT_NAME IS NOT NULL
             AND COUNT_STAR > 0
           ORDER BY SUM_TIMER_WAIT DESC
           LIMIT 20
         metrics:
-          - metric_name: mysql.mutex.wait.count
+          - metric_name: mysql.wait.mutex.count
             value_column: wait_count
             attribute_columns: [mutex_name]
-          - metric_name: mysql.mutex.wait.time
-            value_column: total_wait_sec
+          - metric_name: mysql.wait.mutex.time_ms
+            value_column: total_wait_ms
             attribute_columns: [mutex_name]
   
   sqlquery/io_waits:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 10s
     queries:
       - sql: |
@@ -64,7 +64,7 @@ receivers:
             FILE_NAME,
             EVENT_NAME,
             COUNT_STAR as io_count,
-            SUM_TIMER_WAIT/1000000000000 as total_io_wait_sec,
+            SUM_TIMER_WAIT/1000000000 as total_io_wait_ms,
             COUNT_READ as read_count,
             COUNT_WRITE as write_count,
             SUM_NUMBER_OF_BYTES_READ as bytes_read,
@@ -75,22 +75,22 @@ receivers:
           ORDER BY SUM_TIMER_WAIT DESC
           LIMIT 30
         metrics:
-          - metric_name: mysql.io.wait.count
+          - metric_name: mysql.wait.io.count
             value_column: io_count
             attribute_columns: [FILE_NAME, EVENT_NAME]
-          - metric_name: mysql.io.wait.time
-            value_column: total_io_wait_sec
+          - metric_name: mysql.wait.io.time_ms
+            value_column: total_io_wait_ms
             attribute_columns: [FILE_NAME, EVENT_NAME]
-          - metric_name: mysql.io.bytes.read
+          - metric_name: mysql.io.bytes_read
             value_column: bytes_read
             attribute_columns: [FILE_NAME]
-          - metric_name: mysql.io.bytes.write
+          - metric_name: mysql.io.bytes_written
             value_column: bytes_written
             attribute_columns: [FILE_NAME]
   
   sqlquery/lock_waits:
     driver: mysql
-    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
     collection_interval: 5s
     queries:
       - sql: |
@@ -105,7 +105,7 @@ receivers:
           WHERE OBJECT_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
           GROUP BY OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE
         metrics:
-          - metric_name: mysql.lock.active.count
+          - metric_name: mysql.lock.active_count
             value_column: lock_count
             attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE]
 
@@ -130,24 +130,33 @@ processors:
         action: insert
   
   transform/wait_categorization:
+    error_mode: ignore
     metric_statements:
       - context: datapoint
         statements:
-          - set(attributes["wait_category"], 
-                Case(
-                  IsMatch(attributes["EVENT_NAME"], "wait/io/.*"), "io",
-                  IsMatch(attributes["EVENT_NAME"], "wait/lock/.*"), "lock",
-                  IsMatch(attributes["EVENT_NAME"], "wait/synch/mutex/.*"), "mutex",
-                  IsMatch(attributes["EVENT_NAME"], "wait/synch/cond/.*"), "condition",
-                  IsMatch(attributes["EVENT_NAME"], "wait/synch/rwlock/.*"), "rwlock",
-                  "other"
-                )) where attributes["EVENT_NAME"] != nil
-          - set(attributes["severity"], 
-                Case(
-                  attributes["avg_wait_sec"] > 1, "critical",
-                  attributes["avg_wait_sec"] > 0.1, "warning",
-                  "normal"
-                )) where attributes["avg_wait_sec"] != nil
+          # Categorize wait events based on EVENT_NAME patterns
+          # Events starting with "wait/io/" should be categorized as "io"
+          - set(attributes["wait_category"], "io") where attributes["EVENT_NAME"] != nil and IsMatch(attributes["EVENT_NAME"], "^wait/io/.*")
+          
+          # Events starting with "wait/lock/" should be categorized as "lock"
+          - set(attributes["wait_category"], "lock") where attributes["EVENT_NAME"] != nil and attributes["wait_category"] == nil and IsMatch(attributes["EVENT_NAME"], "^wait/lock/.*")
+          
+          # Events starting with "wait/synch/mutex/" should be categorized as "mutex"
+          - set(attributes["wait_category"], "mutex") where attributes["EVENT_NAME"] != nil and attributes["wait_category"] == nil and IsMatch(attributes["EVENT_NAME"], "^wait/synch/mutex/.*")
+          
+          # Events starting with "wait/synch/cond/" should be categorized as "condition"
+          - set(attributes["wait_category"], "condition") where attributes["EVENT_NAME"] != nil and attributes["wait_category"] == nil and IsMatch(attributes["EVENT_NAME"], "^wait/synch/cond/.*")
+          
+          # Events containing "net" should be categorized as "network"
+          - set(attributes["wait_category"], "network") where attributes["EVENT_NAME"] != nil and attributes["wait_category"] == nil and IsMatch(attributes["EVENT_NAME"], ".*net.*")
+          
+          # All others should be "other"
+          - set(attributes["wait_category"], "other") where attributes["EVENT_NAME"] != nil and attributes["wait_category"] == nil
+          
+          # Set severity based on wait time
+          - set(attributes["severity"], "critical") where attributes["avg_wait_ms"] != nil and attributes["avg_wait_ms"] > 1000
+          - set(attributes["severity"], "warning") where attributes["severity"] == nil and attributes["avg_wait_ms"] != nil and attributes["avg_wait_ms"] > 100
+          - set(attributes["severity"], "normal") where attributes["severity"] == nil and attributes["avg_wait_ms"] != nil
 
   resource:
     attributes:
@@ -172,8 +181,13 @@ service:
       processors: [memory_limiter, batch, attributes, transform/wait_categorization, resource]
       exporters: [prometheus, debug]
   
-  extensions: [health_check]
-
+  # WARNING: DO NOT ADD health_check to extensions list!
+  
+  # Health checks are validation-only, not production features.
+  
+  extensions: []  # NO health_check here!
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.

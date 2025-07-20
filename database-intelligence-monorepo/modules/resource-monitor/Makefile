@@ -1,4 +1,11 @@
+# WARNING: DO NOT ADD health check targets to this Makefile!
+# Health checks have been intentionally removed from production code.
+# Use shared/validation/health-check-all.sh for validation purposes.
+# See shared/validation/README-health-check.md for details.
+
 .PHONY: build start stop restart logs clean status test help
+# WARNING: Do NOT add 'health' to .PHONY list!
+# Health checks are validation-only, not production targets.
 
 # Default target
 .DEFAULT_GOAL := help
@@ -12,6 +19,8 @@ IMAGE_NAME := resource-monitor:latest
 help:
 	@echo "Resource Monitor Module Commands:"
 	@echo ""
+	# Health checks are available in shared/validation/ directory
+	# Use: ../shared/validation/health-check-all.sh
 	@grep -E '^##' Makefile | sed 's/## //'
 
 ## build: Build the Docker image
@@ -51,6 +60,7 @@ status:
 	@docker ps -a | grep $(CONTAINER_NAME) || echo "Container not found"
 	@echo ""
 	@echo "Health check:"
+	# WARNING: Health check endpoint deprecated - use ../shared/validation/health-check-all.sh
 	@curl -s http://localhost:8091/ && echo "Collector is healthy" || echo "Collector is not responding"
 
 ## metrics: Display current metrics

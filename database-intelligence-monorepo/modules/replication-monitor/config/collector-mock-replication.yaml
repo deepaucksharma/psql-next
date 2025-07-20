@@ -1,0 +1,140 @@
+receivers:
+  # Generate mock replication metrics for demonstration
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'mock_replication_metrics'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['localhost:9999']  # Non-existent target
+          # Use metric_relabel_configs to create mock metrics
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              target_label: __tmp_mock
+              replacement: "1"
+            - source_labels: [__tmp_mock]
+              target_label: __name__
+              replacement: mysql_replication_lag_seconds
+            - source_labels: []
+              target_label: instance_role
+              replacement: primary
+            - source_labels: []
+              target_label: value
+              replacement: "0"
+  
+  # Accept OTLP data
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+  resource:
+    attributes:
+      - key: service.name
+        value: replication-monitor
+        action: upsert
+      - key: module
+        value: replication-monitor
+        action: upsert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+
+  # Generate mock replication metrics
+  attributes/mock_metrics:
+    actions:
+      - key: mysql.replication.status
+        value: "running"
+        action: insert
+      - key: mysql.replication.lag_seconds
+        value: "2"
+        action: insert
+      - key: mysql.replication.threads_running
+        value: "2"
+        action: insert
+      - key: mysql.replication.gtid_mode
+        value: "ON"
+        action: insert
+
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-replication-monitor
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_REPLICATION"
+        action: insert
+      - key: entity.guid
+        value: "REPLICATION|${env:CLUSTER_NAME}|replication-monitor"
+        action: insert
+      - key: entity.name
+        value: "replication-monitor"
+        action: insert
+
+exporters:
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  prometheus:
+    endpoint: 0.0.0.0:8086
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource, attributes/mock_metrics, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_standard, prometheus, debug]
+  
+  # WARNING: DO NOT ADD health_check to extensions list!
+  
+  # Health checks are validation-only, not production features.
+  
+  extensions: []  # NO health_check here!
+extensions:
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.

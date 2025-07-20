@@ -24,6 +24,15 @@ MySQL wait event profiling and analysis module for identifying performance bottl
   - Lock type and mode analysis
   - Schema and table level lock metrics
 
+## ⚠️ Health Check Policy
+
+**IMPORTANT**: Health check endpoints (port 13133) have been intentionally removed from production code.
+
+- **For validation**: Use `shared/validation/health-check-all.sh`
+- **Documentation**: See `shared/validation/README-health-check.md`
+- **Do NOT**: Add health check endpoints back to production configs
+- **Do NOT**: Expose port 13133 in Docker configurations
+
 ## Quick Start
 
 ```bash
@@ -36,8 +45,8 @@ make run
 # Generate test wait events
 make generate-load
 
-# View wait metrics
-make status
+# View wait metrics (production endpoint)
+curl http://localhost:8083/metrics | grep wait_
 
 # Stop the module
 make stop

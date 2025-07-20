@@ -1,0 +1,30 @@
+==========================================
+SQL Intelligence Module Validation
+==========================================
+
+1. Configuration Cleanup Validation
+-----------------------------------
+Warning: Backup files still exist... [0;32mOK[0m
+Checking: No collector-enhanced.yaml... [0;32mPASS[0m
+Checking: No collector-enterprise.yaml... [0;32mPASS[0m
+Checking: No collector-enterprise-working.yaml... [0;32mPASS[0m
+Checking: collector.yaml exists... [0;32mPASS[0m
+
+2. Architecture Validation
+--------------------------
+Checking: No duplicate metrics/standard pipeline... [0;32mPASS[0m
+Checking: No duplicate metrics/critical pipeline... [0;32mPASS[0m
+Checking: Single metrics pipeline exists... [0;32mPASS[0m
+Checking: Routing processor configured... [0;32mPASS[0m
+
+3. Intelligence Features Validation
+-----------------------------------
+Checking: Query intelligence transform exists... [0;32mPASS[0m
+Checking: Index efficiency scoring logic... [0;32mPASS[0m
+Checking: Impact scoring implementation... [0;32mPASS[0m
+Checking: Recommendations processor... [0;32mPASS[0m
+
+4. Metric Naming Validation
+---------------------------
+Warning: Old metric naming pattern (exec_total)... [0;32mOK[0m
+Warning: Inconsistent unit naming (_ms suffix)... [1;33mWARN[0m

@@ -1,24 +1,24 @@
 receivers:
   mysql:
-    endpoint: mysql-master:3306
-    username: root
-    password: rootpassword
-    database: test_db
+    endpoint: ${env:MYSQL_PRIMARY_ENDPOINT:-mysql-master:3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-rootpassword}
+    database: ${env:MYSQL_DATABASE:-test_db}
     collection_interval: 10s
     transport: tcp
 
   mysql/replica:
-    endpoint: mysql-replica:3306
-    username: root
-    password: rootpassword
-    database: test_db
+    endpoint: ${env:MYSQL_REPLICA_ENDPOINT:-mysql-replica:3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-rootpassword}
+    database: ${env:MYSQL_DATABASE:-test_db}
     collection_interval: 10s
     transport: tcp
 
   # Custom SQL queries for replication monitoring
   sqlquery:
     driver: mysql
-    datasource: "root:rootpassword@tcp(mysql-master:3306)/test_db"
+    datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-rootpassword}@tcp(${env:MYSQL_PRIMARY_ENDPOINT:-mysql-master:3306})/${env:MYSQL_DATABASE:-test_db}"
     queries:
       - sql: |
           SHOW MASTER STATUS
@@ -37,7 +37,7 @@ receivers:
 
   sqlquery/replica:
     driver: mysql
-    datasource: "root:rootpassword@tcp(mysql-replica:3306)/test_db"
+    datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-rootpassword}@tcp(${env:MYSQL_REPLICA_ENDPOINT:-mysql-replica:3306})/${env:MYSQL_DATABASE:-test_db}"
     queries:
       - sql: |
           SHOW SLAVE STATUS
@@ -162,13 +162,10 @@ exporters:
     sampling_thereafter: 200
 
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
-    path: "/health"
-    check_collector_pipeline:
-      enabled: true
-      interval: "5m"
-      exporter_failure_threshold: 5
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
 
   pprof:
     endpoint: 0.0.0.0:1777
@@ -177,7 +174,9 @@ extensions:
     endpoint: 0.0.0.0:55679
 
 service:
-  extensions: [health_check, pprof, zpages]
+  # WARNING: DO NOT ADD health_check to extensions list!
+  # Health checks are validation-only, not production features.
+  extensions: [pprof, zpages]  # NO health_check here!
   pipelines:
     metrics:
       receivers: [mysql, mysql/replica, sqlquery, sqlquery/replica]
@@ -191,6 +190,3 @@ service:
       sampling:
         initial: 10
         thereafter: 100
-    metrics:
-      level: detailed
-      address: 0.0.0.0:8888

@@ -1,159 +1,329 @@
+# Anomaly Detector - Consolidated Configuration
+# Comprehensive statistical anomaly detection with z-score analysis
+
 receivers:
-  # Prometheus federation receiver to pull metrics from other modules
+  # Federation from other modules to detect anomalies across all metrics
   prometheus:
     config:
       scrape_configs:
         - job_name: 'core-metrics-federation'
-          scrape_interval: 10s
+          scrape_interval: ${env:ANOMALY_SCRAPE_INTERVAL:-10s}
           static_configs:
-            - targets: ['${env:CORE_METRICS_ENDPOINT}']
+            - targets: ['${env:CORE_METRICS_ENDPOINT:-core-metrics:8081}']
           metric_relabel_configs:
             - source_labels: [__name__]
               regex: 'mysql_.*'
               action: keep
               
         - job_name: 'sql-intelligence-federation'
-          scrape_interval: 10s
+          scrape_interval: ${env:ANOMALY_SCRAPE_INTERVAL:-10s}
           static_configs:
-            - targets: ['${env:SQL_INTELLIGENCE_ENDPOINT}']
+            - targets: ['${env:SQL_INTELLIGENCE_ENDPOINT:-sql-intelligence:8082}']
           metric_relabel_configs:
             - source_labels: [__name__]
-              regex: '(mysql_query_.*|mysql_slow_.*|mysql_plan_.*)'
+              regex: 'mysql_.*'
               action: keep
               
         - job_name: 'wait-profiler-federation'
-          scrape_interval: 10s
+          scrape_interval: ${env:ANOMALY_SCRAPE_INTERVAL:-10s}
           static_configs:
-            - targets: ['${env:WAIT_PROFILER_ENDPOINT}']
+            - targets: ['${env:WAIT_PROFILER_ENDPOINT:-wait-profiler:8083}']
           metric_relabel_configs:
             - source_labels: [__name__]
-              regex: 'mysql_wait_.*'
+              regex: 'mysql_.*'
               action: keep
 
+        - job_name: 'resource-monitor-federation'
+          scrape_interval: ${env:ANOMALY_SCRAPE_INTERVAL:-10s}
+          static_configs:
+            - targets: ['${env:RESOURCE_MONITOR_ENDPOINT:-resource-monitor:8088}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '(host_.*|mysql_process_.*)'
+              action: keep
+
+  # OTLP receiver for direct metric ingestion
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
 processors:
+  # Memory management - always first
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+
   batch:
-    timeout: 5s
+    timeout: 10s
     send_batch_size: 1000
-  
-  # Transform processor for anomaly detection using statistical methods
-  transform/anomaly_detection:
-    error_mode: ignore
-    metric_statements:
-      # Connection spike detection
-      - context: metric
-        statements:
-          - set(name, "anomaly_score_connections") where name == "mysql_connections_current"
-          - set(attributes["anomaly_type"], "connection_spike") where name == "anomaly_score_connections"
-          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_connections" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
-          
-      # Query latency deviation detection
-      - context: metric
-        statements:
-          - set(name, "anomaly_score_query_latency") where name == "mysql_query_duration_milliseconds"
-          - set(attributes["anomaly_type"], "latency_deviation") where name == "anomaly_score_query_latency"
-          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_query_latency" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
-          
-      # Wait event anomaly detection
-      - context: metric
-        statements:
-          - set(name, "anomaly_score_wait_events") where name == "mysql_wait_time_total"
-          - set(attributes["anomaly_type"], "wait_anomaly") where name == "anomaly_score_wait_events"
-          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_wait_events" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
-          
-      # Resource usage pattern detection
-      - context: metric
-        statements:
-          - set(name, "anomaly_score_cpu") where name == "mysql_cpu_percent"
-          - set(attributes["anomaly_type"], "resource_usage") where name == "anomaly_score_cpu"
-          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_cpu" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
+    send_batch_max_size: 1500
 
-  # Generate alerts based on anomaly scores
-  transform/anomaly_alerts:
-    error_mode: ignore
-    metric_statements:
-      - context: metric
-        statements:
-          # Create alert metric for connection spikes
-          - set(name, "anomaly_alert") where name == "anomaly_score_connections" and value > ${env:CONNECTION_SPIKE_THRESHOLD}
-          - set(attributes["alert_severity"], "high") where name == "anomaly_alert" and attributes["anomaly_type"] == "connection_spike"
-          - set(value, 1) where name == "anomaly_alert"
-          
-          # Create alert metric for latency deviations
-          - set(name, "anomaly_alert") where name == "anomaly_score_query_latency" and value > ${env:LATENCY_DEVIATION_THRESHOLD}
-          - set(attributes["alert_severity"], "critical") where name == "anomaly_alert" and attributes["anomaly_type"] == "latency_deviation"
-          - set(value, 1) where name == "anomaly_alert"
-          
-          # Create alert metric for wait anomalies
-          - set(name, "anomaly_alert") where name == "anomaly_score_wait_events" and value > ${env:WAIT_EVENT_THRESHOLD}
-          - set(attributes["alert_severity"], "medium") where name == "anomaly_alert" and attributes["anomaly_type"] == "wait_anomaly"
-          - set(value, 1) where name == "anomaly_alert"
-          
-          # Create alert metric for resource usage
-          - set(name, "anomaly_alert") where name == "anomaly_score_cpu" and value > ${env:RESOURCE_USAGE_THRESHOLD}
-          - set(attributes["alert_severity"], "medium") where name == "anomaly_alert" and attributes["anomaly_type"] == "resource_usage"
-          - set(value, 1) where name == "anomaly_alert"
-
-  # Add baseline calculation (simplified - in production use a more sophisticated approach)
-  transform/baseline_enrichment:
-    error_mode: ignore
-    metric_statements:
-      - context: metric
-        statements:
-          # Add baseline metadata (these would normally come from a baseline service)
-          - set(attributes["baseline_mean"], 100) where name == "mysql_connections_current"
-          - set(attributes["baseline_stddev"], 20) where name == "mysql_connections_current"
-          - set(attributes["baseline_mean"], 50) where name == "mysql_query_duration_milliseconds"
-          - set(attributes["baseline_stddev"], 15) where name == "mysql_query_duration_milliseconds"
-          - set(attributes["baseline_mean"], 1000) where name == "mysql_wait_time_total"
-          - set(attributes["baseline_stddev"], 300) where name == "mysql_wait_time_total"
-          - set(attributes["baseline_mean"], 50) where name == "mysql_cpu_percent"
-          - set(attributes["baseline_stddev"], 10) where name == "mysql_cpu_percent"
-
+  # Core attributes
   attributes:
     actions:
       - key: module
         value: anomaly-detector
         action: insert
-      - key: detection_method
+      - key: cluster.name
+        value: ${env:CLUSTER_NAME}
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: tier
+        value: intelligence
+        action: insert
+      - key: detection.method
         value: statistical_zscore
+        action: insert
+      - key: detection.version
+        value: "2.0"
         action: insert
 
   resource:
     attributes:
       - key: service.name
-        value: ${env:OTEL_SERVICE_NAME}
+        value: anomaly-detector
+        action: upsert
+      - key: service.version
+        value: "2.0.0"
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
         action: upsert
 
+  # Baseline enrichment - add statistical baselines
+  transform/baseline_enrichment:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          # Connection baselines
+          - set(attributes["baseline_mean"], ${env:CONNECTIONS_BASELINE_MEAN:-100}) where name == "mysql_connections_current"
+          - set(attributes["baseline_stddev"], ${env:CONNECTIONS_BASELINE_STDDEV:-20}) where name == "mysql_connections_current"
+          
+          # Query performance baselines
+          - set(attributes["baseline_mean"], ${env:QUERY_LATENCY_BASELINE_MEAN:-50}) where IsMatch(name, "mysql_query.*latency.*")
+          - set(attributes["baseline_stddev"], ${env:QUERY_LATENCY_BASELINE_STDDEV:-15}) where IsMatch(name, "mysql_query.*latency.*")
+          
+          # Wait time baselines
+          - set(attributes["baseline_mean"], ${env:WAIT_TIME_BASELINE_MEAN:-100}) where IsMatch(name, "mysql_wait.*time.*")
+          - set(attributes["baseline_stddev"], ${env:WAIT_TIME_BASELINE_STDDEV:-30}) where IsMatch(name, "mysql_wait.*time.*")
+          
+          # Threads baselines
+          - set(attributes["baseline_mean"], ${env:THREADS_BASELINE_MEAN:-10}) where name == "mysql_threads_running"
+          - set(attributes["baseline_stddev"], ${env:THREADS_BASELINE_STDDEV:-3}) where name == "mysql_threads_running"
+          
+          # Buffer pool baselines
+          - set(attributes["baseline_mean"], ${env:BUFFER_POOL_BASELINE_MEAN:-70}) where IsMatch(name, "mysql_buffer_pool.*")
+          - set(attributes["baseline_stddev"], ${env:BUFFER_POOL_BASELINE_STDDEV:-15}) where IsMatch(name, "mysql_buffer_pool.*")
+          
+          # I/O baselines
+          - set(attributes["baseline_mean"], ${env:IO_BASELINE_MEAN:-1000}) where IsMatch(name, "mysql.*io.*")
+          - set(attributes["baseline_stddev"], ${env:IO_BASELINE_STDDEV:-300}) where IsMatch(name, "mysql.*io.*")
+          
+          # Lock baselines
+          - set(attributes["baseline_mean"], ${env:LOCK_BASELINE_MEAN:-5}) where IsMatch(name, "mysql.*lock.*")
+          - set(attributes["baseline_stddev"], ${env:LOCK_BASELINE_STDDEV:-2}) where IsMatch(name, "mysql.*lock.*")
+          
+          # Default baselines for any metric without specific baseline
+          - set(attributes["baseline_mean"], 100) where attributes["baseline_mean"] == nil
+          - set(attributes["baseline_stddev"], 30) where attributes["baseline_stddev"] == nil
+          
+          # Add metadata
+          - set(attributes["baseline_source"], ${env:BASELINE_SOURCE:-"static"})
+
+  # Z-score based anomaly detection
+  transform/anomaly_detection:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        conditions:
+          - attributes["baseline_mean"] != nil and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
+        statements:
+          # Calculate z-score
+          - set(attributes["z_score"], (value - attributes["baseline_mean"]) / attributes["baseline_stddev"])
+          - set(attributes["original_value"], value)
+          - set(attributes["original_metric"], name)
+          
+          # Determine anomaly type based on metric
+          - set(attributes["anomaly_type"], "connection_anomaly") where IsMatch(name, "mysql_connections.*")
+          - set(attributes["anomaly_type"], "query_performance_anomaly") where IsMatch(name, "mysql_query.*")
+          - set(attributes["anomaly_type"], "wait_event_anomaly") where IsMatch(name, "mysql_wait.*")
+          - set(attributes["anomaly_type"], "thread_anomaly") where IsMatch(name, "mysql_threads.*")
+          - set(attributes["anomaly_type"], "buffer_pool_anomaly") where IsMatch(name, "mysql_buffer_pool.*")
+          - set(attributes["anomaly_type"], "io_anomaly") where IsMatch(name, "mysql.*io.*")
+          - set(attributes["anomaly_type"], "lock_anomaly") where IsMatch(name, "mysql.*lock.*")
+          - set(attributes["anomaly_type"], "resource_anomaly") where IsMatch(name, "host_.*")
+          - set(attributes["anomaly_type"], "generic_anomaly") where attributes["anomaly_type"] == nil
+          
+          # Set severity based on z-score
+          - set(attributes["severity"], "critical") where attributes["z_score"] >= 4 or attributes["z_score"] <= -4
+          - set(attributes["severity"], "high") where (attributes["z_score"] >= 3 and attributes["z_score"] < 4) or (attributes["z_score"] <= -3 and attributes["z_score"] > -4)
+          - set(attributes["severity"], "medium") where (attributes["z_score"] >= 2 and attributes["z_score"] < 3) or (attributes["z_score"] <= -2 and attributes["z_score"] > -3)
+          - set(attributes["severity"], "low") where (attributes["z_score"] >= 1.5 and attributes["z_score"] < 2) or (attributes["z_score"] <= -1.5 and attributes["z_score"] > -2)
+          - set(attributes["severity"], "none") where attributes["z_score"] > -1.5 and attributes["z_score"] < 1.5
+          
+          # Set anomaly flag
+          - set(attributes["is_anomaly"], true) where attributes["z_score"] >= 2 or attributes["z_score"] <= -2
+          - set(attributes["is_anomaly"], false) where attributes["is_anomaly"] != true
+          
+          # Add context information
+          - set(attributes["deviation_percentage"], ((value - attributes["baseline_mean"]) / attributes["baseline_mean"]) * 100) where attributes["baseline_mean"] > 0
+
+  # Generate anomaly score metrics
+  transform/generate_anomaly_scores:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        conditions:
+          - attributes["is_anomaly"] == true
+        statements:
+          # Create anomaly score metric
+          - set(name, Concat(["anomaly_score_", attributes["anomaly_type"]], ""))
+          - set(unit, "zscore")
+          - set(value, attributes["z_score"])
+
+  # Generate alert metrics for critical anomalies
+  transform/generate_alerts:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        conditions:
+          - attributes["is_anomaly"] == true and (attributes["severity"] == "critical" or attributes["severity"] == "high")
+        statements:
+          # Create alert metric
+          - set(name, "anomaly_alert")
+          - set(attributes["alert_name"], Concat([attributes["anomaly_type"], "_", attributes["severity"], "_alert"], ""))
+          - set(attributes["alert_message"], Concat(["Anomaly detected: type=", attributes["anomaly_type"], ", severity=", attributes["severity"], ", z-score=", ToString(attributes["z_score"]), ", value=", ToString(attributes["original_value"]), ", baseline=", ToString(attributes["baseline_mean"]), ", deviation=", ToString(attributes["deviation_percentage"]), "%"], ""))
+          - set(value, 1)
+
+  # New Relic attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-anomaly-detector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+
+  # Entity synthesis
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_ANOMALY_DETECTOR"
+        action: insert
+      - key: entity.guid
+        value: Concat(["ANOMALY|", attributes["cluster.name"], "|", attributes["instance"]], "")
+        action: insert
+      - key: entity.name
+        value: Concat([attributes["instance"], "-anomaly-detector"], "")
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+
+  # Routing processor to handle different metric types
+  routing:
+    from_attribute: "name"
+    table:
+      - value: "anomaly_alert"
+        exporters: [file/alerts, prometheus]
+      - value: "anomaly_score_.*"
+        exporters: [otlphttp/newrelic, prometheus]
+    default_exporters: [otlphttp/newrelic, prometheus]
+
 exporters:
+  # Primary New Relic OTLP exporter
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # Prometheus exporter for federation
   prometheus:
-    endpoint: "0.0.0.0:${env:EXPORT_PORT}"
-    namespace: anomaly
+    endpoint: 0.0.0.0:8084
+    namespace: mysql
+    resource_to_telemetry_conversion:
+      enabled: true
+    metric_expiration: 5m
     const_labels:
       module: anomaly-detector
-  
-  debug:
-    verbosity: detailed
-    
-  # Export alerts to a file (in production, use alertmanager or similar)
-  file:
-    path: /tmp/anomaly_alerts.json
+
+  # File exporter for alerts
+  file/alerts:
+    path: /tmp/anomaly-alerts/alerts.json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 5
     format: json
+
+  # Debug exporter
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 100
 
 service:
   pipelines:
+    # Single comprehensive pipeline
     metrics:
-      receivers: [prometheus]
-      processors: [batch, transform/baseline_enrichment, transform/anomaly_detection, transform/anomaly_alerts, attributes, resource]
-      exporters: [prometheus, debug]
-    
-    # Separate pipeline for alerts
-    metrics/alerts:
-      receivers: [prometheus]
-      processors: [batch, transform/baseline_enrichment, transform/anomaly_detection, transform/anomaly_alerts]
-      exporters: [file, debug]
-  
-  extensions: [health_check]
+      receivers: [prometheus, otlp]
+      processors: [
+        memory_limiter,
+        batch,
+        attributes,
+        resource,
+        transform/baseline_enrichment,
+        transform/anomaly_detection,
+        transform/generate_anomaly_scores,
+        transform/generate_alerts,
+        attributes/newrelic,
+        attributes/entity_synthesis,
+        routing
+      ]
+      exporters: [otlphttp/newrelic, prometheus, debug]
+
+  # WARNING: DO NOT ADD health_check to extensions list!
+  # Health checks are validation-only, not production features.
+  extensions: [zpages, pprof]  # NO health_check here!
+
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["/tmp/logs/collector.log"]
 
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+    
+  pprof:
+    endpoint: 0.0.0.0:6060

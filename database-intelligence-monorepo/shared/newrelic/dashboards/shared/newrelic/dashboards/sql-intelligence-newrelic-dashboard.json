@@ -1,0 +1,189 @@
+{
+  "name": "SQL Intelligence - New Relic Analytics",
+  "description": "SQL query performance analysis via OpenTelemetry to New Relic",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Query Performance Analysis",
+      "description": "Deep dive into SQL query performance",
+      "widgets": [
+        {
+          "title": "Query Performance Overview",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT rate(sum(mysql.query.exec_total), 1 minute) as 'Queries/min', average(mysql.query.latency_avg_ms) as 'Avg Latency (ms)', uniqueCount(DIGEST) as 'Unique Patterns' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName = 'mysql.query.exec_total' SINCE 5 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Usage Efficiency",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.gauge"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT (1 - (sum(mysql.query.no_index_used_total) / sum(mysql.query.exec_total))) * 100 as 'Index Usage %' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName IN ('mysql.query.no_index_used_total', 'mysql.query.exec_total') SINCE 1 hour ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 70,
+                "alertSeverity": "CRITICAL"
+              },
+              {
+                "value": 85,
+                "alertSeverity": "WARNING"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Latency Trends",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 8,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.query.latency_avg_ms) as 'Average Latency', percentile(mysql.query.latency_avg_ms, 95) as 'P95 Latency', max(mysql.query.latency_max_ms) as 'Max Latency' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName = 'mysql.query.latency_avg_ms' TIMESERIES 1 minute"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Schema Activity",
+          "layout": {
+            "column": 9,
+            "row": 4,
+            "width": 4,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT sum(mysql.query.exec_total) as 'Total Executions' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName = 'mysql.query.exec_total' AND SCHEMA_NAME IS NOT NULL FACET SCHEMA_NAME SINCE 1 hour ago LIMIT 10"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Top Queries by Execution Count",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 5
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query Pattern', latest(SCHEMA_NAME) as 'Schema', sum(mysql.query.exec_total) as 'Total Executions', average(mysql.query.latency_avg_ms) as 'Avg Latency (ms)', max(mysql.query.latency_max_ms) as 'Max Latency (ms)', sum(mysql.query.rows_examined_total) as 'Total Rows Examined' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName = 'mysql.query.exec_total' FACET DIGEST SINCE 1 hour ago ORDER BY sum(mysql.query.exec_total) DESC LIMIT 20"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query Optimization",
+      "description": "Query optimization insights and recommendations",
+      "widgets": [
+        {
+          "title": "Index Usage Analysis",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.area"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT rate(sum(mysql.query.exec_total), 1 minute) as 'Total Queries/min', rate(sum(mysql.query.no_index_used_total), 1 minute) as 'No Index Queries/min' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName IN ('mysql.query.exec_total', 'mysql.query.no_index_used_total') TIMESERIES AUTO"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Optimization Opportunity Score",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 4
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT sum(mysql.query.no_index_used_total) as 'Queries Needing Indexes', (sum(mysql.query.no_index_used_total) / sum(mysql.query.exec_total)) * 100 as 'Optimization %' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName IN ('mysql.query.no_index_used_total', 'mysql.query.exec_total') SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Queries Requiring Index Optimization",
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "width": 12,
+            "height": 6
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query Pattern', latest(SCHEMA_NAME) as 'Schema', sum(mysql.query.no_index_used_total) as 'No Index Count', sum(mysql.query.exec_total) as 'Total Executions', (sum(mysql.query.no_index_used_total) / sum(mysql.query.exec_total)) * 100 as 'No Index %', average(mysql.query.latency_avg_ms) as 'Avg Latency (ms)' FROM Metric WHERE instrumentation.provider = 'opentelemetry' AND metricName = 'mysql.query.no_index_used_total' AND mysql.query.no_index_used_total > 0 FACET DIGEST SINCE 1 hour ago ORDER BY sum(mysql.query.no_index_used_total) DESC LIMIT 25"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

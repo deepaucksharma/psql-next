@@ -1,21 +1,13 @@
-FROM otel/opentelemetry-collector-contrib:0.91.0
+FROM otel/opentelemetry-collector-contrib:latest
 
-# Install additional tools for debugging
-USER root
-RUN apt-get update && apt-get install -y \
-    procps \
-    net-tools \
-    curl \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
+# WARNING: DO NOT ADD HEALTHCHECK instructions here!
+# Health checks have been intentionally removed from production images.
+# Use shared/validation/health-check-all.sh for validation purposes.
 
 # Copy configuration
-COPY config/collector.yaml /etc/otel-collector/config.yaml
+COPY config/collector.yaml /etc/otel/collector.yaml
 
-# Run as otel user
-USER otel
+# Expose ports for OpenTelemetry functionality only
+EXPOSE 8088
+# WARNING: DO NOT expose port 13133 (health check port)!
 
-EXPOSE 4317 4318 8888 13133
-
-ENTRYPOINT ["/otelcol-contrib"]
-CMD ["--config", "/etc/otel-collector/config.yaml"]

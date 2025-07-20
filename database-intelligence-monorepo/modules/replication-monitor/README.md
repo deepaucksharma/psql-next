@@ -105,12 +105,21 @@ make generate-load
 | `make connect-master` | Connect to master MySQL |
 | `make connect-replica` | Connect to replica MySQL |
 
+## ⚠️ Health Check Policy
+
+**IMPORTANT**: Health check endpoints (port 13133) have been intentionally removed from production code.
+
+- **For validation**: Use `shared/validation/health-check-all.sh`
+- **Documentation**: See `shared/validation/README-health-check.md`
+- **Do NOT**: Add health check endpoints back to production configs
+- **Do NOT**: Expose port 13133 in Docker configurations
+
 ## Monitoring Endpoints
 
 - **Prometheus Metrics**: http://localhost:8889/metrics
-- **Collector Health**: http://localhost:13133/health
 - **Collector Metrics**: http://localhost:8888/metrics
 - **MySQL Replica**: localhost:8086
+- **Health Validation**: Use `shared/validation/health-check-all.sh` script only
 
 ## Metrics Collected
 

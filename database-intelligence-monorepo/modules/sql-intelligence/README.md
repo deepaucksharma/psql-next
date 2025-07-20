@@ -25,6 +25,15 @@ Advanced SQL query analysis and performance intelligence for MySQL.
   - Optimization need flagging
   - Business impact correlation (when integrated)
 
+## ⚠️ Health Check Policy
+
+**IMPORTANT**: Health check endpoints (port 13133) have been intentionally removed from production code.
+
+- **For validation**: Use `shared/validation/health-check-all.sh`
+- **Documentation**: See `shared/validation/README-health-check.md`
+- **Do NOT**: Add health check endpoints back to production configs
+- **Do NOT**: Expose port 13133 in Docker configurations
+
 ## Quick Start
 
 ```bash
@@ -40,7 +49,7 @@ make run-with-core
 # View logs
 make logs
 
-# Check metrics
+# Check metrics (production endpoint)
 curl http://localhost:8082/metrics | grep mysql_query
 
 # Stop the module

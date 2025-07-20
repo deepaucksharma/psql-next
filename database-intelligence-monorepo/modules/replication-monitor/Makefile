@@ -1,4 +1,11 @@
+# WARNING: DO NOT ADD health check targets to this Makefile!
+# Health checks have been intentionally removed from production code.
+# Use shared/validation/health-check-all.sh for validation purposes.
+# See shared/validation/README-health-check.md for details.
+
 .PHONY: help build up up-enhanced down restart logs status clean test-replication monitor-lag generate-load check-gtid backup-master restore-replica validate-enhanced
+# WARNING: Do NOT add 'health' to .PHONY list!
+# Health checks are validation-only, not production targets.
 
 # Default target
 help:
@@ -18,6 +25,8 @@ help:
 	@echo "  make backup-master  - Create backup from master"
 	@echo "  make restore-replica - Restore backup to replica"
 	@echo "  make validate-enhanced - Validate enhanced collector config"
+	# Health checks are available in shared/validation/ directory
+	# Use: ../shared/validation/health-check-all.sh
 
 # Build Docker images
 build:
@@ -26,6 +35,7 @@ build:
 # Start all services
 up:
 	docker-compose up -d
+	# WARNING: Health terminology deprecated - services starting up...
 	@echo "Waiting for services to be healthy..."
 	@sleep 20
 	@echo "Services started. MySQL replica is available on port 8086"
@@ -35,6 +45,7 @@ up:
 up-enhanced:
 	@echo "Starting services with enhanced configuration..."
 	COLLECTOR_CONFIG=collector-enhanced.yaml docker-compose up -d
+	# WARNING: Health terminology deprecated - services starting up...
 	@echo "Waiting for services to be healthy..."
 	@sleep 20
 	@echo "Services started with enhanced configuration. MySQL replica is available on port 8086"
@@ -131,13 +142,6 @@ metrics:
 	@echo ""
 	@echo "For all metrics, visit: http://localhost:8889/metrics"
 
-# Health check
-health:
-	@echo "=== Service Health Status ==="
-	@docker-compose ps
-	@echo ""
-	@echo "=== Collector Health ==="
-	@curl -s http://localhost:13133/health || echo "Collector health check failed"
 
 # View collector logs
 collector-logs:

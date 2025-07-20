@@ -2,36 +2,82 @@ version: '3.8'
 
 services:
   business-impact:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
     build: .
-    container_name: business-impact
-    ports:
-      - "8085:8085"
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-      - OTEL_SERVICE_NAME=business-impact
-      - LOG_LEVEL=info
-    volumes:
-      - ./config:/etc/otel
-    networks:
-      - intelligence-network
-    depends_on:
-      - otel-collector
-
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.91.0
-    container_name: business-impact-collector
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
+      MODULE_NAME: business-impact
+      # No MySQL dependency - this module processes metrics from other modules
+      EXPORT_PORT: 8085
+      OTEL_SERVICE_NAME: business-impact
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      ENVIRONMENT: production
+      CLUSTER_NAME: database-intelligence-cluster
+      # Module federation endpoints
+      SQL_INTELLIGENCE_ENDPOINT: ${SQL_INTELLIGENCE_ENDPOINT:-sql-intelligence:8082}
+      CORE_METRICS_ENDPOINT: ${CORE_METRICS_ENDPOINT:-core-metrics:8081}
+      # Business impact scoring configuration
+      REVENUE_IMPACT_SCORE: "10.0"
+      CUSTOMER_IMPACT_SCORE: "8.0"
+      OPERATIONS_IMPACT_SCORE: "7.0"
+      ANALYTICS_IMPACT_SCORE: "5.0"
+      ADMIN_IMPACT_SCORE: "3.0"
+      MAX_IMPACT_SCORE: "10.0"
+      # SLA thresholds
+      SLA_CRITICAL_THRESHOLD: "5.0"
+      SLA_WARNING_THRESHOLD: "2.0"
+      # Revenue calculations
+      BASELINE_REVENUE_PER_SECOND: "1000.0"
+      # Boost factors
+      REVENUE_BOOST_FACTOR: "1.5"
+      CUSTOMER_BOOST_FACTOR: "1.3"
+      # Other endpoints
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-otel-collector:4317}
+      # Override specific config if needed
+      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector-functional.yaml}
     ports:
-      - "8888:8888"   # Prometheus metrics
-      - "8893:8889"   # Prometheus metrics
-      - "13133:13133" # Health check
+      - "8085:8085"      # Prometheus metrics
+      - "8901:8889"      # OTLP gRPC debug
+      - "4323:4317"      # OTLP gRPC
+      - "4324:4318"      # OTLP HTTP
+      - "55683:55679"    # ZPages
+      - "6062:6060"      # pprof
+      - "8902:8888"      # Internal telemetry
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
     volumes:
-      - ./config:/etc/otel
+      - ./config:/etc/otel:ro
+      - ./logs:/tmp/logs
+      - business_reports:/tmp/business-reports
+      - business_impact_queue_standard:/tmp/business-impact-queue-standard
+      - business_impact_queue_critical:/tmp/business-impact-queue-critical
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-functional.yaml}"]
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
     networks:
-      - intelligence-network
+      - db-intelligence
+
+volumes:
+  business_reports:
+    driver: local
+  business_impact_queue_standard:
+    driver: local
+  business_impact_queue_critical:
+    driver: local
 
 networks:
-  intelligence-network:
-    external: true
+  db-intelligence:
+    driver: bridge

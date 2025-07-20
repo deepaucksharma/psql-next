@@ -1,0 +1,293 @@
+# Maximum Value Processors Configuration
+# These processors extract maximum insights from existing data without additional instrumentation
+
+processors:
+  # Business Value Calculation
+  transform/business_value_maximizer:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Real-time revenue impact with business hours multiplier
+          - set(attributes["business.hours"], 
+                Hour(Now()) >= 9 and Hour(Now()) <= 17 and 
+                DayOfWeek(Now()) >= 2 and DayOfWeek(Now()) <= 6)
+          
+          - set(attributes["business.multiplier"], 
+                Case(
+                  attributes["business.hours"] == true, 3.0,
+                  DayOfWeek(Now()) IN (1, 7), 0.5,
+                  Hour(Now()) >= 18 or Hour(Now()) <= 8, 0.8,
+                  1.0
+                ))
+          
+          - set(attributes["business.revenue_impact_realtime"], 
+                attributes["business.revenue_impact"] * attributes["business.multiplier"])
+            where attributes["business.revenue_impact"] != nil
+          
+          # Customer experience impact
+          - set(attributes["customer.experience_score"], 
+                Case(
+                  attributes["sla_impact"] == "violation", 0,
+                  attributes["sla_impact"] == "warning", 50,
+                  100
+                ))
+          
+          # Operational efficiency score
+          - set(attributes["operational.efficiency"], 
+                (100 - (attributes["resource.waste_percent"] + 
+                        attributes["query.inefficiency_score"])) / 2)
+            where attributes["resource.waste_percent"] != nil
+
+  # Advanced Statistical Scoring
+  transform/statistical_intelligence_maximizer:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Composite anomaly score with multiple signals
+          - set(attributes["statistics.composite_score"], 
+                (
+                  attributes["statistics.anomaly_score"] * 0.3 +
+                  attributes["business_impact_score"] * 0.25 +
+                  attributes["wait.severity_score"] * 0.2 +
+                  attributes["resource.pressure_score"] * 0.15 +
+                  attributes["replication.health_deviation"] * 0.1
+                ))
+            where attributes["statistics.anomaly_score"] != nil
+          
+          # Predictive risk calculation
+          - set(attributes["statistics.risk_prediction"], 
+                attributes["statistics.composite_score"] * 
+                (1 + attributes["trend.acceleration"] * 0.5))
+            where attributes["trend.acceleration"] != nil
+          
+          # Pattern confidence scoring
+          - set(attributes["statistics.pattern_confidence"], 
+                Case(
+                  attributes["historical_exec_count"] > 10000, 0.95,
+                  attributes["historical_exec_count"] > 1000, 0.85,
+                  attributes["historical_exec_count"] > 100, 0.70,
+                  attributes["historical_exec_count"] > 10, 0.50,
+                  0.25
+                ))
+          
+          # Anomaly severity classification
+          - set(attributes["statistics.anomaly_severity"], 
+                Case(
+                  attributes["statistics.composite_score"] > 8, "critical",
+                  attributes["statistics.composite_score"] > 6, "high",
+                  attributes["statistics.composite_score"] > 4, "medium",
+                  attributes["statistics.composite_score"] > 2, "low",
+                  "none"
+                ))
+
+  # Query Intelligence Enhancement
+  transform/query_intelligence_maximizer:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Query efficiency score
+          - set(attributes["query.efficiency_score"], 
+                Case(
+                  attributes["rows_examined"] == 0, 100,
+                  attributes["rows_sent"] == 0, 0,
+                  (attributes["rows_sent"] / attributes["rows_examined"]) * 100
+                ))
+            where attributes["rows_examined"] != nil
+          
+          # Query pattern classification
+          - set(attributes["query.pattern_type"], 
+                Case(
+                  IsMatch(attributes["query_text"], "(?i)SELECT.*JOIN.*JOIN.*JOIN"), "complex_join",
+                  IsMatch(attributes["query_text"], "(?i)SELECT.*GROUP BY.*HAVING"), "analytical",
+                  IsMatch(attributes["query_text"], "(?i)INSERT.*ON DUPLICATE KEY"), "upsert",
+                  IsMatch(attributes["query_text"], "(?i)SELECT.*FOR UPDATE"), "transactional",
+                  IsMatch(attributes["query_text"], "(?i)SELECT.*WHERE.*IN\\s*\\("), "batch_lookup",
+                  "simple"
+                ))
+          
+          # Index effectiveness score
+          - set(attributes["index.effectiveness"], 
+                Case(
+                  attributes["no_index_used"] == true, 0,
+                  attributes["full_table_scan"] == true, 10,
+                  attributes["using_filesort"] == true, 30,
+                  attributes["using_temporary"] == true, 50,
+                  100
+                ))
+
+  # Cross-Signal Correlation Enhancement
+  transform/correlation_maximizer:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Correlation strength calculation
+          - set(attributes["correlation.strength"], 
+                Case(
+                  attributes["exemplar.trace_id"] != nil AND 
+                  attributes["log.correlation_id"] != nil AND
+                  attributes["business.transaction_id"] != nil, 1.0,
+                  
+                  attributes["exemplar.trace_id"] != nil AND 
+                  attributes["log.correlation_id"] != nil, 0.8,
+                  
+                  attributes["exemplar.trace_id"] != nil OR
+                  attributes["log.correlation_id"] != nil, 0.5,
+                  
+                  0.2
+                ))
+          
+          # Service dependency impact
+          - set(attributes["dependency.impact_score"], 
+                attributes["correlation.strength"] * 
+                attributes["business_impact_score"] * 
+                attributes["downstream.service_count"])
+            where attributes["downstream.service_count"] != nil
+          
+          # Root cause probability
+          - set(attributes["rootcause.probability"], 
+                attributes["correlation.strength"] * 
+                attributes["statistics.anomaly_score"] / 10)
+            where attributes["statistics.anomaly_score"] != nil
+
+  # Predictive Analytics Enhancement
+  transform/predictive_maximizer:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Trend acceleration detection
+          - set(attributes["trend.acceleration"], 
+                (attributes["current_value"] - attributes["baseline_mean"]) / 
+                Max(attributes["time_since_baseline_hours"], 1))
+            where attributes["baseline_mean"] != nil
+          
+          # Capacity exhaustion prediction
+          - set(attributes["capacity.hours_to_exhaustion"], 
+                Case(
+                  attributes["trend.acceleration"] <= 0, 999999,
+                  (attributes["max_capacity"] - attributes["current_value"]) / 
+                  attributes["trend.acceleration"]
+                ))
+            where attributes["max_capacity"] != nil
+          
+          # Performance degradation forecast
+          - set(attributes["performance.degradation_risk"], 
+                attributes["trend.acceleration"] * 
+                attributes["resource.pressure_score"] * 
+                attributes["statistics.pattern_confidence"])
+            where attributes["resource.pressure_score"] != nil
+
+  # Cost Optimization Calculator
+  transform/cost_optimizer:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Query cost calculation
+          - set(attributes["cost.per_execution"], 
+                (attributes["cpu_time_ms"] * 0.001 + 
+                 attributes["io_operations"] * 0.0001 + 
+                 attributes["memory_mb"] * 0.00001))
+            where attributes["cpu_time_ms"] != nil
+          
+          - set(attributes["cost.per_hour"], 
+                attributes["cost.per_execution"] * 
+                attributes["executions_per_hour"])
+            where attributes["executions_per_hour"] != nil
+          
+          # Optimization potential
+          - set(attributes["optimization.potential_savings"], 
+                attributes["cost.per_hour"] * 
+                (1 - attributes["query.efficiency_score"] / 100))
+            where attributes["query.efficiency_score"] != nil
+          
+          # Resource waste detection
+          - set(attributes["resource.waste_percent"], 
+                Case(
+                  attributes["query.efficiency_score"] < 10, 90,
+                  attributes["query.efficiency_score"] < 30, 70,
+                  attributes["query.efficiency_score"] < 50, 50,
+                  attributes["query.efficiency_score"] < 70, 30,
+                  10
+                ))
+
+  # Automated Action Generator
+  transform/action_generator:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Generate action recommendations
+          - set(attributes["action.type"], 
+                Case(
+                  attributes["lock_status"] == "BLOCKING" AND 
+                  attributes["current_exec_time_ms"] > 30000, "kill_query",
+                  
+                  attributes["no_index_used"] == true AND 
+                  attributes["business_criticality"] == "CRITICAL", "create_index",
+                  
+                  attributes["query.efficiency_score"] < 10 AND
+                  attributes["executions_per_hour"] > 1000, "rewrite_query",
+                  
+                  attributes["statistics.anomaly_severity"] == "critical", "investigate_anomaly",
+                  
+                  attributes["capacity.hours_to_exhaustion"] < 24, "scale_resources",
+                  
+                  "none"
+                ))
+          
+          # Action priority scoring
+          - set(attributes["action.priority"], 
+                Case(
+                  attributes["business.revenue_impact_realtime"] > 10000, 100,
+                  attributes["business.revenue_impact_realtime"] > 1000, 80,
+                  attributes["sla_impact"] == "violation", 70,
+                  attributes["statistics.anomaly_severity"] == "critical", 60,
+                  attributes["cost.per_hour"] > 100, 50,
+                  10
+                ))
+          
+          # Automation confidence
+          - set(attributes["automation.confidence"], 
+                attributes["statistics.pattern_confidence"] * 
+                attributes["correlation.strength"])
+
+  # Dashboard Optimization Metadata
+  transform/dashboard_optimizer:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Add dashboard routing hints
+          - set(attributes["dashboard.primary"], 
+                Case(
+                  attributes["business_criticality"] IN ("CRITICAL", "HIGH"), "executive",
+                  attributes["statistics.anomaly_severity"] IN ("critical", "high"), "intelligence",
+                  attributes["action.type"] != "none", "actions",
+                  attributes["correlation.strength"] > 0.7, "correlation",
+                  "operational"
+                ))
+          
+          # Visualization type hints
+          - set(attributes["viz.recommended"], 
+                Case(
+                  attributes["trend.acceleration"] != nil, "timeseries",
+                  attributes["correlation.strength"] > 0.5, "heatmap",
+                  attributes["business_category"] != nil, "pie",
+                  attributes["statistics.anomaly_score"] > 0, "scatter",
+                  "table"
+                ))
+          
+          # Drill-down path
+          - set(attributes["drilldown.next"], 
+                Case(
+                  attributes["dashboard.primary"] == "executive", "intelligence",
+                  attributes["dashboard.primary"] == "intelligence", "performance",
+                  attributes["dashboard.primary"] == "performance", "correlation",
+                  attributes["dashboard.primary"] == "correlation", "actions",
+                  "executive"
+                ))

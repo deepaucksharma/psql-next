@@ -66,10 +66,10 @@ receivers:
       - sql: |
           SHOW SLAVE STATUS
         metrics:
-          - metric_name: mysql.replication.slave.io_running
+          - metric_name: mysql.replication.slave.io_running_text
             value_column: "Slave_IO_Running"
             value_type: string
-          - metric_name: mysql.replication.slave.sql_running
+          - metric_name: mysql.replication.slave.sql_running_text
             value_column: "Slave_SQL_Running"
             value_type: string
           - metric_name: mysql.replication.slave.seconds_behind_master
@@ -92,13 +92,42 @@ receivers:
               - "Relay_Log_File"
         collection_interval: 5s
 
+      # Numeric replication status metrics using performance_schema
+      - sql: |
+          SELECT 
+            COUNT(DISTINCT CASE WHEN NAME = 'slave_io' AND TYPE = 'FOREGROUND' THEN THREAD_ID END) as io_thread_running,
+            COUNT(DISTINCT CASE WHEN NAME = 'slave_sql' AND TYPE = 'FOREGROUND' THEN THREAD_ID END) as sql_thread_running,
+            (SELECT IF(COUNT(*) > 0, 1, 0) 
+             FROM information_schema.PROCESSLIST 
+             WHERE COMMAND = 'Binlog Dump') as has_slave_connections
+          FROM performance_schema.threads
+          WHERE NAME IN ('slave_io', 'slave_sql')
+        metrics:
+          - metric_name: mysql.replication.slave.io_running
+            value_column: "io_thread_running"
+            value_type: int
+          - metric_name: mysql.replication.slave.sql_running
+            value_column: "sql_thread_running"
+            value_type: int
+          - metric_name: mysql.replication.slave.has_connections
+            value_column: "has_slave_connections"
+            value_type: int
+        collection_interval: 5s
+
       # GTID monitoring
       - sql: |
           SELECT 
             @@gtid_executed as executed_gtid_set,
             @@gtid_purged as purged_gtid_set,
             @@gtid_mode as gtid_mode,
-            @@enforce_gtid_consistency as gtid_consistency
+            CASE 
+              WHEN @@gtid_mode = 'ON' THEN 1 
+              WHEN @@gtid_mode = 'ON_PERMISSIVE' THEN 2
+              WHEN @@gtid_mode = 'OFF_PERMISSIVE' THEN 3
+              ELSE 0 
+            END as gtid_mode_numeric,
+            @@enforce_gtid_consistency as gtid_consistency,
+            CASE WHEN @@enforce_gtid_consistency = 'ON' THEN 1 ELSE 0 END as gtid_consistency_numeric
         metrics:
           - metric_name: mysql.replication.gtid.executed
             value_column: "executed_gtid_set"
@@ -106,12 +135,18 @@ receivers:
           - metric_name: mysql.replication.gtid.purged
             value_column: "purged_gtid_set"
             value_type: string
-          - metric_name: mysql.replication.gtid.mode
+          - metric_name: mysql.replication.gtid.mode_text
             value_column: "gtid_mode"
             value_type: string
-          - metric_name: mysql.replication.gtid.consistency_enforced
+          - metric_name: mysql.replication.gtid.mode
+            value_column: "gtid_mode_numeric"
+            value_type: int
+          - metric_name: mysql.replication.gtid.consistency_enforced_text
             value_column: "gtid_consistency"
             value_type: string
+          - metric_name: mysql.replication.gtid.consistency_enforced
+            value_column: "gtid_consistency_numeric"
+            value_type: int
         collection_interval: 10s
 
       # Replication connection status
@@ -119,6 +154,7 @@ receivers:
           SELECT 
             CHANNEL_NAME,
             SERVICE_STATE,
+            CASE WHEN SERVICE_STATE = 'ON' THEN 1 ELSE 0 END as service_state_numeric,
             LAST_ERROR_NUMBER,
             LAST_ERROR_MESSAGE,
             LAST_ERROR_TIMESTAMP,
@@ -127,6 +163,16 @@ receivers:
           FROM performance_schema.replication_connection_status
         metrics:
           - metric_name: mysql.replication.connection.status
+            value_column: "service_state_numeric"
+            value_type: int
+            attribute_columns:
+              - "CHANNEL_NAME"
+              - "SERVICE_STATE"
+              - "LAST_ERROR_NUMBER"
+              - "LAST_ERROR_MESSAGE"
+              - "LAST_QUEUED_TRANSACTION"
+              - "LAST_APPLIED_TRANSACTION"
+          - metric_name: mysql.replication.connection.status_text
             value_column: "SERVICE_STATE"
             value_type: string
             attribute_columns:
@@ -143,6 +189,7 @@ receivers:
             CHANNEL_NAME,
             THREAD_ID,
             SERVICE_STATE,
+            CASE WHEN SERVICE_STATE = 'ON' THEN 1 ELSE 0 END as service_state_numeric,
             LAST_ERROR_NUMBER,
             LAST_ERROR_MESSAGE,
             APPLYING_TRANSACTION,
@@ -150,6 +197,15 @@ receivers:
           FROM performance_schema.replication_applier_status
         metrics:
           - metric_name: mysql.replication.applier.status
+            value_column: "service_state_numeric"
+            value_type: int
+            attribute_columns:
+              - "CHANNEL_NAME"
+              - "THREAD_ID"
+              - "SERVICE_STATE"
+              - "LAST_ERROR_NUMBER"
+              - "APPLYING_TRANSACTION"
+          - metric_name: mysql.replication.applier.status_text
             value_column: "SERVICE_STATE"
             value_type: string
             attribute_columns:
@@ -240,11 +296,11 @@ processors:
           # Deduct points for stopped threads
           - set(attributes["replication.health_score"], 
                 attributes["replication.health_score"] - 30)
-            where metric.name == "mysql.replication.slave.io_running" and attributes["value"] != "Yes"
+            where metric.name == "mysql.replication.slave.io_running" and value == 0
           
           - set(attributes["replication.health_score"], 
                 attributes["replication.health_score"] - 30)
-            where metric.name == "mysql.replication.slave.sql_running" and attributes["value"] != "Yes"
+            where metric.name == "mysql.replication.slave.sql_running" and value == 0
           
           # Set severity based on health score
           - set(attributes["replication.severity"], "critical")
@@ -273,7 +329,7 @@ processors:
           - set(attributes["alert.type"], "replication_stopped")
             where (metric.name == "mysql.replication.slave.io_running" or 
                    metric.name == "mysql.replication.slave.sql_running") and 
-                   value != "Yes"
+                   value == 0
           - set(attributes["alert.severity"], "critical")
             where attributes["alert.type"] == "replication_stopped"
           - set(attributes["alert.message"], 
@@ -380,13 +436,10 @@ exporters:
       max_backups: 3
 
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
-    path: "/health"
-    check_collector_pipeline:
-      enabled: true
-      interval: "5m"
-      exporter_failure_threshold: 5
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
 
   pprof:
     endpoint: 0.0.0.0:1777
@@ -395,8 +448,9 @@ extensions:
     endpoint: 0.0.0.0:55679
 
 service:
-  extensions: [health_check, pprof, zpages]
-  
+  # WARNING: DO NOT ADD health_check to extensions list!
+  # Health checks are validation-only, not production features.
+  extensions: [pprof, zpages]  # NO health_check here!
   pipelines:
     # Main metrics pipeline
     metrics:
@@ -441,6 +495,3 @@ service:
       sampling:
         initial: 10
         thereafter: 100
-    metrics:
-      level: detailed
-      address: 0.0.0.0:8888

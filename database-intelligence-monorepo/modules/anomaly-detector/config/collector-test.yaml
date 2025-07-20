@@ -34,90 +34,17 @@ processors:
   batch:
     timeout: 5s
     send_batch_size: 1000
-  
-  # Transform processor for anomaly detection using statistical methods
-  transform/anomaly_detection:
-    error_mode: ignore
-    metric_statements:
-      # Connection spike detection
-      - context: metric
-        statements:
-          - set(name, "anomaly_score_connections") where name == "mysql_connections_current"
-          - set(attributes["anomaly_type"], "connection_spike") where name == "anomaly_score_connections"
-          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_connections" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
-          
-      # Query latency deviation detection
-      - context: metric
-        statements:
-          - set(name, "anomaly_score_query_latency") where name == "mysql_query_duration_milliseconds"
-          - set(attributes["anomaly_type"], "latency_deviation") where name == "anomaly_score_query_latency"
-          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_query_latency" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
-          
-      # Wait event anomaly detection
-      - context: metric
-        statements:
-          - set(name, "anomaly_score_wait_events") where name == "mysql_wait_time_total"
-          - set(attributes["anomaly_type"], "wait_anomaly") where name == "anomaly_score_wait_events"
-          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_wait_events" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
-          
-      # Resource usage pattern detection
-      - context: metric
-        statements:
-          - set(name, "anomaly_score_cpu") where name == "mysql_cpu_percent"
-          - set(attributes["anomaly_type"], "resource_usage") where name == "anomaly_score_cpu"
-          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_cpu" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
-
-  # Generate alerts based on anomaly scores
-  transform/anomaly_alerts:
-    error_mode: ignore
-    metric_statements:
-      - context: metric
-        statements:
-          # Create alert metric for connection spikes
-          - set(name, "anomaly_alert") where name == "anomaly_score_connections" and value > ${env:CONNECTION_SPIKE_THRESHOLD}
-          - set(attributes["alert_severity"], "high") where name == "anomaly_alert" and attributes["anomaly_type"] == "connection_spike"
-          - set(value, 1) where name == "anomaly_alert"
-          
-          # Create alert metric for latency deviations
-          - set(name, "anomaly_alert") where name == "anomaly_score_query_latency" and value > ${env:LATENCY_DEVIATION_THRESHOLD}
-          - set(attributes["alert_severity"], "critical") where name == "anomaly_alert" and attributes["anomaly_type"] == "latency_deviation"
-          - set(value, 1) where name == "anomaly_alert"
-          
-          # Create alert metric for wait anomalies
-          - set(name, "anomaly_alert") where name == "anomaly_score_wait_events" and value > ${env:WAIT_EVENT_THRESHOLD}
-          - set(attributes["alert_severity"], "medium") where name == "anomaly_alert" and attributes["anomaly_type"] == "wait_anomaly"
-          - set(value, 1) where name == "anomaly_alert"
-          
-          # Create alert metric for resource usage
-          - set(name, "anomaly_alert") where name == "anomaly_score_cpu" and value > ${env:RESOURCE_USAGE_THRESHOLD}
-          - set(attributes["alert_severity"], "medium") where name == "anomaly_alert" and attributes["anomaly_type"] == "resource_usage"
-          - set(value, 1) where name == "anomaly_alert"
-
-  # Add baseline calculation (simplified - in production use a more sophisticated approach)
-  transform/baseline_enrichment:
-    error_mode: ignore
-    metric_statements:
-      - context: metric
-        statements:
-          # Add baseline metadata (these would normally come from a baseline service)
-          - set(attributes["baseline_mean"], 100) where name == "mysql_connections_current"
-          - set(attributes["baseline_stddev"], 20) where name == "mysql_connections_current"
-          - set(attributes["baseline_mean"], 50) where name == "mysql_query_duration_milliseconds"
-          - set(attributes["baseline_stddev"], 15) where name == "mysql_query_duration_milliseconds"
-          - set(attributes["baseline_mean"], 1000) where name == "mysql_wait_time_total"
-          - set(attributes["baseline_stddev"], 300) where name == "mysql_wait_time_total"
-          - set(attributes["baseline_mean"], 50) where name == "mysql_cpu_percent"
-          - set(attributes["baseline_stddev"], 10) where name == "mysql_cpu_percent"
-
+    
+  # Simple anomaly detection without complex transforms
   attributes:
     actions:
       - key: module
         value: anomaly-detector
         action: insert
-      - key: detection_method
-        value: statistical_zscore
+      - key: anomaly.enabled
+        value: "true"
         action: insert
-
+        
   resource:
     attributes:
       - key: service.name
@@ -126,34 +53,29 @@ processors:
 
 exporters:
   prometheus:
-    endpoint: "0.0.0.0:${env:EXPORT_PORT}"
-    namespace: anomaly
+    endpoint: 0.0.0.0:8889
     const_labels:
       module: anomaly-detector
-  
+      
   debug:
     verbosity: detailed
-    
-  # Export alerts to a file (in production, use alertmanager or similar)
-  file:
-    path: /tmp/anomaly_alerts.json
-    format: json
+    sampling_initial: 10
+    sampling_thereafter: 100
 
 service:
   pipelines:
     metrics:
       receivers: [prometheus]
-      processors: [batch, transform/baseline_enrichment, transform/anomaly_detection, transform/anomaly_alerts, attributes, resource]
+      processors: [batch, attributes, resource]
       exporters: [prometheus, debug]
-    
-    # Separate pipeline for alerts
-    metrics/alerts:
-      receivers: [prometheus]
-      processors: [batch, transform/baseline_enrichment, transform/anomaly_detection, transform/anomaly_alerts]
-      exporters: [file, debug]
   
-  extensions: [health_check]
-
+  # WARNING: DO NOT ADD health_check to extensions list!
+  
+  # Health checks are validation-only, not production features.
+  
+  extensions: []  # NO health_check here!
 extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.

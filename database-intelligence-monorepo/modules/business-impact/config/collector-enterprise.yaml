@@ -1,0 +1,363 @@
+# Enterprise Business Impact Configuration
+# Full revenue analysis and business scoring with circuit breaker pattern
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus federation receiver to pull metrics from other modules
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'sql-intelligence-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['${env:SQL_INTELLIGENCE_ENDPOINT:-sql-intelligence:8082}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '(mysql_query_.*|sql_intelligence_.*)'
+              action: keep
+              
+        - job_name: 'core-metrics-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['${env:CORE_METRICS_ENDPOINT:-core-metrics:8081}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_.*'
+              action: keep
+
+processors:
+  # Memory management with increased limits for business logic processing
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 85
+    spike_limit_percentage: 30
+
+  batch/standard:
+    timeout: 10s
+    send_batch_size: 5000
+    send_batch_max_size: 10000
+
+  batch/critical:
+    timeout: 2s
+    send_batch_size: 500
+    send_batch_max_size: 1000
+
+  # Core attributes for business impact
+  attributes/business_impact:
+    actions:
+      - key: module
+        value: business-impact
+        action: insert
+      - key: module.type
+        value: business-impact-analyzer
+        action: insert
+      - key: cluster.name
+        value: ${env:CLUSTER_NAME}
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: tier
+        value: intelligence
+        action: insert
+
+  resource/standard:
+    attributes:
+      - key: service.name
+        value: business-impact
+        action: upsert
+      - key: service.version
+        value: 2.0.0
+        action: upsert
+      - key: analysis.model.version
+        value: 1.0.0
+        action: upsert
+
+  # New Relic specific attributes for standard pipeline
+  attributes/newrelic_standard:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-business-impact
+        action: insert
+      - key: instrumentation.version
+        value: 2.0.0
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: pipeline.type
+        value: standard
+        action: insert
+
+  # New Relic specific attributes for critical business metrics
+  attributes/newrelic_critical:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-business-impact
+        action: insert
+      - key: instrumentation.version
+        value: 2.0.0
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: pipeline.type
+        value: critical
+        action: insert
+      - key: priority
+        value: high
+        action: insert
+      - key: business.critical
+        value: "true"
+        action: insert
+
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: MYSQL_BUSINESS_IMPACT
+        action: insert
+      - key: entity.guid
+        value: BUSINESS|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT:-mysql}
+        action: insert
+      - key: entity.name
+        value: ${env:MYSQL_ENDPOINT:-mysql}-business-impact
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+
+  # Business impact scoring and revenue analysis
+  transform/business_impact:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Calculate business impact score based on query patterns
+          - set(attributes["business_impact_score"], 0.0)
+          - set(attributes["business_category"], "general")
+          - set(attributes["revenue_impact"], "none")
+          
+          # Revenue-impacting queries (orders, payments, transactions)
+          - set(attributes["business_impact_score"], ${env:REVENUE_IMPACT_SCORE:-10.0}) where IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction|invoice|billing|subscription|purchase|sale|revenue|checkout).*")
+          - set(attributes["business_category"], "revenue") where IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction|invoice|billing|subscription|purchase|sale|revenue|checkout).*")
+          - set(attributes["revenue_impact"], "direct") where IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction|invoice|billing|subscription|purchase|sale|revenue|checkout).*")
+          
+          # Customer-facing operations
+          - set(attributes["business_impact_score"], ${env:CUSTOMER_IMPACT_SCORE:-8.0}) where IsMatch(attributes["db.statement"], "(?i).*(customer|user|account|profile|session|authentication|login|cart|wishlist).*") and attributes["business_impact_score"] < ${env:CUSTOMER_IMPACT_SCORE:-8.0}
+          - set(attributes["business_category"], "customer") where IsMatch(attributes["db.statement"], "(?i).*(customer|user|account|profile|session|authentication|login|cart|wishlist).*") and attributes["business_category"] == "general"
+          - set(attributes["revenue_impact"], "indirect") where IsMatch(attributes["db.statement"], "(?i).*(customer|user|account|profile|session|authentication|login|cart|wishlist).*") and attributes["revenue_impact"] == "none"
+          
+          # Inventory and fulfillment operations
+          - set(attributes["business_impact_score"], ${env:OPERATIONS_IMPACT_SCORE:-7.0}) where IsMatch(attributes["db.statement"], "(?i).*(inventory|stock|product|catalog|fulfillment|shipping|delivery|warehouse).*") and attributes["business_impact_score"] < ${env:OPERATIONS_IMPACT_SCORE:-7.0}
+          - set(attributes["business_category"], "operations") where IsMatch(attributes["db.statement"], "(?i).*(inventory|stock|product|catalog|fulfillment|shipping|delivery|warehouse).*") and attributes["business_category"] == "general"
+          
+          # Analytics and reporting
+          - set(attributes["business_impact_score"], ${env:ANALYTICS_IMPACT_SCORE:-5.0}) where IsMatch(attributes["db.statement"], "(?i).*(report|analytics|metric|dashboard|aggregate|summary|statistics).*") and attributes["business_impact_score"] < ${env:ANALYTICS_IMPACT_SCORE:-5.0}
+          - set(attributes["business_category"], "analytics") where IsMatch(attributes["db.statement"], "(?i).*(report|analytics|metric|dashboard|aggregate|summary|statistics).*") and attributes["business_category"] == "general"
+          
+          # Administrative operations
+          - set(attributes["business_impact_score"], ${env:ADMIN_IMPACT_SCORE:-3.0}) where IsMatch(attributes["db.statement"], "(?i).*(admin|config|setting|log|audit|backup|maintenance).*") and attributes["business_impact_score"] < ${env:ADMIN_IMPACT_SCORE:-3.0}
+          - set(attributes["business_category"], "admin") where IsMatch(attributes["db.statement"], "(?i).*(admin|config|setting|log|audit|backup|maintenance).*") and attributes["business_category"] == "general"
+          
+          # Boost score for critical operations
+          - set(attributes["business_impact_score"], attributes["business_impact_score"] * ${env:REVENUE_BOOST_FACTOR:-1.5}) where IsMatch(attributes["db.operation"], "(?i)(update|delete|insert)") and attributes["business_category"] == "revenue"
+          - set(attributes["business_impact_score"], attributes["business_impact_score"] * ${env:CUSTOMER_BOOST_FACTOR:-1.3}) where IsMatch(attributes["db.operation"], "(?i)(update|delete|insert)") and attributes["business_category"] == "customer"
+          
+          # Cap the score at configured maximum
+          - set(attributes["business_impact_score"], ${env:MAX_IMPACT_SCORE:-10.0}) where attributes["business_impact_score"] > ${env:MAX_IMPACT_SCORE:-10.0}
+          
+          # Add SLA impact based on duration
+          - set(attributes["sla_impact"], "critical") where metric.name == "db.client.operation.duration" and value > ${env:SLA_CRITICAL_THRESHOLD:-5.0}
+          - set(attributes["sla_impact"], "warning") where metric.name == "db.client.operation.duration" and value > ${env:SLA_WARNING_THRESHOLD:-2.0} and value <= ${env:SLA_CRITICAL_THRESHOLD:-5.0}
+          - set(attributes["sla_impact"], "normal") where metric.name == "db.client.operation.duration" and value <= ${env:SLA_WARNING_THRESHOLD:-2.0}
+          
+          # Add business-critical table identification
+          - set(attributes["critical_table"], true) where IsMatch(attributes["db.sql.table"], "(?i).*(order|payment|user|customer|transaction|invoice|product|inventory).*")
+          - set(attributes["critical_table"], false) where !IsMatch(attributes["db.sql.table"], "(?i).*(order|payment|user|customer|transaction|invoice|product|inventory).*")
+
+  # Create business metrics
+  transform/create_metrics:
+    error_mode: ignore
+    metric_statements:
+      - context: scope
+        statements:
+          # Create business impact metrics
+          - set(metric.name, "business.impact.score") where metric.name == "db.client.operation.duration"
+          - set(metric.unit, "score") where metric.name == "business.impact.score"
+          - set(metric.description, "Business impact score (0-10) based on query patterns and tables") where metric.name == "business.impact.score"
+
+  # Revenue impact calculations
+  transform/revenue_impact:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Calculate estimated revenue impact based on business category and latency
+          - set(attributes["revenue_per_second"], ${env:BASELINE_REVENUE_PER_SECOND:-1000.0})
+          - set(attributes["estimated_revenue_impact"], 0.0)
+          
+          # Direct revenue impact for revenue-category queries
+          - set(attributes["estimated_revenue_impact"], attributes["revenue_per_second"] * value) where attributes["business_category"] == "revenue" and metric.name == "db.client.operation.duration"
+          
+          # Indirect revenue impact for customer-facing queries
+          - set(attributes["estimated_revenue_impact"], attributes["revenue_per_second"] * value * 0.7) where attributes["business_category"] == "customer" and metric.name == "db.client.operation.duration"
+          
+          # Operational impact
+          - set(attributes["estimated_revenue_impact"], attributes["revenue_per_second"] * value * 0.3) where attributes["business_category"] == "operations" and metric.name == "db.client.operation.duration"
+          
+          # Add business context
+          - set(attributes["business_context"], "critical") where attributes["business_impact_score"] >= 8.0
+          - set(attributes["business_context"], "important") where attributes["business_impact_score"] >= 5.0 and attributes["business_impact_score"] < 8.0
+          - set(attributes["business_context"], "standard") where attributes["business_impact_score"] < 5.0
+
+  # Filter for critical business metrics only
+  filter/critical_business:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'attributes["business_category"] == "revenue" or attributes["business_category"] == "customer"'
+
+exporters:
+  # Standard New Relic exporter for all business metrics
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 20000
+
+  # Critical New Relic exporter for high-priority business metrics
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: none
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 2s
+      max_interval: 20s
+      max_elapsed_time: 120s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # OTLP for forwarding to other systems
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT:-otel-collector:4317}
+    tls:
+      insecure: true
+
+  # Prometheus exporter for local monitoring
+  prometheus:
+    endpoint: "0.0.0.0:${env:EXPORT_PORT}"
+    namespace: business_impact
+    const_labels:
+      module: business-impact
+      cluster: ${env:CLUSTER_NAME}
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: basic
+    sampling_initial: 10
+    sampling_thereafter: 1000
+
+  # File exporter for business reports
+  file/business_reports:
+    path: /tmp/business-reports/impact-analysis.json
+    rotation:
+      max_megabytes: 100
+      max_days: 30
+      max_backups: 30
+    format: json
+
+extensions:
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  # Use shared/validation/health-check-all.sh for validation purposes.
+  # See shared/validation/README-health-check.md for details.
+
+  pprof:
+    endpoint: 0.0.0.0:6060
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  # WARNING: DO NOT ADD health_check to extensions list!
+  # Health checks are validation-only, not production features.
+  extensions: [pprof, zpages]  # NO health_check here!
+  pipelines:
+    # Main pipeline for business impact analysis
+    metrics/business_analysis:
+      receivers: [otlp, prometheus]
+      processors: [
+        memory_limiter,
+        batch/standard,
+        transform/business_impact,
+        transform/create_metrics,
+        transform/revenue_impact,
+        attributes/business_impact,
+        resource/standard,
+        attributes/newrelic_standard,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_standard, prometheus, otlp, debug]
+
+    # Critical business metrics pipeline
+    metrics/critical_business:
+      receivers: [otlp, prometheus]
+      processors: [
+        memory_limiter,
+        batch/critical,
+        transform/business_impact,
+        transform/create_metrics,
+        transform/revenue_impact,
+        filter/critical_business,
+        attributes/business_impact,
+        resource/standard,
+        attributes/newrelic_critical,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_critical, file/business_reports]
+
+    # Metrics federation pipeline
+    metrics/federation:
+      receivers: [prometheus]
+      processors: [
+        memory_limiter,
+        batch/standard,
+        attributes/business_impact,
+        resource/standard
+      ]
+      exporters: [prometheus]
+
+  telemetry:
+    logs:
+      level: info
+      encoding: json

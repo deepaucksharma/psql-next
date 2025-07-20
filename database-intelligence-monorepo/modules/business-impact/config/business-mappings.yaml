@@ -1,0 +1,147 @@
+# Business Impact Mapping Configuration
+# Maps database tables and operations to business categories and impact scores
+
+# Table mappings define business context for specific tables
+table_mappings:
+  # Revenue-critical tables
+  orders:
+    category: revenue
+    impact_score: 10.0
+    revenue_impact: direct
+    description: "Order processing table"
+  
+  payments:
+    category: revenue
+    impact_score: 10.0
+    revenue_impact: direct
+    description: "Payment transactions"
+  
+  invoices:
+    category: revenue
+    impact_score: 9.0
+    revenue_impact: direct
+    description: "Invoice management"
+  
+  shopping_cart:
+    category: revenue
+    impact_score: 8.0
+    revenue_impact: direct
+    description: "Shopping cart operations"
+  
+  # Customer-facing tables
+  users:
+    category: customer
+    impact_score: 8.0
+    revenue_impact: indirect
+    description: "User accounts"
+  
+  customer_profiles:
+    category: customer
+    impact_score: 7.0
+    revenue_impact: indirect
+    description: "Customer profile data"
+  
+  sessions:
+    category: customer
+    impact_score: 6.0
+    revenue_impact: indirect
+    description: "User sessions"
+  
+  # Operations tables
+  inventory:
+    category: operations
+    impact_score: 7.0
+    revenue_impact: indirect
+    description: "Inventory management"
+  
+  products:
+    category: operations
+    impact_score: 6.0
+    revenue_impact: indirect
+    description: "Product catalog"
+  
+  warehouses:
+    category: operations
+    impact_score: 5.0
+    revenue_impact: indirect
+    description: "Warehouse data"
+  
+  # Analytics tables
+  reports:
+    category: analytics
+    impact_score: 4.0
+    revenue_impact: none
+    description: "Reporting data"
+  
+  metrics:
+    category: analytics
+    impact_score: 3.0
+    revenue_impact: none
+    description: "Business metrics"
+  
+  # Administrative tables
+  system_logs:
+    category: admin
+    impact_score: 2.0
+    revenue_impact: none
+    description: "System logs"
+  
+  configurations:
+    category: admin
+    impact_score: 3.0
+    revenue_impact: none
+    description: "System configuration"
+
+# Operation multipliers adjust scores based on SQL operation type
+operation_multipliers:
+  DELETE:
+    revenue: 2.0      # DELETE on revenue tables is very critical
+    customer: 1.8     # DELETE on customer data is critical
+    operations: 1.5   # DELETE on operations is significant
+    analytics: 1.2    # DELETE on analytics is less critical
+    admin: 1.0        # DELETE on admin is normal
+  
+  UPDATE:
+    revenue: 1.5
+    customer: 1.3
+    operations: 1.2
+    analytics: 1.0
+    admin: 1.0
+  
+  INSERT:
+    revenue: 1.2      # New orders/payments are important
+    customer: 1.1
+    operations: 1.1
+    analytics: 1.0
+    admin: 1.0
+  
+  SELECT:
+    revenue: 1.0      # READ operations don't modify data
+    customer: 1.0
+    operations: 1.0
+    analytics: 1.0
+    admin: 1.0
+
+# SLA thresholds for response time impact
+sla_thresholds:
+  critical:
+    duration_seconds: 5.0
+    additional_score: 2.0
+  
+  warning:
+    duration_seconds: 2.0
+    additional_score: 1.0
+  
+  normal:
+    duration_seconds: 1.0
+    additional_score: 0.0
+
+# Default values for unmapped tables
+defaults:
+  category: general
+  impact_score: 1.0
+  revenue_impact: none
+  description: "Unmapped table"
+
+# Maximum allowed impact score
+max_impact_score: 15.0

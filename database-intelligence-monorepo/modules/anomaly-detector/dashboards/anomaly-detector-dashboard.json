@@ -77,7 +77,7 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -107,11 +107,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "100 - (avg(irate(node_cpu_seconds_total{mode=\"idle\",instance=~\"${instance}\"}[${interval}])) * 100)",
+          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
-      "title": "CPU Usage",
+      "title": "Query Rate",
       "type": "timeseries"
     },
     {
@@ -169,7 +169,7 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -199,11 +199,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "100 * (1 - ((node_memory_MemAvailable_bytes{instance=~\"${instance}\"}) / (node_memory_MemTotal_bytes{instance=~\"${instance}\"})))",
+          "expr": "mysql_global_status_threads_connected{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}",
           "refId": "A"
         }
       ],
-      "title": "Memory Usage",
+      "title": "Current Connections",
       "type": "timeseries"
     },
     {
@@ -283,17 +283,17 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\"}[${interval}])",
+          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A",
           "legendFormat": "Actual"
         },
         {
-          "expr": "anomaly_detection_threshold{metric=\"query_rate\",instance=~\"${instance}\"}",
+          "expr": "avg_over_time(rate(mysql_global_status_queries{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[5m])[1h])",
           "refId": "B",
-          "legendFormat": "Threshold"
+          "legendFormat": "Baseline (1h avg)"
         }
       ],
-      "title": "Query Rate with Anomaly Detection",
+      "title": "Query Rate with Baseline Comparison",
       "type": "timeseries"
     },
     {
@@ -344,11 +344,11 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(anomaly_detection_count{instance=~\"${instance}\"}[${interval}]))",
+          "expr": "increase(mysql_global_status_aborted_connects{instance=~\"${instance}\",instrumentation_provider=\"opentelemetry\"}[${interval}])",
           "refId": "A"
         }
       ],
-      "title": "Anomalies Detected",
+      "title": "Aborted Connections",
       "type": "stat",
       "gridPos": {
         "x": 12,
@@ -443,38 +443,6 @@
         "query": ".*",
         "skipUrlSync": false,
         "type": "textbox"
-      },
-      {
-        "name": "anomaly_type",
-        "label": "Anomaly Type",
-        "type": "custom",
-        "options": [
-          {
-            "text": "All",
-            "value": ".*"
-          },
-          {
-            "text": "CPU",
-            "value": "cpu"
-          },
-          {
-            "text": "Memory",
-            "value": "memory"
-          },
-          {
-            "text": "Query Rate",
-            "value": "query_rate"
-          },
-          {
-            "text": "Connections",
-            "value": "connections"
-          }
-        ],
-        "current": {
-          "text": "All",
-          "value": ".*"
-        },
-        "multi": false
       }
     ]
   },
@@ -488,436 +456,5 @@
   "uid": "db-intel-anomaly-detector",
   "version": 0,
   "weekStart": "",
-  "panels_library": {
-    "cpu_usage": {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
-      "id": 1,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "100 - (avg(irate(node_cpu_seconds_total{mode=\"idle\",instance=~\"${instance}\"}[${interval}])) * 100)",
-          "refId": "A"
-        }
-      ],
-      "title": "CPU Usage",
-      "type": "timeseries"
-    },
-    "memory_usage": {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 2,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "100 * (1 - ((node_memory_MemAvailable_bytes{instance=~\"${instance}\"}) / (node_memory_MemTotal_bytes{instance=~\"${instance}\"})))",
-          "refId": "A"
-        }
-      ],
-      "title": "Memory Usage",
-      "type": "timeseries"
-    },
-    "query_rate": {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "rate(mysql_global_status_queries{instance=~\"${instance}\"}[${interval}])",
-          "refId": "A"
-        }
-      ],
-      "title": "Query Rate",
-      "type": "timeseries"
-    },
-    "connections": {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 100
-              },
-              {
-                "color": "red",
-                "value": 200
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
-      },
-      "id": 4,
-      "options": {
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": true
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "mysql_global_status_threads_connected{instance=~\"${instance}\"}",
-          "refId": "A"
-        }
-      ],
-      "title": "Current Connections",
-      "type": "gauge"
-    },
-    "error_rate": {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 5
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 16
-      },
-      "id": 5,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "rate(mysql_global_status_connection_errors_total{instance=~\"${instance}\"}[${interval}]) / rate(mysql_global_status_connections{instance=~\"${instance}\"}[${interval}]) * 100",
-          "refId": "A"
-        }
-      ],
-      "title": "Error Rate",
-      "type": "timeseries"
-    }
-  },
-  "description": "Monitor database performance metrics and detect anomalies in real-time"
+  "description": "Monitor database performance metrics using validated MySQL metrics patterns"
 }
