@@ -1,0 +1,410 @@
+# Integration Configuration
+# Implements circuit breaker, persistent queues, and tenant routing from master-enhanced.yaml
+
+receivers:
+  # OTLP receiver for all modules
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus federation from all modules
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'core-metrics'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['core-metrics:8081']
+            
+        - job_name: 'sql-intelligence'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['sql-intelligence:8082']
+            
+        - job_name: 'wait-profiler'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['wait-profiler:8083']
+            
+        - job_name: 'anomaly-detector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['anomaly-detector:8084']
+            
+        - job_name: 'business-impact'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['business-impact:8085']
+            
+        - job_name: 'replication-monitor'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['replication-monitor:8086']
+            
+        - job_name: 'performance-advisor'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['performance-advisor:8087']
+            
+        - job_name: 'resource-monitor'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['resource-monitor:8088']
+
+processors:
+  # Memory management with circuit breaker
+  memory_limiter:
+    check_interval: ${env:MEMORY_CHECK_INTERVAL:5s}
+    limit_percentage: ${env:MEMORY_LIMIT_PERCENT:80}
+    spike_limit_percentage: ${env:MEMORY_SPIKE_PERCENT:30}
+
+  memory_limiter/small:
+    check_interval: 1s
+    limit_percentage: 60
+    spike_limit_percentage: 20
+    
+  # Batching for efficiency
+  batch:
+    timeout: ${env:BATCH_TIMEOUT:5s}
+    send_batch_size: ${env:BATCH_SIZE:1000}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE:2000}
+    
+  # Small batch for critical metrics
+  batch/minimal:
+    timeout: 1s
+    send_batch_size: 100
+    send_batch_max_size: 200
+    
+  # Large batch for historical data
+  batch/large:
+    timeout: 30s
+    send_batch_size: 10000
+    send_batch_max_size: 20000
+
+  # Feature flag based filtering
+  filter/feature_flags:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["feature.ml_scoring"] == "${env:ML_FEATURES_ENABLED:true}"'
+        - 'attributes["feature.lock_analysis"] == "${env:LOCK_ANALYSIS_ENABLED:true}"' 
+        - 'attributes["feature.wait_profiling"] == "${env:WAIT_PROFILE_ENABLED:true}"'
+        
+  # Circuit breaker routing
+  routing/circuit_breaker:
+    default_exporters: [otlphttp/primary]
+    table:
+      - statement: route() where attributes["circuit.state"] == "open"
+        exporters: [otlp/fallback]
+      - statement: route() where attributes["circuit.state"] == "closed"
+        exporters: [otlp/primary]
+        
+  # Tenant-based routing for multi-tenancy
+  routing/tenant:
+    from_attribute: db_schema
+    default_exporters: [otlp/standard_tenant]
+    table:
+      - value: "orders|payments|customers"
+        exporters: [otlp/critical_tenant]
+      - value: "analytics|reporting" 
+        exporters: [otlp/batch_tenant]
+        
+  # Data quality scoring
+  transform/data_quality:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Add confidence score based on data completeness
+          - set(attributes["data.confidence"], 
+                (
+                  Case(attributes["historical_exec_count"] > 1000, 30, 10) +
+                  Case(attributes["current_wait_profile"] != "", 30, 0) +
+                  Case(attributes["historical_p95_time_ms"] > 0, 20, 0) +
+                  Case(attributes["performance_issue"] != "UNKNOWN", 20, 0)
+                ))
+          
+          # Mark low-quality data
+          - set(attributes["data.quality"], "low")
+            where attributes["data.confidence"] < 50
+            
+  # Automated response hooks
+  transform/auto_remediation:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Flag for external automation
+          - set(attributes["action.required"], "kill_query")
+            where attributes["lock_status"] == "BLOCKING"
+              and attributes["current_exec_time_ms"] > 30000
+              
+          - set(attributes["action.required"], "add_index")
+            where attributes["advisor.type"] == "critical_missing_index"
+              and attributes["business.revenue_impact"] > 100
+              
+  # Progressive rollout sampling
+  probabilistic_sampler/progressive:
+    hash_seed: 22
+    sampling_percentage: ${env:ROLLOUT_PERCENTAGE:10}
+    attribute_source: "query_hash"
+
+  # Resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence-integration
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT:production}
+        action: upsert
+
+  # Critical query filter
+  filter/critical_only:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["business_criticality"] == "CRITICAL" or attributes["intelligence_score"] > 150'
+        
+  # Importance-based filtering
+  filter/importance:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["intelligence_score"] > 10 or attributes["historical_exec_count"] > 100'
+
+exporters:
+  # Debug output
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:normal}
+    sampling_initial: ${env:DEBUG_SAMPLING_INITIAL:10}
+    sampling_thereafter: ${env:DEBUG_SAMPLING_THEREAFTER:100}
+    
+  # Primary OTLP HTTP exporter with adaptive compression
+  otlphttp/primary:
+    endpoint: ${env:OTLP_ENDPOINT:https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:API_KEY}
+    compression: ${env:COMPRESSION_TYPE:gzip}  # or zstd for better ratios
+    timeout: ${env:EXPORT_TIMEOUT:30s}
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:EXPORT_WORKERS:5}
+      queue_size: ${env:EXPORT_QUEUE_SIZE:10000}
+      storage: file_storage/reliable
+
+  # Reliable exporter with persistent queue
+  otlp/reliable:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:API_KEY}
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 50000
+      storage: file_storage/reliable
+      
+  # Fallback exporter for circuit breaker
+  otlp/fallback:
+    endpoint: ${env:FALLBACK_ENDPOINT:https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:API_KEY}
+    compression: none
+    timeout: 5s
+    
+  # Tenant-specific exporters
+  otlp/critical_tenant:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:API_KEY}
+      X-Tenant-Priority: "critical"
+    compression: none
+    timeout: 10s
+    
+  otlp/standard_tenant:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:API_KEY}
+      X-Tenant-Priority: "standard"
+    compression: gzip
+    timeout: 30s
+    
+  otlp/batch_tenant:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:API_KEY}
+      X-Tenant-Priority: "batch"
+    compression: zstd
+    timeout: 60s
+    
+  # Ultra-low latency for realtime critical paths
+  otlp/realtime_high_priority:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:API_KEY}
+      X-Priority: "realtime"
+    compression: none
+    timeout: 5s
+    retry_on_failure:
+      enabled: false
+      
+  # Near-realtime with small batching
+  otlp/near_realtime:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:API_KEY}
+      X-Priority: "high"
+    compression: gzip
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 3
+      queue_size: 5000
+      
+  # Standard priority
+  otlp/standard:
+    endpoint: ${env:OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:API_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 10000
+      
+  # Prometheus exporter
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: database_intelligence
+    const_labels:
+      integration: "complete"
+    enable_open_metrics: true
+    
+  # File exporter for debugging
+  file/debug:
+    path: /tmp/integration-debug.json
+    format: json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+      
+  # Debug exporter (replaces logging)
+  debug/verbose:
+    verbosity: ${env:DEBUG_VERBOSITY:detailed}
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+extensions:
+  # Health check endpoint
+  health_check:
+    endpoint: 0.0.0.0:${env:HEALTH_PORT:13133}
+    path: /health
+    
+  # Circuit breaker to prevent cascade failures
+  circuitbreaker:
+    failure_threshold: ${env:CIRCUIT_FAILURE_THRESHOLD:5}
+    recovery_timeout: ${env:CIRCUIT_RECOVERY_TIMEOUT:30s}
+    half_open_requests: ${env:CIRCUIT_HALF_OPEN_REQUESTS:3}
+    
+  # Performance profiling
+  pprof:
+    endpoint: 0.0.0.0:${env:PPROF_PORT:1777}
+    
+  # zPages for debugging
+  zpages:
+    endpoint: 0.0.0.0:${env:ZPAGES_PORT:55679}
+    
+  # File storage for queue persistence with overflow protection
+  file_storage/reliable:
+    directory: ${env:OTEL_FILE_STORAGE_DIR:/var/lib/otel/queue}
+    timeout: 10s
+    compaction:
+      on_start: true
+      on_rebound: true
+      rebound_needed_threshold_mib: 100
+      rebound_trigger_threshold_mib: 10
+      directory: ${env:OTEL_FILE_STORAGE_DIR:/var/lib/otel/queue}
+      max_transaction_size: 65536
+
+service:
+  # Telemetry settings
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:info}
+      initial_fields:
+        service: database-intelligence-integration
+        version: "2.0.0"
+    metrics:
+      level: ${env:TELEMETRY_LEVEL:detailed}
+      address: 0.0.0.0:${env:TELEMETRY_PORT:8888}
+      
+  # Active extensions
+  extensions: [health_check, circuitbreaker, pprof, zpages, file_storage/reliable]
+  
+  # Integration pipelines
+  pipelines:
+    # Critical realtime metrics
+    metrics/critical_realtime:
+      receivers: [otlp, prometheus]
+      processors: 
+        - memory_limiter/small
+        - batch/minimal
+        - resource
+        - filter/critical_only
+        - routing/circuit_breaker
+      exporters: [otlp/critical_tenant, otlp/realtime_high_priority]
+      
+    # Standard metrics pipeline
+    metrics/standard:
+      receivers: [otlp, prometheus]
+      processors:
+        - memory_limiter
+        - batch
+        - resource
+        - filter/feature_flags
+        - transform/data_quality
+        - routing/tenant
+      exporters: [otlphttp/primary, prometheus]
+      
+    # Intelligence analysis pipeline
+    metrics/analysis:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - batch/large
+        - resource
+        - transform/data_quality
+        - transform/auto_remediation
+        - filter/importance
+        - routing/tenant
+      exporters: [otlp/reliable]
+      
+    # Progressive rollout pipeline
+    metrics/progressive:
+      receivers: [prometheus]
+      processors:
+        - memory_limiter
+        - batch
+        - resource
+        - probabilistic_sampler/progressive
+      exporters: [otlphttp/primary]
+      
+    # Debug pipeline
+    metrics/debug:
+      receivers: [otlp, prometheus]
+      processors: [batch]
+      exporters: [debug, file/debug, debug/verbose]

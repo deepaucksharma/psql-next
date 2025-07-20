@@ -1,0 +1,437 @@
+# Enhanced Cross-Signal Correlator Configuration
+# Implements advanced correlation features from master-enhanced.yaml
+
+receivers:
+  # OTLP receiver for traces correlation
+  otlp/traces:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        
+  # File log receiver for slow query logs
+  filelog/slow_query:
+    include: [/var/log/mysql/slow.log]
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '# Time: (?P<timestamp>\d{6}\s+\d{1,2}:\d{2}:\d{2})'
+      - type: regex_parser
+        regex: '# Query_time: (?P<query_time>[\d.]+)\s+Lock_time: (?P<lock_time>[\d.]+)'
+      - type: regex_parser
+        regex: '# Rows_sent: (?P<rows_sent>\d+)\s+Rows_examined: (?P<rows_examined>\d+)'
+      - type: add
+        field: attributes.metric_name
+        value: mysql.slowlog.query_time
+        
+  # Prometheus receiver for metrics correlation
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'metrics-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['core-metrics:8081', 'sql-intelligence:8082', 'wait-profiler:8083']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_.*'
+              action: keep
+              
+        - job_name: 'business-impact-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['business-impact:8085']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'business_.*'
+              action: keep
+
+connectors:
+  # Convert logs to metrics
+  count:
+    logs:
+      mysql.slowlog.count:
+        description: Count of slow queries from logs
+        conditions:
+          - IsMatch(attributes["metric_name"], "mysql.slowlog.*")
+        attributes:
+          - key: query_digest
+            default_value: "unknown"
+          - key: db_schema
+            default_value: "unknown"
+          - key: user
+            default_value: "unknown"
+            
+  # Forward spans to metrics for exemplars
+  spanmetrics:
+    dimensions:
+      - name: query_hash
+      - name: db_schema
+      - name: service.name
+      - name: span.kind
+      - name: db.operation
+      - name: db.system
+      - name: business_criticality
+      - name: intelligence_score_tier
+    exemplars:
+      enabled: true
+    metrics_flush_interval: 15s
+    histogram:
+      explicit:
+        buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+    dimension_key_cache_size: 10000
+    aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
+
+processors:
+  # Memory management with circuit breaker protection
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+    send_batch_max_size: 2000
+    
+  # Resource detection and enrichment
+  resourcedetection:
+    detectors: [env, system, docker, ec2, gcp, azure]
+    timeout: 5s
+    override: false
+    system:
+      hostname_sources: ["os", "dns"]
+      
+  # Semantic conventions
+  resource/semantic_conventions:
+    attributes:
+      - key: service.name
+        value: cross-signal-correlator
+        action: upsert
+      - key: service.namespace
+        value: database-intelligence
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT:production}
+        action: upsert
+        
+  # Enhanced trace-to-metrics correlation
+  transform/trace_correlation:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          # Extract database operation details
+          - set(attributes["db.query_hash"], 
+                Hash(attributes["db.statement"]))
+            where attributes["db.statement"] != nil
+          - set(attributes["db.query_type"], 
+                Case(
+                  IsMatch(attributes["db.statement"], "(?i)^SELECT.*"), "SELECT",
+                  IsMatch(attributes["db.statement"], "(?i)^INSERT.*"), "INSERT",
+                  IsMatch(attributes["db.statement"], "(?i)^UPDATE.*"), "UPDATE",
+                  IsMatch(attributes["db.statement"], "(?i)^DELETE.*"), "DELETE",
+                  "OTHER"
+                ))
+            where attributes["db.statement"] != nil
+          # Add correlation IDs
+          - set(attributes["correlation.trace_id"], trace_id)
+          - set(attributes["correlation.span_id"], span_id)
+          # Add business context correlation
+          - set(attributes["correlation.business_category"], 
+                Case(
+                  IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction).*"), "revenue",
+                  IsMatch(attributes["db.statement"], "(?i).*(customer|user|account).*"), "customer",
+                  IsMatch(attributes["db.statement"], "(?i).*(inventory|product|stock).*"), "operations",
+                  "general"
+                ))
+          # Add intelligence score tier
+          - set(attributes["intelligence_score_tier"], 
+                Case(
+                  duration.nanos / 1000000 > 5000, "critical",
+                  duration.nanos / 1000000 > 1000, "high",
+                  duration.nanos / 1000000 > 100, "medium",
+                  "low"
+                ))
+          
+  # Enhanced log-to-metrics enrichment
+  transform/log_enrichment:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # Parse slow query log attributes
+          - set(attributes["query_duration_ms"], 
+                attributes["query_time"] * 1000)
+            where attributes["query_time"] != nil
+          - set(attributes["lock_duration_ms"], 
+                attributes["lock_time"] * 1000)
+            where attributes["lock_time"] != nil
+          # Add severity based on duration
+          - set(severity_text, "ERROR")
+            where attributes["query_duration_ms"] > 5000
+          - set(severity_text, "WARN")
+            where attributes["query_duration_ms"] > 1000 and attributes["query_duration_ms"] <= 5000
+          - set(severity_text, "INFO")
+            where attributes["query_duration_ms"] <= 1000
+          # Calculate efficiency score
+          - set(attributes["query_efficiency"], 
+                attributes["rows_sent"] / Max(attributes["rows_examined"], 1))
+            where attributes["rows_sent"] != nil and attributes["rows_examined"] != nil
+          # Mark inefficient queries
+          - set(attributes["query_inefficient"], true)
+            where attributes["query_efficiency"] < 0.01 and attributes["rows_examined"] > 10000
+            
+  # Enhanced metric exemplar enrichment
+  transform/exemplar_enrichment:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Add trace context to metrics for exemplars
+          - set(attributes["exemplar.trace_id"], 
+                attributes["correlation.trace_id"])
+            where attributes["correlation.trace_id"] != nil
+          - set(attributes["exemplar.span_id"], 
+                attributes["correlation.span_id"])
+            where attributes["correlation.span_id"] != nil
+          # Add query context
+          - set(attributes["exemplar.query_hash"], 
+                attributes["db.query_hash"])
+            where attributes["db.query_hash"] != nil
+          # Add business impact
+          - set(attributes["exemplar.business_impact"], 
+                attributes["business_impact_score"])
+            where attributes["business_impact_score"] != nil
+          # Add anomaly score
+          - set(attributes["exemplar.anomaly_score"], 
+                attributes["ml.anomaly_score"])
+            where attributes["ml.anomaly_score"] != nil
+            
+  # Cross-signal anomaly detection
+  transform/cross_signal_anomaly:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Detect correlated anomalies
+          - set(attributes["cross_signal.anomaly"], true)
+            where attributes["ml.anomaly_score"] > 3 and 
+                  attributes["business_impact_score"] > 7
+          # Calculate combined risk score
+          - set(attributes["cross_signal.risk_score"], 
+                (attributes["ml.anomaly_score"] * attributes["business_impact_score"]) / 10)
+            where attributes["ml.anomaly_score"] != nil and 
+                  attributes["business_impact_score"] != nil
+          # Mark critical cross-signal issues
+          - set(attributes["cross_signal.critical"], true)
+            where attributes["cross_signal.risk_score"] > 5
+            
+  # Attributes processor for consistent labeling
+  attributes/correlation:
+    actions:
+      - key: correlation.enabled
+        value: "true"
+        action: insert
+      - key: module
+        value: cross-signal-correlator
+        action: insert
+        
+  # Group by trace for correlation
+  groupbytrace:
+    wait_duration: 10s
+    num_traces: 100000
+    num_workers: 4
+
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_INSTANCE"
+        action: insert
+      - key: entity.guid
+        value: "MYSQL|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: entity.name
+        value: "${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+
+exporters:
+  # Primary New Relic OTLP exporter
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # High-priority exporter for critical correlations
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+      
+  # Debug exporter
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+    
+  # Debug file export
+  file/correlation:
+    path: /tmp/correlation-debug.json
+    format: json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    # Traces pipeline for correlation
+    traces:
+      receivers: [otlp/traces]
+      processors: [
+        memory_limiter, 
+        batch, 
+        resourcedetection,
+        resource/semantic_conventions, 
+        transform/trace_correlation,
+        groupbytrace,
+        attributes/correlation,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_standard, spanmetrics, debug]
+      
+    # Logs to metrics pipeline
+    logs:
+      receivers: [filelog/slow_query]
+      processors: [
+        memory_limiter, 
+        batch, 
+        resource/semantic_conventions,
+        transform/log_enrichment,
+        attributes/correlation,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [count, debug]
+      
+    # Metrics from logs
+    metrics/from_logs:
+      receivers: [count]
+      processors: [
+        memory_limiter, 
+        batch, 
+        attributes/correlation,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_standard]
+      
+    # Metrics from spans (exemplars)
+    metrics/from_spans:
+      receivers: [spanmetrics]
+      processors: [
+        memory_limiter, 
+        batch, 
+        transform/exemplar_enrichment,
+        attributes/correlation,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_standard]
+      
+    # Federated metrics with correlation
+    metrics/federated:
+      receivers: [prometheus]
+      processors: [
+        memory_limiter,
+        batch,
+        resource/semantic_conventions,
+        transform/cross_signal_anomaly,
+        attributes/correlation,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_standard]
+      
+    # Critical cross-signal alerts
+    metrics/critical:
+      receivers: [prometheus, spanmetrics]
+      processors: [
+        memory_limiter,
+        batch,
+        transform/cross_signal_anomaly,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_critical]
+      
+    # Debug pipeline
+    metrics/debug:
+      receivers: [spanmetrics, count]
+      processors: [batch]
+      exporters: [file/correlation]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:info}
+      initial_fields:
+        service: cross-signal-correlator
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

@@ -1,0 +1,368 @@
+# Enhanced Integration Docker Compose
+# Runs all modules with enhanced configurations and full feature set
+
+version: '3.8'
+
+services:
+  # MySQL instances for testing
+  mysql-master:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: test_db
+      MYSQL_USER: otel
+      MYSQL_PASSWORD: otelpassword
+    command: >
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+      --slow-query-log=ON
+      --slow-query-log-file=/var/log/mysql/slow.log
+      --long-query-time=1
+    volumes:
+      - mysql-master-data:/var/lib/mysql
+      - mysql-logs:/var/log/mysql
+      - ../shared/interfaces/mysql-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - db-intelligence
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  mysql-replica:
+    image: mysql:8.0
+    depends_on:
+      mysql-master:
+        condition: service_healthy
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: test_db
+    command: >
+      --server-id=2
+      --relay-log=relay-bin
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+      --read-only=ON
+    volumes:
+      - mysql-replica-data:/var/lib/mysql
+      - ../modules/replication-monitor/src/init-replica.sql:/docker-entrypoint-initdb.d/02-replica.sql:ro
+    networks:
+      - db-intelligence
+
+  # Core monitoring modules with enhanced configurations
+  core-metrics:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: core-metrics-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/core-metrics/config/collector-enhanced.yaml:/etc/otel/collector.yaml:ro
+    environment:
+      - COLLECTOR_CONFIG=collector-enhanced.yaml
+      - MYSQL_PRIMARY_ENDPOINT=mysql-master:3306
+      - MYSQL_REPLICA_ENDPOINT=mysql-replica:3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=rootpassword
+      - MYSQL_DATABASE=test_db
+      - ENVIRONMENT=production
+      - CLUSTER_NAME=integration-test
+      - SERVICE_NAME=mysql-monitoring
+      - EXPORT_PORT=8081
+      - OTLP_ENDPOINT=integration-collector:4317
+      - GOMEMLIMIT=1750MiB
+    ports:
+      - "8081:8081"
+      - "13133:13133"
+    networks:
+      - db-intelligence
+    depends_on:
+      - mysql-master
+      - mysql-replica
+
+  sql-intelligence:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: sql-intelligence-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/sql-intelligence/config/collector-enhanced.yaml:/etc/otel/collector.yaml:ro
+    environment:
+      - COLLECTOR_CONFIG=collector-enhanced.yaml
+      - MYSQL_ENDPOINT=mysql-master:3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=rootpassword
+      - SQL_INTELLIGENCE_INTERVAL=5s
+      - ENABLE_SQL_INTELLIGENCE=true
+      - ML_FEATURES_ENABLED=true
+      - BUSINESS_CONTEXT_ENABLED=true
+      - ADVISOR_ENGINE_ENABLED=true
+      - EXPORT_PORT=8082
+      - OTLP_ENDPOINT=integration-collector:4317
+      - GOMEMLIMIT=3500MiB
+    ports:
+      - "8082:8082"
+      - "13134:13134"
+    networks:
+      - db-intelligence
+    depends_on:
+      - mysql-master
+
+  wait-profiler:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: wait-profiler-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/wait-profiler/config/collector.yaml:/etc/otel/collector.yaml:ro
+    environment:
+      - MYSQL_ENDPOINT=mysql-master:3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=rootpassword
+      - WAIT_PROFILE_ENABLED=true
+      - EXPORT_PORT=8083
+      - OTLP_ENDPOINT=integration-collector:4317
+    ports:
+      - "8083:8083"
+      - "13135:13135"
+    networks:
+      - db-intelligence
+    depends_on:
+      - mysql-master
+
+  anomaly-detector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: anomaly-detector-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/anomaly-detector/config/collector.yaml:/etc/otel/collector.yaml:ro
+    environment:
+      - CORE_METRICS_ENDPOINT=core-metrics:8081
+      - SQL_INTELLIGENCE_ENDPOINT=sql-intelligence:8082
+      - WAIT_PROFILER_ENDPOINT=wait-profiler:8083
+      - ANOMALY_DETECTION_ENABLED=true
+      - CONNECTION_SPIKE_THRESHOLD=3
+      - LATENCY_DEVIATION_THRESHOLD=3
+      - WAIT_EVENT_THRESHOLD=3
+      - RESOURCE_USAGE_THRESHOLD=3
+      - EXPORT_PORT=8084
+      - OTLP_ENDPOINT=integration-collector:4317
+    ports:
+      - "8084:8084"
+      - "13136:13136"
+    networks:
+      - db-intelligence
+    depends_on:
+      - core-metrics
+      - sql-intelligence
+      - wait-profiler
+
+  business-impact:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: business-impact-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/business-impact/config/collector.yaml:/etc/otel/collector.yaml:ro
+    environment:
+      - EXPORT_PORT=8085
+      - OTLP_ENDPOINT=integration-collector:4317
+    ports:
+      - "8085:8085"
+      - "4317:4317"  # OTLP receiver
+    networks:
+      - db-intelligence
+
+  replication-monitor:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: replication-monitor-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/replication-monitor/config/collector-enhanced.yaml:/etc/otel/collector.yaml:ro
+    environment:
+      - COLLECTOR_CONFIG=collector-enhanced.yaml
+      - MYSQL_PRIMARY_ENDPOINT=mysql-master:3306
+      - MYSQL_REPLICA_ENDPOINT=mysql-replica:3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=rootpassword
+      - REPLICATION_LAG_THRESHOLD=300
+      - ALERT_MANAGER_ENDPOINT=alert-manager:8089
+      - EXPORT_PORT=8086
+      - OTLP_ENDPOINT=integration-collector:4317
+    ports:
+      - "8086:8086"
+      - "13137:13137"
+    networks:
+      - db-intelligence
+    depends_on:
+      - mysql-master
+      - mysql-replica
+
+  performance-advisor:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: performance-advisor-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/performance-advisor/config/collector.yaml:/etc/otel/collector.yaml:ro
+    environment:
+      - EXPORT_PORT=8087
+      - OTLP_ENDPOINT=integration-collector:4317
+    ports:
+      - "8087:8087"
+      - "13138:13138"
+    networks:
+      - db-intelligence
+
+  resource-monitor:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: resource-monitor-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/resource-monitor/config/collector.yaml:/etc/otel/collector.yaml:ro
+    environment:
+      - EXPORT_PORT=8088
+      - OTLP_ENDPOINT=integration-collector:4317
+    ports:
+      - "8088:8088"
+      - "13139:13139"
+    networks:
+      - db-intelligence
+
+  canary-tester:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: canary-tester-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/canary-tester/config/collector-enhanced.yaml:/etc/otel/collector.yaml:ro
+    environment:
+      - COLLECTOR_CONFIG=collector-enhanced.yaml
+      - MYSQL_ENDPOINT=mysql-master:3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=rootpassword
+      - CANARY_DATABASE=test_db
+      - CANARY_INTERVAL=60s
+      - CANARY_WORKLOAD_INTERVAL=300s
+      - ALERT_MANAGER_ENDPOINT=alert-manager:8089
+      - EXPORT_PORT=8089
+      - OTLP_ENDPOINT=integration-collector:4317
+      - CANARY_BASELINE_DIR=/var/lib/canary/baselines
+    ports:
+      - "8089:8089"
+      - "13140:13140"
+    networks:
+      - db-intelligence
+    depends_on:
+      - mysql-master
+
+  alert-manager:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: alert-manager-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/alert-manager/config/collector.yaml:/etc/otel/collector.yaml:ro
+      - alert-storage:/var/lib/alerts
+    environment:
+      - WEBHOOK_ENDPOINT=${WEBHOOK_ENDPOINT:-http://webhook-receiver:8080/alerts}
+      - ALERT_FILE_PATH=/var/lib/alerts/alerts.json
+      - UPSTREAM_OTLP_ENDPOINT=integration-collector:4317
+      - OTEL_LOG_LEVEL=info
+    ports:
+      - "8090:8089"  # OTLP receiver
+      - "9091:9091"   # Prometheus metrics
+      - "13141:13134" # Health check
+    networks:
+      - db-intelligence
+
+  cross-signal-correlator:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: cross-signal-correlator-enhanced
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ../modules/cross-signal-correlator/config/collector.yaml:/etc/otel/collector.yaml:ro
+      - mysql-logs:/var/log/mysql:ro
+      - correlation-storage:/var/lib/otel/correlation
+    environment:
+      - OTEL_SERVICE_NAME=cross-signal-correlator
+      - CORE_METRICS_ENDPOINT=core-metrics:8081
+      - SQL_INTELLIGENCE_ENDPOINT=sql-intelligence:8082
+      - WAIT_PROFILER_ENDPOINT=wait-profiler:8083
+      - OTLP_ENDPOINT=integration-collector:4317
+      - TRACE_CORRELATION_ENABLED=true
+      - LOG_CORRELATION_ENABLED=true
+      - EXEMPLAR_ENABLED=true
+      - EXPORT_PORT=8892
+    ports:
+      - "4318:4318"   # OTLP HTTP
+      - "8892:8892"   # Prometheus metrics
+      - "13142:13137" # Health check
+    networks:
+      - db-intelligence
+    depends_on:
+      - core-metrics
+      - sql-intelligence
+      - wait-profiler
+
+  # Integration collector with circuit breaker and persistent queues
+  integration-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: integration-collector
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ./config/collector-integration.yaml:/etc/otel/collector.yaml:ro
+      - otel-storage:/var/lib/otel/queue
+    environment:
+      - OTLP_ENDPOINT=${OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      - API_KEY=${NEW_RELIC_LICENSE_KEY}
+      - FALLBACK_ENDPOINT=${FALLBACK_ENDPOINT:-https://otlp.nr-data.net}
+      - ENVIRONMENT=production
+      - CLUSTER_NAME=integration-test
+      - ML_FEATURES_ENABLED=true
+      - LOCK_ANALYSIS_ENABLED=true
+      - WAIT_PROFILE_ENABLED=true
+      - CIRCUIT_FAILURE_THRESHOLD=5
+      - CIRCUIT_RECOVERY_TIMEOUT=30s
+      - ROLLOUT_PERCENTAGE=100
+      - COMPRESSION_TYPE=gzip
+      - EXPORT_WORKERS=10
+      - EXPORT_QUEUE_SIZE=50000
+      - OTEL_FILE_STORAGE_DIR=/var/lib/otel/queue
+      - GOMEMLIMIT=4000MiB
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "8889:8889"   # Prometheus
+      - "8888:8888"   # Internal metrics
+      - "13143:13133" # Health check
+      - "1777:1777"   # pprof
+      - "55679:55679" # zpages
+    networks:
+      - db-intelligence
+    depends_on:
+      - core-metrics
+      - sql-intelligence
+      - anomaly-detector
+
+  # Optional webhook receiver for testing alerts
+  webhook-receiver:
+    image: python:3.9-alpine
+    container_name: webhook-receiver
+    volumes:
+      - ../modules/alert-manager/scripts/webhook-receiver.py:/app/webhook-receiver.py:ro
+    command: python /app/webhook-receiver.py
+    ports:
+      - "8080:8080"
+    networks:
+      - db-intelligence
+
+volumes:
+  mysql-master-data:
+  mysql-replica-data:
+  mysql-logs:
+  alert-storage:
+  correlation-storage:
+  otel-storage:
+
+networks:
+  db-intelligence:
+    name: database-intelligence-monorepo_db-intelligence
+    driver: bridge

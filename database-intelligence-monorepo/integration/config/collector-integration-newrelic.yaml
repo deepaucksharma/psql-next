@@ -1,0 +1,454 @@
+# New Relic Integration Configuration
+# Central collector for all modules with New Relic-specific optimizations
+
+receivers:
+  # OTLP receiver for all modules
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus federation from all modules
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'core-metrics'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['core-metrics:8081']
+            
+        - job_name: 'sql-intelligence'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['sql-intelligence:8082']
+            
+        - job_name: 'wait-profiler'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['wait-profiler:8083']
+            
+        - job_name: 'anomaly-detector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['anomaly-detector:8084']
+            
+        - job_name: 'business-impact'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['business-impact:8085']
+            
+        - job_name: 'replication-monitor'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['replication-monitor:8086']
+            
+        - job_name: 'performance-advisor'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['performance-advisor:8087']
+            
+        - job_name: 'resource-monitor'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['resource-monitor:8088']
+            
+        - job_name: 'cross-signal-correlator'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['cross-signal-correlator:8890']
+
+processors:
+  # Memory management with circuit breaker
+  memory_limiter:
+    check_interval: ${env:MEMORY_CHECK_INTERVAL:5s}
+    limit_percentage: ${env:MEMORY_LIMIT_PERCENT:80}
+    spike_limit_percentage: ${env:MEMORY_SPIKE_PERCENT:30}
+
+  memory_limiter/small:
+    check_interval: 1s
+    limit_percentage: 60
+    spike_limit_percentage: 20
+    
+  # Batching for efficiency
+  batch:
+    timeout: ${env:BATCH_TIMEOUT:5s}
+    send_batch_size: ${env:BATCH_SIZE:1000}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE:2000}
+    
+  # Small batch for critical metrics
+  batch/minimal:
+    timeout: 1s
+    send_batch_size: 100
+    send_batch_max_size: 200
+    
+  # Large batch for historical data
+  batch/large:
+    timeout: 30s
+    send_batch_size: 10000
+    send_batch_max_size: 20000
+
+  # Feature flag based filtering
+  filter/feature_flags:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["feature.ml_scoring"] == "${env:ML_FEATURES_ENABLED:true}"'
+        - 'attributes["feature.lock_analysis"] == "${env:LOCK_ANALYSIS_ENABLED:true}"' 
+        - 'attributes["feature.wait_profiling"] == "${env:WAIT_PROFILE_ENABLED:true}"'
+        
+  # Circuit breaker routing
+  routing/circuit_breaker:
+    default_exporters: [otlphttp/newrelic]
+    table:
+      - statement: route() where attributes["circuit.state"] == "open"
+        exporters: [otlphttp/newrelic_fallback]
+      - statement: route() where attributes["circuit.state"] == "closed"
+        exporters: [otlphttp/newrelic]
+        
+  # Tenant-based routing for multi-tenancy
+  routing/tenant:
+    from_attribute: db_schema
+    default_exporters: [otlphttp/newrelic_standard]
+    table:
+      - value: "orders|payments|customers"
+        exporters: [otlphttp/newrelic_critical]
+      - value: "analytics|reporting" 
+        exporters: [otlphttp/newrelic_batch]
+        
+  # NRDB optimization - limit high cardinality
+  transform/nrdb_optimization:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Limit table names to top 100
+          - limit(attributes["table"], 100) 
+            where metric.name == "mysql.table.io.wait.count"
+          
+          # Limit index names to top 50
+          - limit(attributes["index_name"], 50) 
+            where metric.name == "mysql.index.io.wait.count"
+          
+          # Limit query digests to top 500
+          - limit(attributes["digest"], 500) 
+            where metric.name == "mysql.statement_event.count"
+          
+          # Truncate long query texts
+          - set(attributes["query_text"], Substring(attributes["query_text"], 0, 255))
+            where Len(attributes["query_text"]) > 255
+        
+  # Data quality scoring
+  transform/data_quality:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Add confidence score based on data completeness
+          - set(attributes["data.confidence"], 
+                (
+                  Case(attributes["historical_exec_count"] > 1000, 30, 10) +
+                  Case(attributes["current_wait_profile"] != "", 30, 0) +
+                  Case(attributes["historical_p95_time_ms"] > 0, 20, 0) +
+                  Case(attributes["performance_issue"] != "UNKNOWN", 20, 0)
+                ))
+          
+          # Mark low-quality data
+          - set(attributes["data.quality"], "low")
+            where attributes["data.confidence"] < 50
+            
+  # New Relic event types
+  transform/newrelic_events:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          # Mark high-value metrics for longer retention
+          - set(attributes["nr.highValue"], true)
+            where name == "mysql.intelligence.comprehensive" or 
+                  name == "mysql.replica.time_behind_source" or
+                  name == "business.revenue_impact"
+          
+          # Add event type for NRQL queries
+          - set(attributes["eventType"], "MySQLIntelligence")
+            where name == "mysql.intelligence.comprehensive"
+          
+          - set(attributes["eventType"], "MySQLReplication")
+            where name =~ "mysql.replica.*"
+          
+          - set(attributes["eventType"], "MySQLBusiness")
+            where name =~ "business.*"
+            
+  # Progressive rollout sampling
+  probabilistic_sampler/progressive:
+    hash_seed: 22
+    sampling_percentage: ${env:ROLLOUT_PERCENTAGE:10}
+    attribute_source: "query_hash"
+
+  # Resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: database-intelligence-integration
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT:production}
+        action: upsert
+
+  # Critical query filter
+  filter/critical_only:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["business_criticality"] == "CRITICAL" or attributes["intelligence_score"] > 150'
+        
+  # Importance-based filtering
+  filter/importance:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'attributes["intelligence_score"] > 10 or attributes["historical_exec_count"] > 100'
+
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: team
+        value: ${env:TEAM_NAME}
+        action: insert
+      - key: cost_center
+        value: ${env:COST_CENTER}
+        action: insert
+
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_INSTANCE"
+        action: insert
+      - key: entity.guid
+        value: "MYSQL|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: entity.name
+        value: "${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+
+exporters:
+  # Debug output
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:normal}
+    sampling_initial: ${env:DEBUG_SAMPLING_INITIAL:10}
+    sampling_thereafter: ${env:DEBUG_SAMPLING_THEREAFTER:100}
+    
+  # Primary New Relic OTLP exporter
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT:https://otlp.nr-data.net}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: ${env:COMPRESSION_TYPE:gzip}
+    timeout: ${env:EXPORT_TIMEOUT:30s}
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:EXPORT_WORKERS:5}
+      queue_size: ${env:EXPORT_QUEUE_SIZE:10000}
+      storage: file_storage/reliable
+
+  # Reliable exporter with persistent queue
+  otlphttp/newrelic_reliable:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 50000
+      storage: file_storage/reliable
+      
+  # Fallback exporter for circuit breaker
+  otlphttp/newrelic_fallback:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: none
+    timeout: 5s
+    
+  # Critical metrics exporter
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none
+    timeout: 10s
+    
+  # Standard metrics exporter
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: standard
+    compression: gzip
+    timeout: 30s
+    
+  # Batch metrics exporter
+  otlphttp/newrelic_batch:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: batch
+    compression: zstd
+    timeout: 60s
+    
+  # New Relic Events API
+  otlphttp/newrelic_events:
+    endpoint: https://insights-collector.newrelic.com/v1/accounts/${env:NEW_RELIC_ACCOUNT_ID}/events
+    headers:
+      X-Insert-Key: ${env:NEW_RELIC_LICENSE_KEY}
+      Content-Type: application/json
+    compression: gzip
+    timeout: 30s
+      
+  # File exporter for debugging
+  file/debug:
+    path: /tmp/integration-debug.json
+    format: json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+
+extensions:
+  # Health check endpoint
+  health_check:
+    endpoint: 0.0.0.0:${env:HEALTH_PORT:13133}
+    path: /health
+    
+  # Circuit breaker to prevent cascade failures
+  circuitbreaker:
+    failure_threshold: ${env:CIRCUIT_FAILURE_THRESHOLD:5}
+    recovery_timeout: ${env:CIRCUIT_RECOVERY_TIMEOUT:30s}
+    half_open_requests: ${env:CIRCUIT_HALF_OPEN_REQUESTS:3}
+    
+  # Performance profiling
+  pprof:
+    endpoint: 0.0.0.0:${env:PPROF_PORT:1777}
+    
+  # zPages for debugging
+  zpages:
+    endpoint: 0.0.0.0:${env:ZPAGES_PORT:55679}
+    
+  # File storage for queue persistence with overflow protection
+  file_storage/reliable:
+    directory: ${env:OTEL_FILE_STORAGE_DIR:/var/lib/otel/queue}
+    timeout: 10s
+    compaction:
+      on_start: true
+      on_rebound: true
+      rebound_needed_threshold_mib: 100
+      rebound_trigger_threshold_mib: 10
+      directory: ${env:OTEL_FILE_STORAGE_DIR:/var/lib/otel/queue}
+      max_transaction_size: 65536
+
+service:
+  # Telemetry settings
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:info}
+      initial_fields:
+        service: database-intelligence-integration
+        version: "2.0.0"
+    metrics:
+      level: ${env:TELEMETRY_LEVEL:detailed}
+      address: 0.0.0.0:${env:TELEMETRY_PORT:8888}
+      
+  # Active extensions
+  extensions: [health_check, circuitbreaker, pprof, zpages, file_storage/reliable]
+  
+  # Integration pipelines
+  pipelines:
+    # Critical realtime metrics
+    metrics/critical_realtime:
+      receivers: [otlp, prometheus]
+      processors: 
+        - memory_limiter/small
+        - batch/minimal
+        - resource
+        - filter/critical_only
+        - routing/circuit_breaker
+        - attributes/newrelic
+        - attributes/entity_synthesis
+      exporters: [otlphttp/newrelic_critical]
+      
+    # Standard metrics pipeline
+    metrics/standard:
+      receivers: [otlp, prometheus]
+      processors:
+        - memory_limiter
+        - batch
+        - resource
+        - filter/feature_flags
+        - transform/nrdb_optimization
+        - transform/data_quality
+        - transform/newrelic_events
+        - routing/tenant
+        - attributes/newrelic
+        - attributes/entity_synthesis
+      exporters: [otlphttp/newrelic, otlphttp/newrelic_events]
+      
+    # Intelligence analysis pipeline
+    metrics/analysis:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - batch/large
+        - resource
+        - transform/data_quality
+        - transform/nrdb_optimization
+        - filter/importance
+        - routing/tenant
+        - attributes/newrelic
+        - attributes/entity_synthesis
+      exporters: [otlphttp/newrelic_reliable]
+      
+    # Progressive rollout pipeline
+    metrics/progressive:
+      receivers: [prometheus]
+      processors:
+        - memory_limiter
+        - batch
+        - resource
+        - probabilistic_sampler/progressive
+        - attributes/newrelic
+        - attributes/entity_synthesis
+      exporters: [otlphttp/newrelic]
+      
+    # Debug pipeline
+    metrics/debug:
+      receivers: [otlp, prometheus]
+      processors: [batch]
+      exporters: [debug, file/debug]

@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  cross-signal-correlator:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: cross-signal-correlator
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
+    volumes:
+      - ./config/${COLLECTOR_CONFIG:-collector.yaml}:/etc/otel/collector.yaml:ro
+      - /var/log/mysql:/var/log/mysql:ro  # For slow query log access
+      - correlation-storage:/var/lib/otel/correlation
+    environment:
+      # Service identification
+      - OTEL_SERVICE_NAME=cross-signal-correlator
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      
+      # Module endpoints for federation
+      - CORE_METRICS_ENDPOINT=core-metrics:8081
+      - SQL_INTELLIGENCE_ENDPOINT=sql-intelligence:8082
+      - WAIT_PROFILER_ENDPOINT=wait-profiler:8083
+      
+      # OTLP configuration
+      - OTLP_ENDPOINT=${OTLP_ENDPOINT:-localhost:4317}
+      
+      # Correlation settings
+      - TRACE_CORRELATION_ENABLED=${TRACE_CORRELATION_ENABLED:-true}
+      - LOG_CORRELATION_ENABLED=${LOG_CORRELATION_ENABLED:-true}
+      - EXEMPLAR_ENABLED=${EXEMPLAR_ENABLED:-true}
+      
+      # Memory settings
+      - GOMEMLIMIT=1500MiB
+      - GOGC=100
+      - MEMORY_LIMIT_PERCENT=${MEMORY_LIMIT_PERCENT:-80}
+      - MEMORY_SPIKE_PERCENT=${MEMORY_SPIKE_PERCENT:-30}
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      
+    ports:
+      - "4317:4317"   # OTLP gRPC for traces
+      - "4318:4318"   # OTLP HTTP for traces
+      - "8899:8889"   # Prometheus metrics
+      - "8888:8888"   # Internal metrics
+      - "13137:13137" # Health check (changed from 13133)
+      - "1777:1777"   # pprof
+      - "55679:55679" # zpages
+    
+    networks:
+      - db-intelligence
+    
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:13137/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    
+    restart: unless-stopped
+
+volumes:
+  correlation-storage:
+    driver: local
+
+networks:
+  db-intelligence:
+    external: true
+    name: database-intelligence-monorepo_db-intelligence

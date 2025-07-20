@@ -120,7 +120,7 @@ processors:
         value: "resource-monitor"
         action: insert
       - key: deployment.environment
-        value: "monitoring"
+        value: ${env:ENVIRONMENT}
         action: insert
       - key: monitor.type
         value: "system-resources"
@@ -146,27 +146,76 @@ processors:
       - key: collection.timestamp
         action: insert
         value: ${env:HOSTNAME}
+      - key: module
+        value: resource-monitor
+        action: insert
+
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "HOST"
+        action: insert
+      - key: entity.guid
+        value: "HOST|${env:CLUSTER_NAME}|${env:HOSTNAME}"
+        action: insert
+      - key: entity.name
+        value: "${env:HOSTNAME}"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
 
 exporters:
-  # Prometheus exporter for metrics visualization
-  prometheus:
-    endpoint: "0.0.0.0:8888"
-    namespace: resource_monitor
-    const_labels:
-      monitor: "mysql-resources"
-    resource_to_telemetry_conversion:
-      enabled: true
-
-  # OTLP exporter to send to other collectors
-  otlp:
-    endpoint: "localhost:4317"
-    tls:
-      insecure: true
+  # Primary New Relic OTLP exporter for standard metrics
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
     retry_on_failure:
       enabled: true
       initial_interval: 5s
       max_interval: 30s
       max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # High-priority exporter for critical resource metrics
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none  # No compression for lower latency
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
 
   # Debug exporter for development
   debug:
@@ -207,14 +256,20 @@ service:
     # Main metrics pipeline
     metrics:
       receivers: [hostmetrics, otlp]
-      processors: [memory_limiter, batch, resource, attributes]
-      exporters: [prometheus, file]
+      processors: [memory_limiter, batch, resource, attributes, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_standard, file]
     
     # MySQL-specific metrics pipeline
     metrics/mysql:
       receivers: [hostmetrics]
-      processors: [memory_limiter, filter/mysql, batch, resource]
-      exporters: [prometheus, otlp]
+      processors: [memory_limiter, filter/mysql, batch, resource, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_standard]
+    
+    # Critical resource metrics (CPU/Memory pressure)
+    metrics/critical:
+      receivers: [hostmetrics]
+      processors: [memory_limiter, batch, resource, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_critical]
     
     # Debug pipeline for troubleshooting
     metrics/debug:

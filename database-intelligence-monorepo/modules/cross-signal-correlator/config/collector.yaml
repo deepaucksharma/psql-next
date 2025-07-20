@@ -197,9 +197,9 @@ exporters:
     tls:
       insecure: true
       
-  # Logging exporter
-  logging:
-    loglevel: info
+  # Debug exporter
+  debug:
+    verbosity: detailed
     sampling_initial: 10
     sampling_thereafter: 100
     
@@ -238,7 +238,7 @@ service:
         groupbytrace,
         attributes/correlation
       ]
-      exporters: [otlp, spanmetrics, logging]
+      exporters: [otlp, spanmetrics, debug]
       
     # Logs to metrics pipeline
     logs:
@@ -250,7 +250,7 @@ service:
         transform/log_enrichment,
         attributes/correlation
       ]
-      exporters: [count, logging]
+      exporters: [count, debug]
       
     # Metrics from logs
     metrics/from_logs:

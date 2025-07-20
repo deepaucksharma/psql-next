@@ -1,0 +1,182 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:8087
+        cors:
+          allowed_origins:
+            - "http://*"
+            - "https://*"
+  
+  # Pull metrics from other modules
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'anomaly-detector'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['anomaly-detector:8081']
+        
+        - job_name: 'query-analyzer'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['query-analyzer:8083']
+        
+        - job_name: 'intelligent-alerting'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['intelligent-alerting:8085']
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+  
+  # Generate performance recommendations
+  transform:
+    metric_statements:
+      # Missing Index Recommendations
+      - context: metric
+        statements:
+          - set(name, "db.performance.recommendation.missing_index") where name == "mysql.statement.executions" and attributes["statement_digest_text"] != nil
+          - set(attributes["recommendation_type"], "missing_index")
+          - set(attributes["severity"], "high") where value > 1000
+          - set(attributes["recommendation"], "Consider adding index on columns used in WHERE clause") where attributes["statement_digest_text"] != nil and IsMatch(attributes["statement_digest_text"], ".*WHERE.*")
+          - set(attributes["impact_score"], value * 0.8) where attributes["recommendation_type"] == "missing_index"
+      
+      # Slow Query Recommendations
+      - context: metric
+        statements:
+          - set(name, "db.performance.recommendation.slow_query") where name == "mysql.statement.avg_timer_wait" and value > 1000000000
+          - set(attributes["recommendation_type"], "slow_query")
+          - set(attributes["severity"], "critical") where value > 5000000000
+          - set(attributes["severity"], "high") where value > 1000000000 and value <= 5000000000
+          - set(attributes["recommendation"], "Query execution time exceeds threshold. Consider query optimization.")
+          - set(attributes["threshold_exceeded_by"], (value - 1000000000) / 1000000000)
+      
+      # Connection Pool Sizing Recommendations
+      - context: metric
+        statements:
+          - set(name, "db.performance.recommendation.connection_pool") where name == "mysql.threads.running"
+          - set(attributes["recommendation_type"], "connection_pool")
+          - set(attributes["current_connections"], value)
+          - set(attributes["severity"], "medium") where value > 50
+          - set(attributes["recommendation"], "Connection pool may be undersized. Consider increasing max_connections.") where value > 50
+          - set(attributes["optimal_pool_size"], value * 1.5) where value > 50
+      
+      # Cache Hit Ratio Recommendations
+      - context: metric
+        statements:
+          - set(name, "db.performance.recommendation.cache_efficiency") where name == "mysql.cache.hit_ratio"
+          - set(attributes["recommendation_type"], "cache_optimization")
+          - set(attributes["current_hit_ratio"], value)
+          - set(attributes["severity"], "high") where value < 0.8
+          - set(attributes["severity"], "medium") where value >= 0.8 and value < 0.95
+          - set(attributes["recommendation"], "Cache hit ratio below optimal. Consider increasing buffer pool size.") where value < 0.95
+          - set(attributes["performance_impact"], (1 - value) * 100)
+      
+      # Table Lock Recommendations
+      - context: metric
+        statements:
+          - set(name, "db.performance.recommendation.table_locks") where name == "mysql.table.locks.waited"
+          - set(attributes["recommendation_type"], "lock_contention")
+          - set(attributes["severity"], "high") where value > 100
+          - set(attributes["recommendation"], "High lock contention detected. Consider row-level locking or query optimization.")
+          - set(attributes["lock_wait_ratio"], value / 1000)
+      
+      # Memory Usage Recommendations
+      - context: metric
+        statements:
+          - set(name, "db.performance.recommendation.memory_usage") where name == "mysql.buffer_pool.usage"
+          - set(attributes["recommendation_type"], "memory_optimization")
+          - set(attributes["current_usage_percent"], value)
+          - set(attributes["severity"], "medium") where value > 0.9
+          - set(attributes["recommendation"], "Buffer pool usage high. Monitor for memory pressure.") where value > 0.9
+      
+      # Query Pattern Recommendations
+      - context: metric
+        statements:
+          - set(name, "db.performance.recommendation.query_pattern") where name == "mysql.statement.errors"
+          - set(attributes["recommendation_type"], "query_errors")
+          - set(attributes["error_count"], value)
+          - set(attributes["severity"], "high") where value > 10
+          - set(attributes["recommendation"], "High error rate detected. Review query syntax and permissions.")
+      
+      # Replication Lag Recommendations
+      - context: metric
+        statements:
+          - set(name, "db.performance.recommendation.replication_lag") where name == "mysql.replica.lag"
+          - set(attributes["recommendation_type"], "replication_performance")
+          - set(attributes["lag_seconds"], value)
+          - set(attributes["severity"], "critical") where value > 300
+          - set(attributes["severity"], "high") where value > 60 and value <= 300
+          - set(attributes["recommendation"], "Replication lag exceeds threshold. Check network and replica performance.")
+      
+      # Add recommendation scores for prioritization
+      - context: metric
+        statements:
+          - set(attributes["priority_score"], 100) where attributes["severity"] == "critical"
+          - set(attributes["priority_score"], 75) where attributes["severity"] == "high"
+          - set(attributes["priority_score"], 50) where attributes["severity"] == "medium"
+          - set(attributes["priority_score"], 25) where attributes["severity"] == "low"
+  
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: performance-advisor
+        action: upsert
+      - key: service.namespace
+        value: database-intelligence
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+      - key: module
+        value: performance-advisor
+        action: upsert
+  
+  # Filter to only keep recommendation metrics
+  filter:
+    metrics:
+      include:
+        match_type: regexp
+        metric_names:
+          - "db\\.performance\\.recommendation\\..*"
+
+exporters:
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    
+  # Export to console for debugging
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [batch, transform, resource, filter]
+      exporters: [prometheus, debug]
+  
+  extensions: [health_check, zpages]
+  
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: performance-advisor
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /
+  
+  zpages:
+    endpoint: 0.0.0.0:55679

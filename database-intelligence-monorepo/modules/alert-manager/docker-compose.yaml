@@ -10,6 +10,7 @@ services:
       - "8089:8089"  # OTLP gRPC receiver
       - "4318:4318"  # OTLP HTTP receiver
       - "9091:9091"  # Prometheus exporter
+      - "8897:8889"  # Prometheus metrics
       - "13134:13134" # Health check extension
     environment:
       - OTEL_SERVICE_NAME=alert-manager
@@ -17,8 +18,9 @@ services:
       - WEBHOOK_ENDPOINT=${WEBHOOK_ENDPOINT:-http://localhost:9999/alerts}
       - ALERT_FILE_PATH=/var/log/alerts/alerts.json
     volumes:
-      - ./config:/etc/otelcol
+      - ./config:/etc/otel
       - alert-logs:/var/log/alerts
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
     networks:
       - intelligence-network
     restart: unless-stopped

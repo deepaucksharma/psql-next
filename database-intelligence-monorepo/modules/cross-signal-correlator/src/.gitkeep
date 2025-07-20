@@ -1,0 +1,5 @@
+# Source directory for cross-signal-correlator
+# This module primarily uses configuration, but this directory is available for:
+# - Custom processors
+# - Helper scripts
+# - Additional correlation logic

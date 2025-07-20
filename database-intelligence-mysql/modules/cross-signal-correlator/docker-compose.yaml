@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  otel-collector-cross-signal-correlator:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector-cross-signal-correlator
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    environment:
+      # Configuration selection
+      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector.yaml}
+      
+      # MySQL Configuration
+      MYSQL_PRIMARY_ENDPOINT: ${MYSQL_PRIMARY_ENDPOINT:-mysql-primary:3306}
+      MYSQL_REPLICA_ENDPOINT: ${MYSQL_REPLICA_ENDPOINT:-mysql-replica:3306}
+      MYSQL_USER: ${MYSQL_USER:-otel_monitor}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-otelmonitorpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-""}
+      
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      NEW_RELIC_PROMETHEUS_ENDPOINT: ${NEW_RELIC_PROMETHEUS_ENDPOINT:-https://metric-api.newrelic.com/prometheus/v1/write}
+      
+      # Environment Settings
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SERVICE_NAME: ${SERVICE_NAME:-mysql-cross-signal-correlator}
+      NAMESPACE: ${NAMESPACE:-database}
+      CLUSTER_NAME: ${CLUSTER_NAME:-mysql-cluster}
+      TEAM_NAME: ${TEAM_NAME:-database-team}
+      COST_CENTER: ${COST_CENTER:-engineering}
+      
+      # Cross-Signal Correlation Settings
+      ENABLE_TRACE_CORRELATION: ${ENABLE_TRACE_CORRELATION:-true}
+      ENABLE_LOG_CORRELATION: ${ENABLE_LOG_CORRELATION:-true}
+      ENABLE_METRIC_EXEMPLARS: ${ENABLE_METRIC_EXEMPLARS:-true}
+      SPAN_METRICS_FLUSH_INTERVAL: ${SPAN_METRICS_FLUSH_INTERVAL:-15s}
+      
+      # MySQL Log Settings
+      MYSQL_SLOW_LOG_PATH: ${MYSQL_SLOW_LOG_PATH:-/var/log/mysql/slow.log}
+      MYSQL_ERROR_LOG_PATH: ${MYSQL_ERROR_LOG_PATH:-/var/log/mysql/error.log}
+      
+      # Batch and Memory Settings
+      BATCH_TIMEOUT: ${BATCH_TIMEOUT:-5s}
+      BATCH_SIZE: ${BATCH_SIZE:-2000}
+      BATCH_MAX_SIZE: ${BATCH_MAX_SIZE:-5000}
+      MEMORY_LIMIT_PERCENT: ${MEMORY_LIMIT_PERCENT:-80}
+      MEMORY_SPIKE_PERCENT: ${MEMORY_SPIKE_PERCENT:-30}
+      
+      # Export Settings
+      EXPORT_TIMEOUT: ${EXPORT_TIMEOUT:-30s}
+      EXPORT_WORKERS: ${EXPORT_WORKERS:-10}
+      EXPORT_QUEUE_SIZE: ${EXPORT_QUEUE_SIZE:-20000}
+      COMPRESSION_TYPE: ${COMPRESSION_TYPE:-gzip}
+      
+      # Cloud Provider Settings
+      CLOUD_PROVIDER: ${CLOUD_PROVIDER:-docker}
+      CLOUD_REGION: ${CLOUD_REGION:-local}
+      
+      # Debug Settings
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEBUG_VERBOSITY: ${DEBUG_VERBOSITY:-normal}
+      TELEMETRY_LEVEL: ${TELEMETRY_LEVEL:-detailed}
+      TELEMETRY_PORT: ${TELEMETRY_PORT:-8888}
+      
+      # Circuit Breaker Settings
+      CIRCUIT_FAILURE_THRESHOLD: ${CIRCUIT_FAILURE_THRESHOLD:-5}
+      CIRCUIT_RECOVERY_TIMEOUT: ${CIRCUIT_RECOVERY_TIMEOUT:-30s}
+      CIRCUIT_HALF_OPEN_REQUESTS: ${CIRCUIT_HALF_OPEN_REQUESTS:-3}
+      
+      # Multi-tenancy Settings
+      ENABLE_TENANT_ROUTING: ${ENABLE_TENANT_ROUTING:-true}
+      CRITICAL_TENANTS: ${CRITICAL_TENANTS:-"orders,payments,customers"}
+      BATCH_TENANTS: ${BATCH_TENANTS:-"analytics,reporting"}
+      
+      # Progressive Rollout Settings
+      ROLLOUT_PERCENTAGE: ${ROLLOUT_PERCENTAGE:-10}
+      
+      # Prometheus Scraping
+      PROMETHEUS_SCRAPE_INTERVAL: ${PROMETHEUS_SCRAPE_INTERVAL:-10s}
+      MYSQL_EXPORTER_ENDPOINT: ${MYSQL_EXPORTER_ENDPOINT:-mysql-exporter:9104}
+      
+      # Resource limits
+      GOMAXPROCS: ${GOMAXPROCS:-4}
+      GOMEMLIMIT: ${GOMEMLIMIT:-3500MiB}
+      OTEL_FILE_STORAGE_DIR: ${OTEL_FILE_STORAGE_DIR:-/var/lib/otel/storage}
+      
+      # Port Settings for OTLP receivers
+      OTLP_GRPC_PORT: ${OTLP_GRPC_PORT:-4317}
+      OTLP_HTTP_PORT: ${OTLP_HTTP_PORT:-4318}
+      HEALTH_PORT: ${HEALTH_PORT:-13133}
+      PPROF_PORT: ${PPROF_PORT:-1777}
+      ZPAGES_PORT: ${ZPAGES_PORT:-55679}
+      
+    volumes:
+      - ./config/${COLLECTOR_CONFIG}:/etc/otel-collector-config.yaml:ro
+      - otel_cross_signal_storage:/var/lib/otel/storage
+      - mysql_logs:/var/log/mysql:ro
+      
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "13137:13133" # Health check extension
+      - "8892:8888"   # Telemetry metrics
+      - "1779:1777"   # pprof extension
+      - "55680:55679" # zPages extension
+      
+    networks:
+      - mysql-monitoring-network
+      
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  mysql-monitoring-network:
+    external: true
+
+volumes:
+  otel_cross_signal_storage:
+    driver: local
+  mysql_logs:
+    external: true

@@ -1,0 +1,154 @@
+receivers:
+  # OTLP receiver for receiving alerts from other modules
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:8089
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "*"
+          allowed_headers:
+            - "*"
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Batch processor for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Group by attributes for alert aggregation
+  groupbyattrs:
+    keys:
+      - service.name
+      - alert.severity
+      - alert.type
+      - db.system
+      - db.name
+
+  # Transform processor for alert enrichment
+  transform:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Add timestamp if not present
+          - set(attributes["alert.timestamp"], Now()) where attributes["alert.timestamp"] == nil
+          # Set default severity if not present
+          - set(attributes["alert.severity"], "warning") where attributes["alert.severity"] == nil
+          # Add alert state
+          - set(attributes["alert.state"], "active") where attributes["alert.state"] == nil
+
+  # Filter processor to deduplicate alerts
+  filter:
+    error_mode: ignore
+    metrics:
+      # Keep only alerts with proper structure
+      include:
+        match_type: regexp
+        metric_names:
+          - "^alert\\..*"
+          - "^db\\.alert\\..*"
+          - "^anomaly\\.detected"
+          - "^threshold\\.exceeded"
+
+  # Attributes processor for alert metadata
+  attributes:
+    actions:
+      - key: alert.manager.version
+        value: "1.0.0"
+        action: insert
+      - key: alert.processed_at
+        value: $HOSTNAME
+        action: insert
+      - key: environment
+        from_attribute: deployment.environment
+        action: insert
+
+  # Resource processor for consistent labeling
+  resource:
+    attributes:
+      - key: service.name
+        value: alert-manager
+        action: insert
+      - key: service.version
+        value: "1.0.0"
+        action: insert
+
+exporters:
+  # Prometheus exporter for alert metrics
+  prometheus:
+    endpoint: 0.0.0.0:9091
+    namespace: alert_manager
+    const_labels:
+      service: alert_manager
+    metric_expiration: 5m
+    enable_open_metrics: true
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 20
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: 0.0.0.0:13134
+    path: /health
+    check_collector_pipeline:
+      enabled: true
+      interval: 10s
+      exporter_failure_threshold: 5
+
+  # Performance profiler
+  pprof:
+    endpoint: 0.0.0.0:1777
+    block_profile_fraction: 3
+    mutex_profile_fraction: 5
+
+  # Memory ballast for stable memory usage
+  memory_ballast:
+    size_mib: 128
+
+service:
+  extensions: [health_check, pprof, memory_ballast]
+  
+  pipelines:
+    # Main alert processing pipeline
+    metrics/alerts:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - filter
+        - transform
+        - groupbyattrs
+        - attributes
+        - resource
+        - batch
+      exporters: [prometheus, debug]
+    
+    # Debug pipeline for troubleshooting
+    metrics/debug:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+  
+  telemetry:
+    logs:
+      level: ${env:OTEL_LOG_LEVEL:-info}
+      initial_fields:
+        service: alert-manager
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

@@ -1,0 +1,295 @@
+# Enhanced Business Impact Configuration
+# Implements business scoring and revenue impact from master-enhanced.yaml
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus federation from SQL Intelligence
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'sql-intelligence-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['${env:SQL_INTELLIGENCE_ENDPOINT}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_(query|statement|plan)_.*'
+              action: keep
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  # Enhanced business impact calculation
+  transform/business_impact:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Calculate business impact score based on query patterns
+          - set(attributes["business_impact_score"], 0.0)
+          - set(attributes["business_category"], "general")
+          - set(attributes["revenue_impact"], "none")
+          - set(attributes["business_criticality"], "LOW")
+          
+          # Revenue-impacting queries (orders, payments, transactions)
+          - set(attributes["business_impact_score"], 10.0) where IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction|invoice|billing|subscription|purchase|sale|revenue|checkout).*")
+          - set(attributes["business_category"], "revenue") where IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction|invoice|billing|subscription|purchase|sale|revenue|checkout).*")
+          - set(attributes["revenue_impact"], "direct") where IsMatch(attributes["db.statement"], "(?i).*(order|payment|transaction|invoice|billing|subscription|purchase|sale|revenue|checkout).*")
+          - set(attributes["business_criticality"], "CRITICAL") where attributes["business_category"] == "revenue"
+          
+          # Customer-facing operations
+          - set(attributes["business_impact_score"], 8.0) where IsMatch(attributes["db.statement"], "(?i).*(customer|user|account|profile|session|authentication|login|cart|wishlist).*") and attributes["business_impact_score"] < 8.0
+          - set(attributes["business_category"], "customer") where IsMatch(attributes["db.statement"], "(?i).*(customer|user|account|profile|session|authentication|login|cart|wishlist).*") and attributes["business_category"] == "general"
+          - set(attributes["revenue_impact"], "indirect") where IsMatch(attributes["db.statement"], "(?i).*(customer|user|account|profile|session|authentication|login|cart|wishlist).*") and attributes["revenue_impact"] == "none"
+          - set(attributes["business_criticality"], "HIGH") where attributes["business_category"] == "customer"
+          
+          # Inventory and fulfillment operations
+          - set(attributes["business_impact_score"], 7.0) where IsMatch(attributes["db.statement"], "(?i).*(inventory|stock|product|catalog|fulfillment|shipping|delivery|warehouse).*") and attributes["business_impact_score"] < 7.0
+          - set(attributes["business_category"], "operations") where IsMatch(attributes["db.statement"], "(?i).*(inventory|stock|product|catalog|fulfillment|shipping|delivery|warehouse).*") and attributes["business_category"] == "general"
+          - set(attributes["business_criticality"], "MEDIUM") where attributes["business_category"] == "operations"
+          
+          # Analytics and reporting
+          - set(attributes["business_impact_score"], 5.0) where IsMatch(attributes["db.statement"], "(?i).*(report|analytics|metric|dashboard|aggregate|summary|statistics).*") and attributes["business_impact_score"] < 5.0
+          - set(attributes["business_category"], "analytics") where IsMatch(attributes["db.statement"], "(?i).*(report|analytics|metric|dashboard|aggregate|summary|statistics).*") and attributes["business_category"] == "general"
+          - set(attributes["business_criticality"], "LOW") where attributes["business_category"] == "analytics"
+          
+          # Administrative operations
+          - set(attributes["business_impact_score"], 3.0) where IsMatch(attributes["db.statement"], "(?i).*(admin|config|setting|log|audit|backup|maintenance).*") and attributes["business_impact_score"] < 3.0
+          - set(attributes["business_category"], "admin") where IsMatch(attributes["db.statement"], "(?i).*(admin|config|setting|log|audit|backup|maintenance).*") and attributes["business_category"] == "general"
+          - set(attributes["business_criticality"], "LOW") where attributes["business_category"] == "admin"
+          
+          # Boost score for critical operations
+          - set(attributes["business_impact_score"], attributes["business_impact_score"] * 1.5) where IsMatch(attributes["db.operation"], "(?i)(update|delete|insert)") and attributes["business_category"] == "revenue"
+          - set(attributes["business_impact_score"], attributes["business_impact_score"] * 1.3) where IsMatch(attributes["db.operation"], "(?i)(update|delete|insert)") and attributes["business_category"] == "customer"
+          
+          # Cap the score at 10
+          - set(attributes["business_impact_score"], 10.0) where attributes["business_impact_score"] > 10.0
+
+  # Revenue impact calculation
+  transform/revenue_impact:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Calculate estimated revenue impact
+          - set(attributes["business.revenue_impact"], 0.0)
+          
+          # High-value transactions
+          - set(attributes["business.revenue_impact"], 
+                attributes["business_impact_score"] * 100 * attributes["query_count"])
+            where attributes["business_category"] == "revenue" and attributes["query_count"] != nil
+          
+          # Customer experience impact
+          - set(attributes["business.revenue_impact"], 
+                attributes["business_impact_score"] * 50 * attributes["query_count"])
+            where attributes["business_category"] == "customer" and attributes["query_count"] != nil
+          
+          # Operations impact
+          - set(attributes["business.revenue_impact"], 
+                attributes["business_impact_score"] * 20 * attributes["query_count"])
+            where attributes["business_category"] == "operations" and attributes["query_count"] != nil
+          
+          # Add time-based multiplier for business hours
+          - set(attributes["business.revenue_impact"], 
+                attributes["business.revenue_impact"] * 2.0)
+            where Hour(Now()) >= 9 and Hour(Now()) <= 17 and DayOfWeek(Now()) >= 2 and DayOfWeek(Now()) <= 6
+
+  # SLA impact analysis
+  transform/sla_impact:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Add SLA impact based on duration
+          - set(attributes["sla_impact"], "violation") where metric.name == "db.client.operation.duration" and value > 5.0
+          - set(attributes["sla_impact"], "warning") where metric.name == "db.client.operation.duration" and value > 2.0 and value <= 5.0
+          - set(attributes["sla_impact"], "normal") where metric.name == "db.client.operation.duration" and value <= 2.0
+          
+          # SLA violation cost
+          - set(attributes["sla.violation_cost"], 500.0) where attributes["sla_impact"] == "violation" and attributes["business_criticality"] == "CRITICAL"
+          - set(attributes["sla.violation_cost"], 200.0) where attributes["sla_impact"] == "violation" and attributes["business_criticality"] == "HIGH"
+          - set(attributes["sla.violation_cost"], 50.0) where attributes["sla_impact"] == "violation" and attributes["business_criticality"] == "MEDIUM"
+          
+          # Add business-critical table identification
+          - set(attributes["critical_table"], true) where IsMatch(attributes["db.sql.table"], "(?i).*(order|payment|user|customer|transaction|invoice|product|inventory).*")
+          - set(attributes["critical_table"], false) where !IsMatch(attributes["db.sql.table"], "(?i).*(order|payment|user|customer|transaction|invoice|product|inventory).*")
+
+  transform/create_metrics:
+    metric_statements:
+      - context: scope
+        statements:
+          # Create business impact metrics
+          - set(metric.name, "business.impact.score") where metric.name == "db.client.operation.duration"
+          - set(metric.unit, "score") where metric.name == "business.impact.score"
+          - set(metric.description, "Business impact score (0-10) based on query patterns and tables") where metric.name == "business.impact.score"
+
+  attributes/business_metadata:
+    actions:
+      - key: service.name
+        value: "business-impact"
+        action: insert
+      - key: module.type
+        value: "business-impact-analyzer"
+        action: insert
+
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: eventType
+        value: "MySQLBusiness"
+        action: insert
+
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_INSTANCE"
+        action: insert
+      - key: entity.guid
+        value: "MYSQL|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: entity.name
+        value: "${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+
+  # New Relic event enrichment
+  transform/newrelic_events:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Mark high-value metrics for New Relic
+          - set(attributes["nr.highValue"], true)
+            where attributes["business_criticality"] IN ("CRITICAL", "HIGH")
+          
+          # Add workload classification
+          - set(attributes["workload.function"], "payment_processing")
+            where attributes["business_category"] == "revenue"
+          - set(attributes["workload.function"], "customer_experience")
+            where attributes["business_category"] == "customer"
+          - set(attributes["workload.function"], "operations")
+            where attributes["business_category"] == "operations"
+
+exporters:
+  # Primary New Relic OTLP exporter for standard metrics
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # High-priority exporter for critical business metrics
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none  # No compression for lower latency
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+
+  # New Relic Events API for business events
+  otlphttp/newrelic_events:
+    endpoint: https://insights-collector.newrelic.com/v1/accounts/${env:NEW_RELIC_ACCOUNT_ID}/events
+    headers:
+      X-Insert-Key: ${env:NEW_RELIC_LICENSE_KEY}
+      Content-Type: application/json
+    compression: gzip
+    timeout: 30s
+
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  telemetry:
+    logs:
+      level: "info"
+    metrics:
+      level: "detailed"
+      address: 0.0.0.0:8888
+
+  pipelines:
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: 
+        - memory_limiter
+        - batch
+        - transform/business_impact
+        - transform/revenue_impact
+        - transform/sla_impact
+        - transform/create_metrics
+        - attributes/business_metadata
+        - attributes/newrelic
+        - attributes/entity_synthesis
+        - transform/newrelic_events
+      exporters: [otlphttp/newrelic_standard, debug]
+    
+    # Critical business metrics pipeline
+    metrics/critical:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - batch
+        - transform/business_impact
+        - transform/revenue_impact
+        - attributes/newrelic
+        - attributes/entity_synthesis
+      exporters: [otlphttp/newrelic_critical, otlphttp/newrelic_events]
+
+  extensions: [health_check, pprof, zpages]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:6060
+  zpages:
+    endpoint: 0.0.0.0:55679

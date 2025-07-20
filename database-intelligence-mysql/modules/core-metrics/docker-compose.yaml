@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  otel-collector-core-metrics:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector-core-metrics
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    environment:
+      # Configuration selection
+      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector.yaml}
+      
+      # MySQL Configuration
+      MYSQL_PRIMARY_ENDPOINT: ${MYSQL_PRIMARY_ENDPOINT:-mysql-primary:3306}
+      MYSQL_REPLICA_ENDPOINT: ${MYSQL_REPLICA_ENDPOINT:-mysql-replica:3306}
+      MYSQL_USER: ${MYSQL_USER:-otel_monitor}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-otelmonitorpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-""}
+      MYSQL_VERSION: ${MYSQL_VERSION:-"8.0"}
+      
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      
+      # Environment Settings
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SERVICE_NAME: ${SERVICE_NAME:-mysql-core-metrics}
+      NAMESPACE: ${NAMESPACE:-database}
+      CLUSTER_NAME: ${CLUSTER_NAME:-mysql-cluster}
+      MYSQL_ROLE: ${MYSQL_ROLE:-primary}
+      TEAM_NAME: ${TEAM_NAME:-database-team}
+      COST_CENTER: ${COST_CENTER:-engineering}
+      
+      # Collection Settings
+      MYSQL_COLLECTION_INTERVAL: ${MYSQL_COLLECTION_INTERVAL:-10s}
+      HOST_COLLECTION_INTERVAL: ${HOST_COLLECTION_INTERVAL:-10s}
+      
+      # Batch and Memory Settings
+      BATCH_TIMEOUT: ${BATCH_TIMEOUT:-5s}
+      BATCH_SIZE: ${BATCH_SIZE:-1000}
+      BATCH_MAX_SIZE: ${BATCH_MAX_SIZE:-2000}
+      MEMORY_LIMIT_PERCENT: ${MEMORY_LIMIT_PERCENT:-80}
+      MEMORY_SPIKE_PERCENT: ${MEMORY_SPIKE_PERCENT:-30}
+      MEMORY_CHECK_INTERVAL: ${MEMORY_CHECK_INTERVAL:-5s}
+      
+      # Export Settings
+      EXPORT_TIMEOUT: ${EXPORT_TIMEOUT:-30s}
+      EXPORT_WORKERS: ${EXPORT_WORKERS:-5}
+      EXPORT_QUEUE_SIZE: ${EXPORT_QUEUE_SIZE:-10000}
+      COMPRESSION_TYPE: ${COMPRESSION_TYPE:-gzip}
+      
+      # Cloud Provider Settings
+      CLOUD_PROVIDER: ${CLOUD_PROVIDER:-docker}
+      CLOUD_REGION: ${CLOUD_REGION:-local}
+      
+      # Debug Settings
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEBUG_VERBOSITY: ${DEBUG_VERBOSITY:-normal}
+      TELEMETRY_LEVEL: ${TELEMETRY_LEVEL:-detailed}
+      TELEMETRY_PORT: ${TELEMETRY_PORT:-8888}
+      
+      # Enhanced Features (only used with enhanced config)
+      TLS_INSECURE: ${TLS_INSECURE:-true}
+      MYSQL_INITIAL_DELAY: ${MYSQL_INITIAL_DELAY:-1s}
+      
+      # Resource limits
+      GOMAXPROCS: ${GOMAXPROCS:-2}
+      GOMEMLIMIT: ${GOMEMLIMIT:-1750MiB}
+      OTEL_FILE_STORAGE_DIR: ${OTEL_FILE_STORAGE_DIR:-/var/lib/otel/storage}
+      
+    volumes:
+      - ./config/${COLLECTOR_CONFIG}:/etc/otel-collector-config.yaml:ro
+      - otel_core_metrics_storage:/var/lib/otel/storage
+      
+    ports:
+      - "13133:13133" # Health check extension
+      - "8888:8888"   # Telemetry metrics
+      
+    networks:
+      - mysql-monitoring-network
+      
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  mysql-monitoring-network:
+    external: true
+
+volumes:
+  otel_core_metrics_storage:
+    driver: local

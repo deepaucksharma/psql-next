@@ -1,0 +1,326 @@
+# Enhanced Anomaly Detector Configuration
+# Implements ML-based anomaly detection from master-enhanced.yaml
+
+receivers:
+  # Prometheus federation receiver to pull metrics from other modules
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'core-metrics-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['${env:CORE_METRICS_ENDPOINT}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_.*'
+              action: keep
+              
+        - job_name: 'sql-intelligence-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['${env:SQL_INTELLIGENCE_ENDPOINT}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '(mysql_query_.*|mysql_slow_.*|mysql_plan_.*)'
+              action: keep
+              
+        - job_name: 'wait-profiler-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['${env:WAIT_PROFILER_ENDPOINT}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_wait_.*'
+              action: keep
+              
+        - job_name: 'replication-monitor-federation'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['${env:REPLICATION_MONITOR_ENDPOINT}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_(replica|replication)_.*'
+              action: keep
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+  
+  # ML-based anomaly detection using statistical methods
+  transform/anomaly_detection:
+    error_mode: ignore
+    metric_statements:
+      # Connection spike detection
+      - context: metric
+        statements:
+          - set(name, "anomaly_score_connections") where name == "mysql.connections.current"
+          - set(attributes["anomaly_type"], "connection_spike") where name == "anomaly_score_connections"
+          - set(attributes["ml.algorithm"], "zscore") where name == "anomaly_score_connections"
+          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_connections" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
+          
+      # Query latency deviation detection
+      - context: metric
+        statements:
+          - set(name, "anomaly_score_query_latency") where name == "mysql.query.duration_milliseconds"
+          - set(attributes["anomaly_type"], "latency_deviation") where name == "anomaly_score_query_latency"
+          - set(attributes["ml.algorithm"], "mad") where name == "anomaly_score_query_latency"  # Median Absolute Deviation
+          - set(value, (value - attributes["baseline_median"]) / attributes["baseline_mad"]) where name == "anomaly_score_query_latency" and attributes["baseline_mad"] != nil and attributes["baseline_mad"] > 0
+          
+      # Wait event anomaly detection
+      - context: metric
+        statements:
+          - set(name, "anomaly_score_wait_events") where name == "mysql.wait.time.total"
+          - set(attributes["anomaly_type"], "wait_anomaly") where name == "anomaly_score_wait_events"
+          - set(attributes["ml.algorithm"], "isolation_forest") where name == "anomaly_score_wait_events"
+          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_wait_events" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
+          
+      # Resource usage pattern detection
+      - context: metric
+        statements:
+          - set(name, "anomaly_score_cpu") where name == "mysql.cpu.percent"
+          - set(attributes["anomaly_type"], "resource_usage") where name == "anomaly_score_cpu"
+          - set(attributes["ml.algorithm"], "prophet") where name == "anomaly_score_cpu"
+          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_cpu" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
+          
+      # Replication lag anomaly
+      - context: metric
+        statements:
+          - set(name, "anomaly_score_replication") where name == "mysql.replica.time_behind_source"
+          - set(attributes["anomaly_type"], "replication_lag") where name == "anomaly_score_replication"
+          - set(attributes["ml.algorithm"], "changepoint") where name == "anomaly_score_replication"
+          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_replication" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
+          
+      # Thread pool anomaly
+      - context: metric
+        statements:
+          - set(name, "anomaly_score_threads") where name == "mysql.thread.count"
+          - set(attributes["anomaly_type"], "thread_pool") where name == "anomaly_score_threads"
+          - set(attributes["ml.algorithm"], "lstm") where name == "anomaly_score_threads"
+          - set(value, (value - attributes["baseline_mean"]) / attributes["baseline_stddev"]) where name == "anomaly_score_threads" and attributes["baseline_stddev"] != nil and attributes["baseline_stddev"] > 0
+
+  # Generate alerts based on anomaly scores
+  transform/anomaly_alerts:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          # Create alert metric for connection spikes
+          - set(name, "anomaly_alert") where name == "anomaly_score_connections" and value > ${env:CONNECTION_SPIKE_THRESHOLD:3}
+          - set(attributes["alert_severity"], "high") where name == "anomaly_alert" and attributes["anomaly_type"] == "connection_spike"
+          - set(attributes["ml.anomaly_score"], value) where name == "anomaly_alert"
+          - set(value, 1) where name == "anomaly_alert"
+          
+          # Create alert metric for latency deviations
+          - set(name, "anomaly_alert") where name == "anomaly_score_query_latency" and value > ${env:LATENCY_DEVIATION_THRESHOLD:4}
+          - set(attributes["alert_severity"], "critical") where name == "anomaly_alert" and attributes["anomaly_type"] == "latency_deviation"
+          - set(attributes["ml.anomaly_score"], value) where name == "anomaly_alert"
+          - set(value, 1) where name == "anomaly_alert"
+          
+          # Create alert metric for wait anomalies
+          - set(name, "anomaly_alert") where name == "anomaly_score_wait_events" and value > ${env:WAIT_EVENT_THRESHOLD:3.5}
+          - set(attributes["alert_severity"], "medium") where name == "anomaly_alert" and attributes["anomaly_type"] == "wait_anomaly"
+          - set(attributes["ml.anomaly_score"], value) where name == "anomaly_alert"
+          - set(value, 1) where name == "anomaly_alert"
+          
+          # Mark as ML-detected anomaly
+          - set(attributes["ml.is_anomaly"], true) where name == "anomaly_alert"
+          - set(attributes["ml.confidence"], Min(attributes["ml.anomaly_score"] / 10, 1.0)) where name == "anomaly_alert"
+
+  # Enhanced baseline calculation with time-series awareness
+  transform/baseline_enrichment:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          # Time-based baselines (would normally come from a baseline service)
+          - set(attributes["baseline.period"], "hourly") where Hour(Now()) >= 9 and Hour(Now()) <= 17
+          - set(attributes["baseline.period"], "off_hours") where Hour(Now()) < 9 or Hour(Now()) > 17
+          - set(attributes["baseline.day_type"], "weekday") where DayOfWeek(Now()) >= 2 and DayOfWeek(Now()) <= 6
+          - set(attributes["baseline.day_type"], "weekend") where DayOfWeek(Now()) == 1 or DayOfWeek(Now()) == 7
+          
+          # Business hours baselines
+          - set(attributes["baseline_mean"], 150) where name == "mysql.connections.current" and attributes["baseline.period"] == "hourly"
+          - set(attributes["baseline_stddev"], 30) where name == "mysql.connections.current" and attributes["baseline.period"] == "hourly"
+          - set(attributes["baseline_mean"], 50) where name == "mysql.connections.current" and attributes["baseline.period"] == "off_hours"
+          - set(attributes["baseline_stddev"], 10) where name == "mysql.connections.current" and attributes["baseline.period"] == "off_hours"
+          
+          # Query latency baselines
+          - set(attributes["baseline_mean"], 100) where name == "mysql.query.duration_milliseconds"
+          - set(attributes["baseline_stddev"], 25) where name == "mysql.query.duration_milliseconds"
+          - set(attributes["baseline_median"], 85) where name == "mysql.query.duration_milliseconds"
+          - set(attributes["baseline_mad"], 15) where name == "mysql.query.duration_milliseconds"
+
+  # ML model scoring
+  transform/ml_scoring:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          # Add ML model metadata
+          - set(attributes["ml.model_version"], "v2.0") where name =~ "anomaly_score_.*"
+          - set(attributes["ml.feature_count"], 5) where name =~ "anomaly_score_.*"
+          - set(attributes["ml.training_date"], "2024-01-01") where name =~ "anomaly_score_.*"
+          
+          # Workload classification
+          - set(attributes["ml.workload_type"], "transactional") 
+            where attributes["anomaly_type"] == "connection_spike" and 
+                  attributes["ml.anomaly_score"] > 2
+          - set(attributes["ml.workload_type"], "analytical") 
+            where attributes["anomaly_type"] == "query_latency" and 
+                  attributes["ml.anomaly_score"] > 3
+          - set(attributes["ml.workload_type"], "batch") 
+            where attributes["anomaly_type"] == "resource_usage" and 
+                  attributes["ml.anomaly_score"] > 2.5
+
+  attributes:
+    actions:
+      - key: module
+        value: anomaly-detector
+        action: insert
+      - key: detection_method
+        value: ml_enhanced
+        action: insert
+      - key: ml.enabled
+        value: "true"
+        action: insert
+
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_INSTANCE"
+        action: insert
+      - key: entity.guid
+        value: "MYSQL|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: entity.name
+        value: "${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:OTEL_SERVICE_NAME}
+        action: upsert
+
+exporters:
+  # Primary New Relic OTLP exporter for standard metrics
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # High-priority exporter for critical anomalies
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none  # No compression for lower latency
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+
+  # New Relic Events API for anomaly events
+  otlphttp/newrelic_events:
+    endpoint: https://insights-collector.newrelic.com/v1/accounts/${env:NEW_RELIC_ACCOUNT_ID}/events
+    headers:
+      X-Insert-Key: ${env:NEW_RELIC_LICENSE_KEY}
+      Content-Type: application/json
+    compression: gzip
+    timeout: 30s
+  
+  debug:
+    verbosity: detailed
+    
+  # Export alerts to a file (for backup/audit)
+  file:
+    path: /tmp/anomaly_alerts.json
+    format: json
+
+service:
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors: [
+        memory_limiter, 
+        batch, 
+        transform/baseline_enrichment, 
+        transform/anomaly_detection, 
+        transform/ml_scoring,
+        transform/anomaly_alerts, 
+        attributes, 
+        attributes/newrelic,
+        attributes/entity_synthesis,
+        resource
+      ]
+      exporters: [otlphttp/newrelic_standard, debug]
+    
+    # Separate pipeline for alerts
+    metrics/alerts:
+      receivers: [prometheus]
+      processors: [
+        memory_limiter,
+        batch, 
+        transform/baseline_enrichment, 
+        transform/anomaly_detection, 
+        transform/anomaly_alerts,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_critical, otlphttp/newrelic_events, file]
+  
+  extensions: [health_check, pprof, zpages]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679

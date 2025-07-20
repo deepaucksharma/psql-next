@@ -122,21 +122,6 @@ receivers:
     password: ${env:MYSQL_PASSWORD:rootpassword}
     database: ${env:CANARY_DATABASE:test}
     collection_interval: 30s
-    metrics:
-      mysql.buffer_pool.operations:
-        enabled: true
-      mysql.commands:
-        enabled: true
-      mysql.connections:
-        enabled: true
-      mysql.query.count:
-        enabled: true
-      mysql.query.slow.count:
-        enabled: true
-      mysql.threads:
-        enabled: true
-      mysql.uptime:
-        enabled: true
 
   # OTLP receiver for external canary results
   otlp:
@@ -248,8 +233,8 @@ processors:
 
 exporters:
   # Console logging
-  logging:
-    loglevel: info
+  debug:
+    verbosity: detailed
     sampling_initial: 10
     sampling_thereafter: 100
 
@@ -318,7 +303,7 @@ service:
         transform/canary_analysis,
         attributes/canary
       ]
-      exporters: [logging, prometheus, otlp/external]
+      exporters: [debug, prometheus, otlp/external]
     
     # Workload simulation metrics
     metrics/workload:
@@ -341,7 +326,7 @@ service:
         filter/canary_alerts,
         attributes/canary
       ]
-      exporters: [otlp/alerts, logging]
+      exporters: [otlp/alerts, debug]
     
     # External metrics forwarding
     metrics/external:

@@ -13,7 +13,7 @@ services:
       - OTEL_SERVICE_NAME=business-impact
       - LOG_LEVEL=info
     volumes:
-      - ./config:/etc/otelcol-contrib
+      - ./config:/etc/otel
     networks:
       - intelligence-network
     depends_on:
@@ -22,12 +22,13 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.91.0
     container_name: business-impact-collector
-    command: ["--config=/etc/otelcol-contrib/collector.yaml"]
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
     ports:
       - "8888:8888"   # Prometheus metrics
+      - "8893:8889"   # Prometheus metrics
       - "13133:13133" # Health check
     volumes:
-      - ./config/collector.yaml:/etc/otelcol-contrib/collector.yaml
+      - ./config:/etc/otel
     networks:
       - intelligence-network
 

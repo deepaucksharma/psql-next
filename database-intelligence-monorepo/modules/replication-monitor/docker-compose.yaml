@@ -77,14 +77,14 @@ services:
   collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: replication-collector
-    command: ["--config=/etc/otel-collector/collector.yaml"]
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
     volumes:
-      - ./config/collector.yaml:/etc/otel-collector/collector.yaml
+      - ./config:/etc/otel
     ports:
       - "4317:4317"   # OTLP gRPC receiver
       - "4318:4318"   # OTLP HTTP receiver
       - "8888:8888"   # Prometheus metrics
-      - "8889:8889"   # Prometheus exporter
+      - "8894:8889"   # Prometheus exporter
     depends_on:
       mysql-master:
         condition: service_healthy

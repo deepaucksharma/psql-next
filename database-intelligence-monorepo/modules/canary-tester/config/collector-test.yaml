@@ -1,0 +1,89 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # MySQL receiver for database metrics
+  mysql:
+    endpoint: canary-mysql:3306
+    username: root
+    password: rootpassword
+    database: test
+    collection_interval: 30s
+
+  # Prometheus receiver for canary metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'canary-tester'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['canary-tester:8090']
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: canary-tester
+        action: insert
+      - key: service.version
+        value: "1.0.0"
+        action: insert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Add metric attributes for canary queries
+  attributes/canary:
+    actions:
+      - key: monitoring.type
+        value: synthetic
+        action: insert
+      - key: canary.enabled
+        value: "true"
+        action: insert
+      - key: module
+        value: canary-tester
+        action: insert
+
+exporters:
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    
+  # Console exporter for debugging
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    metrics:
+      receivers: [otlp, mysql, prometheus]
+      processors: [memory_limiter, batch, resource, attributes/canary]
+      exporters: [prometheus, debug]

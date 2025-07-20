@@ -1,0 +1,305 @@
+# NerdGraph Queries for MySQL Intelligence
+# Use these queries with New Relic's GraphQL API
+
+# Create MySQL Intelligence Dashboard
+mutation CreateMySQLDashboard($accountId: Int!, $dashboard: DashboardInput!) {
+  dashboardCreate(accountId: $accountId, dashboard: $dashboard) {
+    entityResult {
+      guid
+      name
+      permalink
+    }
+    errors {
+      description
+      type
+    }
+  }
+}
+
+# Create Alert Policy for MySQL Intelligence
+mutation CreateAlertPolicy($accountId: Int!, $policy: AlertsPolicyInput!) {
+  alertsPolicyCreate(accountId: $accountId, policy: $policy) {
+    id
+    name
+    incidentPreference
+  }
+}
+
+# Create NRQL Alert Condition
+mutation CreateNrqlCondition($accountId: Int!, $policyId: ID!, $condition: AlertsNrqlConditionStaticInput!) {
+  alertsNrqlConditionStaticCreate(
+    accountId: $accountId
+    policyId: $policyId
+    condition: $condition
+  ) {
+    id
+    name
+    nrql {
+      query
+    }
+  }
+}
+
+# Query MySQL Entities
+query GetMySQLEntities($query: String!) {
+  actor {
+    entitySearch(query: $query) {
+      results {
+        entities {
+          guid
+          name
+          type
+          domain
+          tags {
+            key
+            values
+          }
+          ... on InfrastructureHostEntity {
+            alertSeverity
+            reporting
+          }
+        }
+      }
+    }
+  }
+}
+
+# Get MySQL Performance Metrics
+query GetMySQLMetrics($accountId: Int!, $query: String!, $since: DateTime!, $until: DateTime) {
+  actor {
+    account(id: $accountId) {
+      nrql(query: $query, timeout: 60) {
+        results
+        totalResult
+        metadata {
+          eventTypes
+          facets
+          messages
+          timeWindow {
+            begin
+            end
+          }
+        }
+      }
+    }
+  }
+}
+
+# Create Workload for MySQL Instances
+mutation CreateMySQLWorkload($accountId: Int!, $workload: WorkloadCreateInput!) {
+  workloadCreate(accountId: $accountId, workload: $workload) {
+    guid
+    name
+    permalink
+  }
+}
+
+# Get Alert Violations
+query GetAlertViolations($accountId: Int!, $filter: AlertsIncidentFilter) {
+  actor {
+    account(id: $accountId) {
+      alerts {
+        incidents(filter: $filter, limit: 100) {
+          incidents {
+            id
+            title
+            description
+            priority
+            state
+            openedAt
+            closedAt
+            violationUrl
+            policyName
+            conditionName
+          }
+        }
+      }
+    }
+  }
+}
+
+# Update Dashboard
+mutation UpdateDashboard($guid: EntityGuid!, $dashboard: DashboardUpdateInput!) {
+  dashboardUpdate(guid: $guid, dashboard: $dashboard) {
+    entityResult {
+      guid
+      name
+    }
+    errors {
+      description
+    }
+  }
+}
+
+# Create Applied Intelligence Destination
+mutation CreateAIDestination($accountId: Int!, $destination: AiNotificationsDestinationInput!) {
+  aiNotificationsCreateDestination(
+    accountId: $accountId
+    destination: $destination
+  ) {
+    destination {
+      id
+      name
+      type
+      active
+    }
+    error {
+      description
+    }
+  }
+}
+
+# Create Applied Intelligence Channel
+mutation CreateAIChannel($accountId: Int!, $channel: AiNotificationsChannelInput!) {
+  aiNotificationsCreateChannel(
+    accountId: $accountId
+    channel: $channel
+  ) {
+    channel {
+      id
+      name
+      type
+      destinations {
+        id
+        name
+      }
+    }
+    error {
+      description
+    }
+  }
+}
+
+# Query Anomalies
+query GetAnomalies($accountId: Int!, $query: String!) {
+  actor {
+    account(id: $accountId) {
+      nrql(
+        query: $query
+        timeout: 60
+      ) {
+        results
+        metadata {
+          timeWindow {
+            begin
+            end
+          }
+        }
+      }
+    }
+  }
+}
+
+# Create Synthetic Monitor for Canary Tests
+mutation CreateSyntheticMonitor($accountId: Int!, $monitor: SyntheticsCreateMonitorInput!) {
+  syntheticsCreateMonitor(accountId: $accountId, monitor: $monitor) {
+    monitor {
+      guid
+      name
+      status
+    }
+    errors {
+      description
+      type
+    }
+  }
+}
+
+# Get Dashboard by GUID
+query GetDashboard($guid: EntityGuid!) {
+  actor {
+    entity(guid: $guid) {
+      ... on DashboardEntity {
+        guid
+        name
+        description
+        pages {
+          name
+          widgets {
+            title
+            visualization {
+              id
+            }
+            configuration
+          }
+        }
+        owner {
+          email
+        }
+      }
+    }
+  }
+}
+
+# Create Alert Workflow
+mutation CreateAlertWorkflow($accountId: Int!, $workflow: AiWorkflowsCreateWorkflowInput!) {
+  aiWorkflowsCreateWorkflow(accountId: $accountId, createWorkflowData: $workflow) {
+    workflow {
+      id
+      name
+      enabled
+      destinationConfigurations {
+        channelId
+        notificationTriggers
+      }
+    }
+    errors {
+      description
+      type
+    }
+  }
+}
+
+# Query Entity Golden Metrics
+query GetGoldenMetrics($guid: EntityGuid!) {
+  actor {
+    entity(guid: $guid) {
+      goldenMetrics {
+        metrics {
+          title
+          name
+          query
+          unit
+        }
+      }
+      goldenTags {
+        tags {
+          key
+        }
+      }
+    }
+  }
+}
+
+# Create Data Drop Rule (for cost optimization)
+mutation CreateDropRule($accountId: Int!, $rule: NrqlDropRulesCreateDropRuleInput!) {
+  nrqlDropRulesCreate(accountId: $accountId, rules: [$rule]) {
+    successes {
+      id
+      nrql
+      description
+      action
+    }
+    failures {
+      error {
+        description
+        reason
+      }
+    }
+  }
+}
+
+# Get Account Usage
+query GetAccountUsage($accountId: Int!, $productLine: ProductLine!) {
+  actor {
+    account(id: $accountId) {
+      dataUsage(productLine: $productLine) {
+        usage {
+          timestamp
+          value
+          unit
+        }
+      }
+    }
+  }
+}

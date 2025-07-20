@@ -1,0 +1,166 @@
+receivers:
+  sqlquery/slow_queries:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    collection_interval: 15s
+    queries:
+      - sql: |
+          SELECT 
+            DIGEST,
+            SCHEMA_NAME,
+            DIGEST_TEXT,
+            COUNT_STAR as exec_count,
+            SUM_TIMER_WAIT/1000000000000 as total_latency_sec,
+            AVG_TIMER_WAIT/1000000000000 as avg_latency_sec,
+            MAX_TIMER_WAIT/1000000000000 as max_latency_sec,
+            SUM_ROWS_EXAMINED as rows_examined_total,
+            SUM_ROWS_SENT as rows_sent_total,
+            SUM_NO_INDEX_USED as no_index_used_count,
+            SUM_NO_GOOD_INDEX_USED as no_good_index_count
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE SCHEMA_NAME IS NOT NULL
+            AND DIGEST_TEXT NOT LIKE '%performance_schema%'
+            AND COUNT_STAR > 0
+          ORDER BY total_latency_sec DESC
+          LIMIT 20
+        metrics:
+          - metric_name: mysql.query.exec_count
+            value_column: exec_count
+            attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
+          - metric_name: mysql.query.latency.total
+            value_column: total_latency_sec
+            attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
+          - metric_name: mysql.query.latency.avg
+            value_column: avg_latency_sec
+            attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
+          - metric_name: mysql.query.latency.max
+            value_column: max_latency_sec
+            attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
+          - metric_name: mysql.query.rows_examined
+            value_column: rows_examined_total
+            attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
+          - metric_name: mysql.query.no_index_used
+            value_column: no_index_used_count
+            attribute_columns: [DIGEST, SCHEMA_NAME, DIGEST_TEXT]
+  
+  sqlquery/table_stats:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    collection_interval: 30s
+    queries:
+      - sql: |
+          SELECT 
+            OBJECT_SCHEMA,
+            OBJECT_NAME,
+            SUM_TIMER_READ/1000000000000 as read_latency_sec,
+            SUM_TIMER_WRITE/1000000000000 as write_latency_sec,
+            COUNT_READ as read_count,
+            COUNT_WRITE as write_count
+          FROM performance_schema.table_io_waits_summary_by_table
+          WHERE OBJECT_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+          ORDER BY (SUM_TIMER_READ + SUM_TIMER_WRITE) DESC
+          LIMIT 20
+        metrics:
+          - metric_name: mysql.table.io.read_latency
+            value_column: read_latency_sec
+            attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME]
+          - metric_name: mysql.table.io.write_latency
+            value_column: write_latency_sec
+            attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME]
+          - metric_name: mysql.table.io.read_count
+            value_column: read_count
+            attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME]
+          - metric_name: mysql.table.io.write_count
+            value_column: write_count
+            attribute_columns: [OBJECT_SCHEMA, OBJECT_NAME]
+
+  sqlquery/index_usage:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/"
+    collection_interval: 60s
+    queries:
+      - sql: |
+          SELECT 
+            TABLE_SCHEMA,
+            TABLE_NAME,
+            INDEX_NAME,
+            CARDINALITY,
+            SEQ_IN_INDEX
+          FROM information_schema.STATISTICS
+          WHERE TABLE_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+            AND INDEX_NAME != 'PRIMARY'
+          ORDER BY CARDINALITY DESC
+          LIMIT 50
+        metrics:
+          - metric_name: mysql.index.cardinality
+            value_column: CARDINALITY
+            attribute_columns: [TABLE_SCHEMA, TABLE_NAME, INDEX_NAME]
+
+  # Optional: Pull metrics from core-metrics if available
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'metrics-federation'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['${env:METRICS_ENDPOINT}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'mysql_.*'
+              action: keep
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+  
+  attributes:
+    actions:
+      - key: module
+        value: sql-intelligence
+        action: insert
+      - key: mysql.endpoint
+        value: ${env:MYSQL_ENDPOINT}
+        action: insert
+  
+  # Transform processor removed temporarily for testing
+
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:OTEL_SERVICE_NAME}
+        action: upsert
+
+exporters:
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  pipelines:
+    metrics/queries:
+      receivers: [sqlquery/slow_queries, sqlquery/table_stats, sqlquery/index_usage]
+      processors: [memory_limiter, batch, attributes, resource]
+      exporters: [prometheus, debug]
+    
+    metrics/federation:
+      receivers: [prometheus]
+      processors: [memory_limiter, batch, attributes, resource]
+      exporters: [prometheus, debug]
+  
+  extensions: [health_check]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133

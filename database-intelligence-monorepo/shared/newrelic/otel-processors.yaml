@@ -1,0 +1,192 @@
+# New Relic OTLP Processors Configuration
+# This file contains processors optimized for New Relic NRDB
+# Include this in your collector configs using:
+# processors: ${file:./shared/newrelic/otel-processors.yaml:processors}
+
+processors:
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: team
+        value: ${env:TEAM_NAME}
+        action: insert
+      - key: cost_center
+        value: ${env:COST_CENTER}
+        action: insert
+        
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_INSTANCE"
+        action: insert
+      - key: entity.guid
+        value: "MYSQL|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: entity.name
+        value: "${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+
+  # NRDB optimization - limit high cardinality
+  transform/nrdb_optimization:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Limit table names to top 100
+          - limit(attributes["table"], 100) 
+            where metric.name == "mysql.table.io.wait.count"
+          
+          # Limit index names to top 50
+          - limit(attributes["index_name"], 50) 
+            where metric.name == "mysql.index.io.wait.count"
+          
+          # Limit query digests to top 500
+          - limit(attributes["digest"], 500) 
+            where metric.name == "mysql.statement_event.count"
+          
+          # Truncate long query texts
+          - set(attributes["query_text"], Substring(attributes["query_text"], 0, 255))
+            where Len(attributes["query_text"]) > 255
+
+  # Add New Relic event types for custom queries
+  transform/newrelic_events:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          # Mark high-value metrics for longer retention
+          - set(attributes["nr.highValue"], true)
+            where name == "mysql.intelligence.comprehensive" or 
+                  name == "mysql.replica.time_behind_source" or
+                  name == "business.revenue_impact"
+          
+          # Add event type for NRQL queries
+          - set(attributes["eventType"], "MySQLIntelligence")
+            where name == "mysql.intelligence.comprehensive"
+          
+          - set(attributes["eventType"], "MySQLReplication")
+            where name =~ "mysql.replica.*"
+          
+          - set(attributes["eventType"], "MySQLBusiness")
+            where name =~ "business.*"
+
+  # Tag mapping for New Relic One
+  attributes/tag_mapping:
+    actions:
+      # Map standard tags to New Relic conventions
+      - key: tags.environment
+        from_attribute: environment
+        action: insert
+      - key: tags.cluster
+        from_attribute: cluster
+        action: insert
+      - key: tags.role
+        from_attribute: mysql.instance.role
+        action: insert
+      - key: tags.version
+        from_attribute: mysql.version
+        action: insert
+      - key: tags.businessCriticality
+        from_attribute: business_criticality
+        action: insert
+
+  # Facet optimization for NRQL
+  transform/facet_optimization:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Create composite keys for common facets
+          - set(attributes["schema.table"], 
+                Concat([attributes["db_schema"], ".", attributes["table_name"]], ""))
+            where attributes["db_schema"] != nil and attributes["table_name"] != nil
+          
+          # Create performance tier attribute
+          - set(attributes["performance.tier"], "critical")
+            where attributes["intelligence_score"] > 150
+          - set(attributes["performance.tier"], "warning")
+            where attributes["intelligence_score"] > 50 and attributes["intelligence_score"] <= 150
+          - set(attributes["performance.tier"], "normal")
+            where attributes["intelligence_score"] <= 50
+
+  # Workload classification for New Relic Workloads
+  transform/workload_classification:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Classify by business function
+          - set(attributes["workload.function"], "payment_processing")
+            where IsMatch(attributes["db_schema"], "(payments|billing|transactions)")
+          
+          - set(attributes["workload.function"], "customer_experience")
+            where IsMatch(attributes["db_schema"], "(customers|users|sessions)")
+          
+          - set(attributes["workload.function"], "inventory_management")
+            where IsMatch(attributes["db_schema"], "(inventory|products|catalog)")
+          
+          - set(attributes["workload.function"], "analytics")
+            where IsMatch(attributes["db_schema"], "(analytics|reporting|metrics)")
+
+  # Alert enrichment for New Relic Alerts
+  transform/alert_enrichment:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Add runbook URL based on issue type
+          - set(attributes["runbook.url"], 
+                "https://wiki.company.com/mysql/missing-index")
+            where attributes["performance_issue"] == "MISSING_INDEX"
+          
+          - set(attributes["runbook.url"], 
+                "https://wiki.company.com/mysql/replication-lag")
+            where attributes["alert.type"] == "replication_lag"
+          
+          # Add impact estimation
+          - set(attributes["alert.impact"], "revenue")
+            where attributes["business_criticality"] == "CRITICAL"
+          
+          - set(attributes["alert.impact"], "performance")
+            where attributes["performance.tier"] == "critical"
+
+  # Golden signals for New Relic
+  transform/golden_signals:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Latency signal
+          - set(attributes["golden.signal"], "latency")
+            where metric.name =~ ".*latency.*|.*duration.*|.*time.*"
+          
+          # Traffic signal
+          - set(attributes["golden.signal"], "traffic")
+            where metric.name =~ ".*count|.*rate|.*throughput.*"
+          
+          # Errors signal
+          - set(attributes["golden.signal"], "errors")
+            where metric.name =~ ".*error.*|.*failed.*|.*violation.*"
+          
+          # Saturation signal
+          - set(attributes["golden.signal"], "saturation")
+            where metric.name =~ ".*usage.*|.*utilization.*|.*pressure.*"

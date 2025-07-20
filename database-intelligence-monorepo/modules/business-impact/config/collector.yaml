@@ -94,8 +94,8 @@ exporters:
     resource_to_telemetry_conversion:
       enabled: true
 
-  logging:
-    loglevel: info
+  debug:
+    verbosity: detailed
     sampling_initial: 10
     sampling_thereafter: 100
 
@@ -115,7 +115,7 @@ service:
         - transform/business_impact
         - transform/create_metrics
         - attributes/business_metadata
-      exporters: [prometheus, otlp, logging]
+      exporters: [prometheus, otlp, debug]
 
   extensions: [health_check, pprof, zpages]
 

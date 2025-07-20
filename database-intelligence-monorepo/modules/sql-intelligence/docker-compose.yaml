@@ -13,8 +13,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    volumes:
-      - ./src/init.sql:/docker-entrypoint-initdb.d/init.sql
+    # volumes:
+    #   - ./src/init.sql:/docker-entrypoint-initdb.d/init.sql  # Commented out to prevent MySQL startup failures
     
   sql-intelligence:
     build: .
@@ -28,9 +28,10 @@ services:
       OTEL_SERVICE_NAME: sql-intelligence
     ports:
       - "8082:8082"
+      - "8890:8889"
     depends_on:
       mysql-test:
         condition: service_healthy
     volumes:
       - ./config:/etc/otel
-    command: ["--config", "/etc/otel/collector.yaml"]
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]

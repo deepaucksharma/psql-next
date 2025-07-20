@@ -1,19 +1,21 @@
-.PHONY: help build run stop clean logs test init dev prod health metrics
+.PHONY: help build run run-enhanced stop clean logs test init dev prod health metrics validate-enhanced
 
 # Default target
 help:
-	@echo "Available targets:"
-	@echo "  make build    - Build Docker images"
-	@echo "  make run      - Run all services"
-	@echo "  make stop     - Stop all services"
-	@echo "  make clean    - Stop services and remove volumes"
-	@echo "  make logs     - Show service logs"
-	@echo "  make test     - Run canary tests"
-	@echo "  make init     - Initialize Go module"
-	@echo "  make dev      - Run in development mode"
-	@echo "  make prod     - Run in production mode"
-	@echo "  make health   - Check service health"
-	@echo "  make metrics  - View Prometheus metrics"
+	@echo "Canary Tester Module - Available Commands:"
+	@echo "  make build           - Build Docker images"
+	@echo "  make run             - Run all services with standard config"
+	@echo "  make run-enhanced    - Run all services with enhanced config"
+	@echo "  make stop            - Stop all services"
+	@echo "  make clean           - Stop services and remove volumes"
+	@echo "  make logs            - Show service logs"
+	@echo "  make test            - Run canary tests"
+	@echo "  make init            - Initialize Go module"
+	@echo "  make dev             - Run in development mode"
+	@echo "  make prod            - Run in production mode"
+	@echo "  make health          - Check service health"
+	@echo "  make metrics         - View Prometheus metrics"
+	@echo "  make validate-enhanced - Validate enhanced collector config"
 
 # Initialize Go module
 init:
@@ -31,6 +33,13 @@ run:
 	@echo "Starting canary-tester services..."
 	docker-compose up -d
 	@echo "Canary tester running on http://localhost:8090"
+	@echo "Prometheus metrics available at http://localhost:8888/metrics"
+
+# Run all services with enhanced configuration
+run-enhanced:
+	@echo "Starting canary-tester services with enhanced configuration..."
+	COLLECTOR_CONFIG=collector-enhanced.yaml docker-compose up -d
+	@echo "Canary tester running on http://localhost:8090 with enhanced configuration"
 	@echo "Prometheus metrics available at http://localhost:8888/metrics"
 
 # Run in development mode with logs
@@ -132,3 +141,8 @@ show-config:
 validate:
 	@echo "Validating collector configuration..."
 	@docker run --rm -v $$(pwd)/config:/config otel/opentelemetry-collector-contrib:latest validate --config=/config/collector.yaml
+
+# Validate enhanced configuration
+validate-enhanced:
+	@echo "Validating enhanced collector configuration..."
+	@docker run --rm -v $$(pwd)/config:/config otel/opentelemetry-collector-contrib:latest validate --config=/config/collector-enhanced.yaml

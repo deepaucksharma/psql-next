@@ -3,8 +3,7 @@ FROM otel/opentelemetry-collector-contrib:latest
 # Copy configuration
 COPY config/collector.yaml /etc/otel/collector.yaml
 
-# Copy initialization scripts
-COPY src/init.sql /docker-entrypoint-initdb.d/
+# Initialization scripts removed temporarily
 
 # Expose metrics port
 EXPOSE 8083

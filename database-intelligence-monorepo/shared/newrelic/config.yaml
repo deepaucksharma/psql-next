@@ -1,0 +1,214 @@
+# New Relic Configuration for Database Intelligence
+# Central configuration for all New Relic integrations
+
+# New Relic Account Information
+account:
+  account_id: ${NEW_RELIC_ACCOUNT_ID}
+  api_key: ${NEW_RELIC_API_KEY}
+  license_key: ${NEW_RELIC_LICENSE_KEY}
+  region: ${NEW_RELIC_REGION:US}  # US or EU
+
+# OTLP Endpoints
+endpoints:
+  otlp:
+    US: https://otlp.nr-data.net
+    EU: https://otlp.eu01.nr-data.net
+  metrics:
+    US: https://metric-api.newrelic.com/metric/v1
+    EU: https://metric-api.eu.newrelic.com/metric/v1
+  events:
+    US: https://insights-collector.newrelic.com/v1/accounts/${NEW_RELIC_ACCOUNT_ID}/events
+    EU: https://insights-collector.eu01.nr-data.net/v1/accounts/${NEW_RELIC_ACCOUNT_ID}/events
+  logs:
+    US: https://log-api.newrelic.com/log/v1
+    EU: https://log-api.eu.newrelic.com/log/v1
+
+# NerdGraph Configuration
+nerdgraph:
+  endpoint:
+    US: https://api.newrelic.com/graphql
+    EU: https://api.eu.newrelic.com/graphql
+  
+# Entity Synthesis
+entity_synthesis:
+  mysql_instances:
+    entity_type: MYSQL_INSTANCE
+    guid_pattern: "mysql:${CLUSTER_NAME}:${MYSQL_ENDPOINT}"
+    tags:
+      - environment
+      - cluster
+      - role
+      - version
+      - region
+
+# Alert Policies
+alert_policies:
+  - name: MySQL Intelligence Critical
+    incident_preference: PER_CONDITION_AND_TARGET
+    conditions:
+      - name: Query Intelligence Score High
+        type: NRQL
+        query: "SELECT average(mysql.intelligence.comprehensive) FROM Metric WHERE intelligence_score > 150 FACET query_digest"
+        threshold: 150
+        duration: 300
+        
+      - name: Replication Lag Critical
+        type: NRQL
+        query: "SELECT average(mysql.replica.time_behind_source) FROM Metric WHERE entity.name LIKE '%replica%'"
+        threshold: 300
+        duration: 180
+        
+      - name: Business Impact Critical
+        type: NRQL
+        query: "SELECT sum(business.revenue_impact) FROM Metric WHERE business_criticality = 'CRITICAL'"
+        threshold: 1000
+        duration: 60
+
+# Dashboard Templates
+dashboards:
+  - name: MySQL Intelligence Overview
+    pages:
+      - name: Executive Summary
+        widgets:
+          - title: Intelligence Score Trend
+            type: line
+            query: "SELECT average(mysql.intelligence.comprehensive) FROM Metric TIMESERIES AUTO"
+          
+          - title: Business Impact by Schema
+            type: bar
+            query: "SELECT sum(business.revenue_impact) FROM Metric FACET db_schema"
+          
+          - title: Top Performance Issues
+            type: table
+            query: "SELECT latest(query_text), average(intelligence_score) FROM Metric WHERE performance_issue != 'OK' FACET query_digest LIMIT 20"
+      
+      - name: Query Analysis
+        widgets:
+          - title: Query Wait Profile
+            type: heatmap
+            query: "SELECT histogram(current_wait_time_ms, 50, 20) FROM Metric FACET wait.primary_category"
+          
+          - title: ML Anomaly Detection
+            type: billboard
+            query: "SELECT count(*) FROM Metric WHERE ml.is_anomaly = true FACET ml.workload_type"
+          
+          - title: Advisory Recommendations
+            type: table
+            query: "SELECT latest(recommendations), latest(advisor.priority) FROM Metric WHERE recommendations IS NOT NULL FACET query_digest"
+      
+      - name: Cross-Signal Correlation
+        widgets:
+          - title: Trace to Metric Correlation
+            type: line
+            query: "SELECT average(traces_spanmetrics_latency) FROM Metric WHERE exemplar.trace_id IS NOT NULL TIMESERIES"
+          
+          - title: Slow Query Log Analysis
+            type: table
+            query: "SELECT count(mysql.slowlog.count) FROM Metric FACET query_digest"
+
+# Workload Configuration
+workloads:
+  - name: MySQL Intelligence Production
+    entity_search_query: "type = 'MYSQL_INSTANCE' AND tags.environment = 'production'"
+    scope_accounts:
+      - ${NEW_RELIC_ACCOUNT_ID}
+    
+  - name: MySQL Critical Business
+    entity_search_query: "type = 'MYSQL_INSTANCE' AND tags.businessCriticality = 'CRITICAL'"
+    scope_accounts:
+      - ${NEW_RELIC_ACCOUNT_ID}
+
+# Applied Intelligence Configuration
+applied_intelligence:
+  # Anomaly Detection
+  anomaly_configurations:
+    - name: Query Performance Anomalies
+      metric: mysql.intelligence.comprehensive
+      threshold_direction: ABOVE
+      sensitivity: HIGH
+      
+    - name: Replication Lag Anomalies
+      metric: mysql.replica.time_behind_source
+      threshold_direction: ABOVE
+      sensitivity: MEDIUM
+  
+  # Incident Intelligence
+  correlation_rules:
+    - name: MySQL Performance Issues
+      description: Correlate MySQL performance issues across instances
+      logic:
+        - type: SIMILAR_ENTITY
+          time_window: 300
+        - type: SIMILAR_MESSAGE
+          similarity_threshold: 0.8
+
+# Synthetic Monitoring
+synthetics:
+  monitors:
+    - name: MySQL Canary Tests
+      type: SCRIPT_API
+      frequency: 300  # 5 minutes
+      locations:
+        - US_EAST_1
+        - EU_WEST_1
+      script: |
+        // Test MySQL connectivity and basic queries
+        $http.get('http://canary-tester:8089/metrics', function(err, response, body) {
+          assert.equal(response.statusCode, 200, 'Expected 200 status code');
+          assert.ok(body.includes('mysql.canary.latency'), 'Canary metrics missing');
+        });
+
+# Data Retention
+data_retention:
+  metrics:
+    raw: 30  # days
+    aggregated: 395  # days (13 months)
+  events:
+    default: 30
+    high_value: 90
+  logs:
+    default: 30
+
+# NRQL Query Library
+query_library:
+  # Performance Queries
+  top_slow_queries: |
+    SELECT average(current_exec_time_ms), count(*)
+    FROM Metric
+    WHERE metricName = 'mysql.intelligence.comprehensive'
+    FACET query_digest
+    SINCE 1 hour ago
+    LIMIT 20
+  
+  # Business Impact Queries
+  revenue_impact_by_hour: |
+    SELECT sum(business.revenue_impact)
+    FROM Metric
+    WHERE business_criticality IN ('CRITICAL', 'HIGH')
+    TIMESERIES 1 hour
+    SINCE 1 day ago
+  
+  # Anomaly Detection Queries
+  anomalous_queries: |
+    SELECT latest(query_text), average(ml.anomaly_score)
+    FROM Metric
+    WHERE ml.is_anomaly = true
+    FACET query_digest
+    SINCE 30 minutes ago
+  
+  # Wait Analysis Queries
+  wait_time_breakdown: |
+    SELECT average(current_wait_time_ms)
+    FROM Metric
+    FACET wait.primary_category
+    WHERE current_wait_time_ms > 0
+    SINCE 1 hour ago
+  
+  # Replication Health
+  replication_status: |
+    SELECT latest(mysql.replica.time_behind_source),
+           latest(replication.health_score)
+    FROM Metric
+    WHERE entity.type = 'MYSQL_INSTANCE'
+    FACET entity.name
+    SINCE 5 minutes ago

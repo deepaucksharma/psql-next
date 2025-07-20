@@ -1,0 +1,399 @@
+# Enhanced Core Metrics Configuration
+# Includes all MySQL metrics from master-enhanced.yaml
+
+receivers:
+  # Primary MySQL metrics receiver with all available metrics
+  mysql/primary:
+    endpoint: ${env:MYSQL_PRIMARY_ENDPOINT:${env:MYSQL_ENDPOINT}}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DATABASE:""}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:10s}
+    initial_delay: ${env:MYSQL_INITIAL_DELAY:1s}
+    transport: tcp
+    tls:
+      insecure: ${env:MYSQL_TLS_INSECURE:true}
+
+  # Replica MySQL receiver (optional)
+  mysql/replica:
+    endpoint: ${env:MYSQL_REPLICA_ENDPOINT:""}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    database: ${env:MYSQL_DATABASE:""}
+    collection_interval: ${env:MYSQL_COLLECTION_INTERVAL:10s}
+    initial_delay: ${env:MYSQL_INITIAL_DELAY:1s}
+
+  # Host metrics for system resource monitoring
+  hostmetrics:
+    collection_interval: ${env:HOST_COLLECTION_INTERVAL:10s}
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.usage:
+            enabled: true
+          system.memory.utilization:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.io_time:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.usage:
+            enabled: true
+          system.filesystem.utilization:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.packets:
+            enabled: true
+          system.network.errors:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+          system.cpu.load_average.15m:
+            enabled: true
+
+  # Prometheus receiver for MySQL exporter metrics (optional)
+  prometheus/mysql_exporter:
+    config:
+      global:
+        scrape_interval: ${env:PROMETHEUS_SCRAPE_INTERVAL:10s}
+        external_labels:
+          cluster: '${env:CLUSTER_NAME}'
+          environment: '${env:ENVIRONMENT}'
+      
+      scrape_configs:
+        - job_name: 'mysql_exporter_advanced'
+          scrape_interval: 15s
+          params:
+            collect[]:
+              - engine_innodb_status
+              - info_schema.innodb_metrics
+              - info_schema.processlist
+              - info_schema.query_response_time
+              - perf_schema.eventsstatementssum
+              - perf_schema.eventswaitssum
+              - perf_schema.file_events
+              - perf_schema.memory_events
+              - perf_schema.replication_group_members
+          
+          static_configs:
+            - targets: ['${env:MYSQL_EXPORTER_ENDPOINT:localhost:9104}']
+          
+          metric_relabel_configs:
+            - source_labels: [__name__, operation, schema]
+              separator: ":"
+              target_label: __tmp_composite_key
+              regex: '(mysql_perf_schema_table_io_waits_total):(.+):(.+)'
+            
+            - source_labels: [__name__]
+              target_label: __tmp_rate_metric
+              regex: '(mysql_global_status_bytes_.*|mysql_global_status_commands_total)'
+
+  # Internal collector metrics
+  prometheus/internal:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['0.0.0.0:8888']
+
+processors:
+  # Memory management with circuit breaker
+  memory_limiter:
+    check_interval: ${env:MEMORY_CHECK_INTERVAL:5s}
+    limit_percentage: ${env:MEMORY_LIMIT_PERCENT:80}
+    spike_limit_percentage: ${env:MEMORY_SPIKE_PERCENT:30}
+
+  batch:
+    timeout: ${env:BATCH_TIMEOUT:5s}
+    send_batch_size: ${env:BATCH_SIZE:1000}
+    send_batch_max_size: ${env:BATCH_MAX_SIZE:2000}
+  
+  # Semantic conventions and resource detection
+  resource/semantic_conventions:
+    attributes:
+      - key: db.system
+        value: mysql
+        action: upsert
+      - key: db.connection_string
+        value: "mysql://${env:MYSQL_PRIMARY_ENDPOINT}"
+        action: upsert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+      - key: service.namespace
+        value: "database"
+        action: upsert
+      - key: service.name
+        value: ${env:SERVICE_NAME:mysql-monitoring}
+        action: insert
+      - key: service.version
+        value: ${env:MYSQL_VERSION}
+        action: insert
+      - key: mysql.instance.endpoint
+        value: ${env:MYSQL_PRIMARY_ENDPOINT}
+        action: insert
+      - key: mysql.instance.role
+        value: ${env:MYSQL_ROLE}
+        action: insert
+      - key: cloud.provider
+        value: ${env:CLOUD_PROVIDER}
+        action: insert
+      - key: cloud.region
+        value: ${env:CLOUD_REGION}
+        action: insert
+        
+  # Automatic resource detection
+  resourcedetection:
+    detectors: [env, system, docker, ec2, gcp, azure]
+    timeout: 5s
+    override: false
+    system:
+      hostname_sources: ["os", "dns"]
+
+  attributes:
+    actions:
+      - key: module
+        value: core-metrics
+        action: insert
+      - key: mysql.endpoint
+        value: ${env:MYSQL_ENDPOINT}
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Entity synthesis
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_INSTANCE"
+        action: insert
+      - key: entity.guid
+        value: "MYSQL|${env:CLUSTER_NAME}|${env:MYSQL_PRIMARY_ENDPOINT}"
+        action: insert
+      - key: entity.name
+        value: "${env:MYSQL_PRIMARY_ENDPOINT}"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+        
+  # Delta conversion for counters
+  cumulativetodelta:
+    include:
+      metrics:
+        - mysql.query.count
+        - mysql.commands
+        - mysql.handlers
+        - mysql.innodb.row_operations
+        - mysql.table.io.wait.count
+        - mysql.index.io.wait.count
+    exclude:
+      match_type: strict
+      metrics:
+        - mysql.connection.count
+        - mysql.thread.count
+        - mysql.buffer_pool.usage
+
+  # Metric enrichment
+  transform/metric_enrichment:
+    error_mode: ignore
+    metric_statements:
+      - context: metric
+        statements:
+          - set(attributes["metric.category"], "mysql")
+          - set(attributes["metric.subcategory"], "core")
+          # Mark critical metrics for high-value retention
+          - set(attributes["nr.highValue"], true)
+            where name == "mysql.replica.time_behind_source" or 
+                  name == "mysql.connection.errors" or
+                  name == "mysql.innodb.row_lock_time"
+          # Add event type for NRQL queries
+          - set(attributes["eventType"], "MySQLCore")
+      - context: datapoint
+        statements:
+          # Table and index limits for cardinality control
+          - limit(attributes["table"], 100) where metric.name == "mysql.table.io.wait.count"
+          - limit(attributes["index_name"], 50) where metric.name == "mysql.index.io.wait.count"
+          - limit(attributes["digest"], 500) where metric.name == "mysql.statement_event.count"
+
+  # Filter important metrics
+  filter/importance:
+    error_mode: ignore
+    metrics:
+      include:
+        match_type: regexp
+        metric_names:
+          - "mysql\\..*"
+          - "system\\..*"
+
+exporters:
+  # Primary New Relic OTLP exporter for standard metrics
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # High-priority exporter for critical metrics
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none  # No compression for lower latency
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+
+  # Debug exporter
+  debug:
+    verbosity: ${env:DEBUG_VERBOSITY:detailed}
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # OTLP exporter for cross-module communication
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT:localhost:4317}
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: ${env:EXPORT_WORKERS:5}
+      queue_size: ${env:EXPORT_QUEUE_SIZE:10000}
+
+  # File exporter for debugging
+  file/debug:
+    path: /tmp/core-metrics-debug.json
+    format: json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+
+service:
+  pipelines:
+    # Main metrics pipeline
+    metrics:
+      receivers: [mysql/primary]
+      processors: [
+        memory_limiter,
+        batch,
+        resourcedetection,
+        resource/semantic_conventions,
+        attributes,
+        attributes/entity_synthesis,
+        cumulativetodelta,
+        transform/metric_enrichment,
+        filter/importance
+      ]
+      exporters: [otlphttp/newrelic_standard, otlp, debug]
+    
+    # Replica metrics pipeline (if configured)
+    metrics/replica:
+      receivers: [mysql/replica]
+      processors: [
+        memory_limiter,
+        batch,
+        resource/semantic_conventions,
+        attributes,
+        cumulativetodelta
+      ]
+      exporters: [otlphttp/newrelic_standard, otlp]
+    
+    # Host metrics pipeline
+    metrics/host:
+      receivers: [hostmetrics]
+      processors: [
+        memory_limiter,
+        batch,
+        resourcedetection,
+        resource/semantic_conventions,
+        attributes
+      ]
+      exporters: [otlphttp/newrelic_standard, otlp]
+    
+    # Prometheus federation pipeline
+    metrics/prometheus:
+      receivers: [prometheus/mysql_exporter, prometheus/internal]
+      processors: [
+        memory_limiter,
+        batch,
+        resource/semantic_conventions,
+        attributes
+      ]
+      exporters: [otlphttp/newrelic_standard]
+      
+    # Debug pipeline
+    metrics/debug:
+      receivers: [mysql/primary]
+      processors: [batch]
+      exporters: [file/debug]
+  
+  extensions: [health_check, pprof, zpages]
+  
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:info}
+      initial_fields:
+        service: core-metrics
+        version: "2.0.0"
+    metrics:
+      level: ${env:TELEMETRY_LEVEL:detailed}
+      address: 0.0.0.0:${env:TELEMETRY_PORT:8888}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:${env:HEALTH_PORT:13133}
+    path: /health
+    
+  pprof:
+    endpoint: 0.0.0.0:${env:PPROF_PORT:1777}
+    
+  zpages:
+    endpoint: 0.0.0.0:${env:ZPAGES_PORT:55679}

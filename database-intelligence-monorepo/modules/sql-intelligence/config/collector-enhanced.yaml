@@ -463,6 +463,41 @@ processors:
         value: ${env:MYSQL_ENDPOINT}
         action: insert
   
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_INSTANCE"
+        action: insert
+      - key: entity.guid
+        value: "MYSQL|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: entity.name
+        value: "${env:MYSQL_ENDPOINT}"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+  
   # Enhanced query analysis from master-enhanced.yaml
   transform/query_analysis:
     metric_statements:
@@ -609,14 +644,39 @@ processors:
         action: upsert
 
 exporters:
-  prometheus:
-    endpoint: "0.0.0.0:${env:EXPORT_PORT}"
-    namespace: mysql
-    const_labels:
-      module: sql-intelligence
+  # Primary New Relic OTLP exporter for standard metrics
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # High-priority exporter for critical SQL intelligence metrics
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none  # No compression for lower latency
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
   
-  logging:
-    loglevel: info
+  debug:
+    verbosity: detailed
     sampling_initial: 10
     sampling_thereafter: 100
 
@@ -643,26 +703,28 @@ service:
       processors: [
         memory_limiter, 
         batch, 
-        attributes, 
+        attributes,
+        attributes/newrelic,
+        attributes/entity_synthesis, 
         transform/wait_categorization,
         transform/ml_features,
         transform/business_impact,
         transform/advanced_advisory,
         resource
       ]
-      exporters: [prometheus, otlp, logging]
+      exporters: [otlphttp/newrelic_critical, otlp, debug]
 
     # Standard queries pipeline
     metrics/queries:
       receivers: [sqlquery/slow_queries, sqlquery/table_stats, sqlquery/index_usage]
-      processors: [batch, attributes, transform/query_analysis, resource]
-      exporters: [prometheus, logging]
+      processors: [memory_limiter, batch, attributes, attributes/newrelic, attributes/entity_synthesis, transform/query_analysis, resource]
+      exporters: [otlphttp/newrelic_standard, debug]
     
     # Federation pipeline
     metrics/federation:
       receivers: [prometheus]
-      processors: [batch, attributes, resource]
-      exporters: [prometheus]
+      processors: [memory_limiter, batch, attributes, attributes/newrelic, resource]
+      exporters: [otlphttp/newrelic_standard]
 
     # Debug pipeline
     metrics/debug:

@@ -13,31 +13,6 @@ receivers:
     password: rootpassword
     database: test
     collection_interval: 30s
-    metrics:
-      mysql.buffer_pool.operations:
-        enabled: true
-      mysql.buffer_pool.pages:
-        enabled: true
-      mysql.buffer_pool.data:
-        enabled: true
-      mysql.commands:
-        enabled: true
-      mysql.connections:
-        enabled: true
-      mysql.locks:
-        enabled: true
-      mysql.operations:
-        enabled: true
-      mysql.query.count:
-        enabled: true
-      mysql.query.slow.count:
-        enabled: true
-      mysql.replica.lag:
-        enabled: true
-      mysql.threads:
-        enabled: true
-      mysql.uptime:
-        enabled: true
 
   # Prometheus receiver for canary metrics
   prometheus:
@@ -63,7 +38,7 @@ processors:
         value: "1.0.0"
         action: insert
       - key: deployment.environment
-        value: production
+        value: ${env:ENVIRONMENT}
         action: insert
 
   # Memory limiter to prevent OOM
@@ -81,31 +56,82 @@ processors:
       - key: canary.enabled
         value: "true"
         action: insert
+      - key: module
+        value: canary-tester
+        action: insert
+
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "SYNTHETIC_MONITOR"
+        action: insert
+      - key: entity.guid
+        value: "SYNTHETIC|${env:CLUSTER_NAME}|canary-mysql"
+        action: insert
+      - key: entity.name
+        value: "MySQL Canary Monitor"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
 
 exporters:
-  # Console exporter for debugging
-  logging:
-    loglevel: info
-    sampling_initial: 10
-    sampling_thereafter: 100
-
-  # Prometheus exporter for metrics
-  prometheus:
-    endpoint: "0.0.0.0:8888"
-    metric_expiration: 10m
-    resource_to_telemetry_conversion:
-      enabled: true
-
-  # OTLP exporter (for forwarding to other collectors)
-  otlp/external:
-    endpoint: "${OTLP_ENDPOINT:}"
-    tls:
-      insecure: true
+  # Primary New Relic OTLP exporter for standard metrics
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
     retry_on_failure:
       enabled: true
       initial_interval: 5s
       max_interval: 30s
       max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # High-priority exporter for canary alerts
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none  # No compression for lower latency
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+
+  # Console exporter for debugging
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
 
 extensions:
   health_check:
@@ -121,10 +147,10 @@ service:
   pipelines:
     metrics:
       receivers: [otlp, mysql, prometheus]
-      processors: [memory_limiter, batch, resource, attributes/canary]
-      exporters: [logging, prometheus]
+      processors: [memory_limiter, batch, resource, attributes/canary, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_standard, debug]
     
-    metrics/external:
-      receivers: [otlp, prometheus]
-      processors: [memory_limiter, batch, resource]
-      exporters: [otlp/external]
+    metrics/alerts:
+      receivers: [mysql]
+      processors: [memory_limiter, batch, resource, attributes/canary, attributes/newrelic, attributes/entity_synthesis]
+      exporters: [otlphttp/newrelic_critical]

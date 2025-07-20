@@ -1,0 +1,102 @@
+# New Relic OTLP Exporters Configuration
+# This file contains all New Relic-specific exporter configurations
+# Include this in your collector configs using:
+# exporters: ${file:./shared/newrelic/otel-exporters.yaml:exporters}
+
+exporters:
+  # Primary New Relic OTLP exporter
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
+
+  # New Relic Metrics API exporter (for custom events)
+  otlphttp/newrelic_metrics:
+    endpoint: https://metric-api.newrelic.com/metric/v1
+    headers:
+      Api-Key: ${env:NEW_RELIC_LICENSE_KEY}
+      Content-Type: application/json
+    compression: gzip
+    timeout: 30s
+
+  # New Relic Events API exporter
+  otlphttp/newrelic_events:
+    endpoint: https://insights-collector.newrelic.com/v1/accounts/${env:NEW_RELIC_ACCOUNT_ID}/events
+    headers:
+      X-Insert-Key: ${env:NEW_RELIC_LICENSE_KEY}
+      Content-Type: application/json
+    compression: gzip
+    timeout: 30s
+
+  # New Relic Logs API exporter
+  otlphttp/newrelic_logs:
+    endpoint: https://log-api.newrelic.com/log/v1
+    headers:
+      Api-Key: ${env:NEW_RELIC_LICENSE_KEY}
+      Content-Type: application/json
+    compression: gzip
+    timeout: 30s
+
+  # High-priority exporter for critical metrics
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none  # No compression for lower latency
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+
+  # Batch exporter for historical data
+  otlphttp/newrelic_batch:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: batch
+    compression: zstd  # Better compression for batch
+    timeout: 60s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 10s
+      max_interval: 300s
+      max_elapsed_time: 3600s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 50000
+
+  # Prometheus remote write for New Relic
+  prometheusremotewrite/newrelic:
+    endpoint: https://metric-api.newrelic.com/prometheus/v1/write?prometheus_server=mysql-intelligence
+    headers:
+      X-License-Key: ${env:NEW_RELIC_LICENSE_KEY}
+    remote_timeout: 30s
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Debug exporter (only for development)
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # Logging exporter
+  logging:
+    loglevel: info
+    sampling_initial: 10
+    sampling_thereafter: 100

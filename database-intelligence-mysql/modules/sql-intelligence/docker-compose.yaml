@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  otel-collector-sql-intelligence:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector-sql-intelligence
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    environment:
+      # Configuration selection
+      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector.yaml}
+      
+      # MySQL Configuration
+      MYSQL_PRIMARY_ENDPOINT: ${MYSQL_PRIMARY_ENDPOINT:-mysql-primary:3306}
+      MYSQL_REPLICA_ENDPOINT: ${MYSQL_REPLICA_ENDPOINT:-mysql-replica:3306}
+      MYSQL_USER: ${MYSQL_USER:-otel_monitor}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-otelmonitorpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-""}
+      
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      
+      # Environment Settings
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SERVICE_NAME: ${SERVICE_NAME:-mysql-sql-intelligence}
+      NAMESPACE: ${NAMESPACE:-database}
+      CLUSTER_NAME: ${CLUSTER_NAME:-mysql-cluster}
+      TEAM_NAME: ${TEAM_NAME:-database-team}
+      COST_CENTER: ${COST_CENTER:-engineering}
+      
+      # SQL Intelligence Settings
+      SQL_INTELLIGENCE_INTERVAL: ${SQL_INTELLIGENCE_INTERVAL:-5s}
+      PERFORMANCE_SCHEMA_EVENTS_LIMIT: ${PERFORMANCE_SCHEMA_EVENTS_LIMIT:-100}
+      
+      # Feature Flags
+      WAIT_PROFILE_ENABLED: ${WAIT_PROFILE_ENABLED:-true}
+      ML_FEATURES_ENABLED: ${ML_FEATURES_ENABLED:-true}
+      BUSINESS_CONTEXT_ENABLED: ${BUSINESS_CONTEXT_ENABLED:-true}
+      ANOMALY_DETECTION_ENABLED: ${ANOMALY_DETECTION_ENABLED:-true}
+      ADVISOR_ENGINE_ENABLED: ${ADVISOR_ENGINE_ENABLED:-true}
+      LOCK_ANALYSIS_ENABLED: ${LOCK_ANALYSIS_ENABLED:-true}
+      
+      # Batch and Memory Settings
+      BATCH_TIMEOUT: ${BATCH_TIMEOUT:-30s}
+      BATCH_SIZE: ${BATCH_SIZE:-10000}
+      BATCH_MAX_SIZE: ${BATCH_MAX_SIZE:-20000}
+      MEMORY_LIMIT_PERCENT: ${MEMORY_LIMIT_PERCENT:-80}
+      MEMORY_SPIKE_PERCENT: ${MEMORY_SPIKE_PERCENT:-30}
+      
+      # Export Settings
+      EXPORT_TIMEOUT: ${EXPORT_TIMEOUT:-30s}
+      EXPORT_WORKERS: ${EXPORT_WORKERS:-10}
+      EXPORT_QUEUE_SIZE: ${EXPORT_QUEUE_SIZE:-50000}
+      COMPRESSION_TYPE: ${COMPRESSION_TYPE:-gzip}
+      
+      # Cloud Provider Settings
+      CLOUD_PROVIDER: ${CLOUD_PROVIDER:-docker}
+      CLOUD_REGION: ${CLOUD_REGION:-local}
+      
+      # Debug Settings
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEBUG_VERBOSITY: ${DEBUG_VERBOSITY:-normal}
+      TELEMETRY_LEVEL: ${TELEMETRY_LEVEL:-detailed}
+      
+      # Enhanced Features (only used with enhanced config)
+      ML_BASELINE_DEVIATION_THRESHOLD: ${ML_BASELINE_DEVIATION_THRESHOLD:-3}
+      INTELLIGENCE_SCORE_THRESHOLD: ${INTELLIGENCE_SCORE_THRESHOLD:-10}
+      HISTORICAL_EXEC_COUNT_THRESHOLD: ${HISTORICAL_EXEC_COUNT_THRESHOLD:-100}
+      
+      # Resource limits
+      GOMAXPROCS: ${GOMAXPROCS:-4}
+      GOMEMLIMIT: ${GOMEMLIMIT:-3500MiB}
+      OTEL_FILE_STORAGE_DIR: ${OTEL_FILE_STORAGE_DIR:-/var/lib/otel/storage}
+      
+    volumes:
+      - ./config/${COLLECTOR_CONFIG}:/etc/otel-collector-config.yaml:ro
+      - otel_sql_intelligence_storage:/var/lib/otel/storage
+      
+    ports:
+      - "13134:13133" # Health check extension
+      - "8889:8888"   # Telemetry metrics
+      - "1778:1777"   # pprof extension
+      
+    networks:
+      - mysql-monitoring-network
+      
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  mysql-monitoring-network:
+    external: true
+
+volumes:
+  otel_sql_intelligence_storage:
+    driver: local

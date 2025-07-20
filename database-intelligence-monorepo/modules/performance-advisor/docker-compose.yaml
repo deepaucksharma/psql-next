@@ -6,11 +6,13 @@ services:
     container_name: performance-advisor
     ports:
       - "8087:8087"
+      - "8895:8889"
     environment:
       - OTEL_SERVICE_NAME=performance-advisor
       - OTEL_RESOURCE_ATTRIBUTES=service.name=performance-advisor,service.version=1.0.0
     volumes:
-      - ./config:/etc/otelcol-contrib
+      - ./config:/etc/otel
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
     networks:
       - database-intelligence
     restart: unless-stopped

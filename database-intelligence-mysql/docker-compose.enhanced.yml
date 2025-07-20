@@ -1,0 +1,245 @@
+version: '3.8'
+
+services:
+  mysql-primary:
+    image: mysql:8.0
+    container_name: mysql-primary
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_USER: ${MYSQL_USER:-appuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql/init:/docker-entrypoint-initdb.d
+      - mysql_primary_data:/var/lib/mysql
+      - ./config/mysql/primary.cnf:/etc/mysql/conf.d/custom.cnf
+      - mysql_logs:/var/log/mysql
+    command: --default-authentication-plugin=mysql_native_password --slow-query-log=ON --slow-query-log-file=/var/log/mysql/slow.log --long_query_time=2
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 5
+      interval: 10s
+    networks:
+      - mysql-network
+
+  mysql-replica:
+    image: mysql:8.0
+    container_name: mysql-replica
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_USER: ${MYSQL_USER:-appuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./mysql/init:/docker-entrypoint-initdb.d
+      - mysql_replica_data:/var/lib/mysql
+      - ./config/mysql/replica.cnf:/etc/mysql/conf.d/custom.cnf
+    command: --default-authentication-plugin=mysql_native_password
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 5
+      interval: 10s
+    networks:
+      - mysql-network
+
+  # Main collector using enhanced configuration
+  otel-collector-enhanced:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector-enhanced
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    environment:
+      # Use enhanced configuration
+      COLLECTOR_CONFIG: master-enhanced.yaml
+      
+      # MySQL Configuration
+      MYSQL_PRIMARY_ENDPOINT: mysql-primary:3306
+      MYSQL_REPLICA_ENDPOINT: mysql-replica:3306
+      MYSQL_USER: otel_monitor
+      MYSQL_PASSWORD: ${MYSQL_MONITOR_PASSWORD:-otelmonitorpass}
+      MYSQL_DATABASE: ""
+      MYSQL_VERSION: "8.0"
+      
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      NEW_RELIC_PROMETHEUS_ENDPOINT: ${NEW_RELIC_PROMETHEUS_ENDPOINT:-https://metric-api.newrelic.com/prometheus/v1/write}
+      
+      # Environment Settings
+      DEPLOYMENT_MODE: enhanced
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      NAMESPACE: docker
+      TEAM_NAME: ${TEAM_NAME:-database-team}
+      SERVICE_NAME: ${SERVICE_NAME:-mysql-monitoring-enhanced}
+      COST_CENTER: ${COST_CENTER:-engineering}
+      CLUSTER_NAME: ${CLUSTER_NAME:-mysql-cluster}
+      MYSQL_ROLE: primary
+      
+      # Cloud Provider Settings
+      CLOUD_PROVIDER: ${CLOUD_PROVIDER:-docker}
+      CLOUD_REGION: ${CLOUD_REGION:-local}
+      
+      # Collection Intervals
+      MYSQL_COLLECTION_INTERVAL: ${MYSQL_COLLECTION_INTERVAL:-10s}
+      SQL_INTELLIGENCE_INTERVAL: ${SQL_INTELLIGENCE_INTERVAL:-5s}
+      HOST_COLLECTION_INTERVAL: ${HOST_COLLECTION_INTERVAL:-10s}
+      
+      # Enhanced Features
+      ENABLE_SQL_INTELLIGENCE: true
+      WAIT_PROFILE_ENABLED: true
+      ML_FEATURES_ENABLED: true
+      BUSINESS_CONTEXT_ENABLED: true
+      ANOMALY_DETECTION_ENABLED: true
+      ADVISOR_ENGINE_ENABLED: true
+      LOCK_ANALYSIS_ENABLED: true
+      
+      # Cross-Signal Correlation
+      ENABLE_TRACE_CORRELATION: true
+      ENABLE_LOG_CORRELATION: true
+      ENABLE_METRIC_EXEMPLARS: true
+      
+      # Batch and Memory Settings
+      BATCH_TIMEOUT: ${BATCH_TIMEOUT:-5s}
+      BATCH_SIZE: ${BATCH_SIZE:-1000}
+      BATCH_MAX_SIZE: ${BATCH_MAX_SIZE:-2000}
+      MEMORY_LIMIT_PERCENT: ${MEMORY_LIMIT_PERCENT:-80}
+      MEMORY_SPIKE_PERCENT: ${MEMORY_SPIKE_PERCENT:-30}
+      MEMORY_CHECK_INTERVAL: ${MEMORY_CHECK_INTERVAL:-5s}
+      
+      # Export Settings
+      EXPORT_TIMEOUT: ${EXPORT_TIMEOUT:-30s}
+      EXPORT_WORKERS: ${EXPORT_WORKERS:-10}
+      EXPORT_QUEUE_SIZE: ${EXPORT_QUEUE_SIZE:-50000}
+      COMPRESSION_TYPE: ${COMPRESSION_TYPE:-gzip}
+      
+      # Circuit Breaker Settings
+      CIRCUIT_FAILURE_THRESHOLD: ${CIRCUIT_FAILURE_THRESHOLD:-5}
+      CIRCUIT_RECOVERY_TIMEOUT: ${CIRCUIT_RECOVERY_TIMEOUT:-30s}
+      CIRCUIT_HALF_OPEN_REQUESTS: ${CIRCUIT_HALF_OPEN_REQUESTS:-3}
+      
+      # Multi-tenancy Settings
+      ENABLE_TENANT_ROUTING: true
+      CRITICAL_TENANTS: "orders,payments,customers"
+      BATCH_TENANTS: "analytics,reporting"
+      
+      # Progressive Rollout
+      ROLLOUT_PERCENTAGE: ${ROLLOUT_PERCENTAGE:-10}
+      
+      # Debug Settings
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEBUG_VERBOSITY: ${DEBUG_VERBOSITY:-normal}
+      DEBUG_SAMPLING_INITIAL: 10
+      DEBUG_SAMPLING_THEREAFTER: 100
+      TELEMETRY_LEVEL: ${TELEMETRY_LEVEL:-detailed}
+      TELEMETRY_PORT: 8888
+      LOGGING_LEVEL: ${LOGGING_LEVEL:-info}
+      
+      # Performance Schema Settings
+      PERFORMANCE_SCHEMA_EVENTS_LIMIT: ${PERFORMANCE_SCHEMA_EVENTS_LIMIT:-100}
+      
+      # Port Settings
+      HEALTH_PORT: 13133
+      PPROF_PORT: 1777
+      ZPAGES_PORT: 55679
+      
+      # Prometheus Settings
+      PROMETHEUS_SCRAPE_INTERVAL: ${PROMETHEUS_SCRAPE_INTERVAL:-10s}
+      MYSQL_EXPORTER_ENDPOINT: ${MYSQL_EXPORTER_ENDPOINT:-mysql-exporter:9104}
+      
+      # TLS Settings
+      MYSQL_TLS_INSECURE: true
+      MYSQL_INITIAL_DELAY: 1s
+      
+      # Resource limits
+      GOMAXPROCS: "4"
+      GOMEMLIMIT: "3500MiB"
+      OTEL_FILE_STORAGE_DIR: "/var/lib/otel/storage"
+      
+    volumes:
+      - ./config/collector/${COLLECTOR_CONFIG:-master-enhanced.yaml}:/etc/otel-collector-config.yaml:ro
+      - otel_storage:/var/lib/otel/storage
+      - mysql_logs:/var/log/mysql:ro
+      
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "13133:13133" # Health check extension
+      - "8888:8888"   # Telemetry metrics
+      - "55679:55679" # zPages extension
+      - "1777:1777"   # pprof extension
+      
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+      mysql-replica:
+        condition: service_healthy
+        
+    networks:
+      - mysql-network
+      
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: MySQL Exporter for Prometheus metrics
+  mysql-exporter:
+    image: prom/mysqld-exporter:latest
+    container_name: mysql-exporter
+    environment:
+      DATA_SOURCE_NAME: "${MYSQL_USER:-otel_monitor}:${MYSQL_MONITOR_PASSWORD:-otelmonitorpass}@(mysql-primary:3306)/"
+    ports:
+      - "9104:9104"
+    networks:
+      - mysql-network
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+
+  # Sample application to generate MySQL traffic
+  mysql-app:
+    image: python:3.9-slim
+    container_name: mysql-app
+    environment:
+      MYSQL_HOST: mysql-primary
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-appuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      # Send traces to the OTLP collector
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-enhanced:4317
+      OTEL_SERVICE_NAME: mysql-sample-app
+    volumes:
+      - ./examples/python-app:/app
+    working_dir: /app
+    command: python app.py
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    networks:
+      - mysql-network
+    restart: unless-stopped
+
+networks:
+  mysql-network:
+    driver: bridge
+
+volumes:
+  mysql_primary_data:
+  mysql_replica_data:
+  otel_storage:
+  mysql_logs:

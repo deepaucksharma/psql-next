@@ -1,0 +1,218 @@
+receivers:
+  # Host metrics receiver for system resource monitoring
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      # CPU metrics
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      
+      # Memory metrics
+      memory:
+        metrics:
+          system.memory.usage:
+            enabled: true
+          system.memory.utilization:
+            enabled: true
+      
+      # Disk I/O metrics
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+          system.disk.io_time:
+            enabled: true
+          system.disk.operation_time:
+            enabled: true
+      
+      # Filesystem metrics
+      filesystem:
+        metrics:
+          system.filesystem.usage:
+            enabled: true
+          system.filesystem.utilization:
+            enabled: true
+      
+      # Network metrics
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.packets:
+            enabled: true
+          system.network.errors:
+            enabled: true
+          system.network.dropped:
+            enabled: true
+          system.network.connections:
+            enabled: true
+      
+      # Process metrics
+      process:
+        metrics:
+          process.cpu.time:
+            enabled: true
+          process.memory.usage:
+            enabled: true
+          process.memory.virtual:
+            enabled: true
+          process.disk.io:
+            enabled: true
+      
+      # Load average
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+          system.cpu.load_average.15m:
+            enabled: true
+      
+      # Paging metrics
+      paging:
+        metrics:
+          system.paging.usage:
+            enabled: true
+          system.paging.operations:
+            enabled: true
+          system.paging.faults:
+            enabled: true
+
+  # Process scraper for MySQL-specific metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'mysql_process_metrics'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['localhost:9104']  # MySQL exporter endpoint if available
+
+  # OTLP receiver for additional metrics
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch processor to optimize data flow
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Resource processor to add metadata
+  resource:
+    attributes:
+      - key: service.name
+        value: "resource-monitor"
+        action: insert
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: monitor.type
+        value: "system-resources"
+        action: insert
+
+  # Filter processor for MySQL-specific processes
+  filter/mysql:
+    metrics:
+      include:
+        match_type: regexp
+        expressions:
+          - 'process\..*'
+        resource_attributes:
+          - key: process.name
+            value: ".*mysql.*"
+
+  # Attributes processor to enrich metrics
+  attributes:
+    actions:
+      - key: host.name
+        action: insert
+        from_attribute: host.name
+      - key: collection.timestamp
+        action: insert
+        value: ${env:HOSTNAME}
+      - key: module
+        value: resource-monitor
+        action: insert
+
+exporters:
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    
+  # Debug exporter for development
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # File exporter for persistent storage
+  file:
+    path: /tmp/resource-metrics.json
+    rotation:
+      max_megabytes: 100
+      max_days: 7
+      max_backups: 3
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/"
+    check_collector_pipeline:
+      enabled: true
+      interval: 5s
+      exporter_failure_threshold: 5
+
+  # Performance profiler
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  # Z-pages for debugging
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    # Main metrics pipeline
+    metrics:
+      receivers: [hostmetrics, otlp]
+      processors: [memory_limiter, batch, resource, attributes]
+      exporters: [prometheus, file, debug]
+    
+    # MySQL-specific metrics pipeline
+    metrics/mysql:
+      receivers: [hostmetrics]
+      processors: [memory_limiter, filter/mysql, batch, resource]
+      exporters: [prometheus]
+    
+    # Debug pipeline for troubleshooting
+    metrics/debug:
+      receivers: [hostmetrics]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["stdout", "/tmp/otel-collector.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8889

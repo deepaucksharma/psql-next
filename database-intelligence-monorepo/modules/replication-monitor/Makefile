@@ -1,10 +1,11 @@
-.PHONY: help build up down restart logs status clean test-replication monitor-lag generate-load check-gtid backup-master restore-replica
+.PHONY: help build up up-enhanced down restart logs status clean test-replication monitor-lag generate-load check-gtid backup-master restore-replica validate-enhanced
 
 # Default target
 help:
 	@echo "MySQL Replication Monitor - Available Commands:"
 	@echo "  make build          - Build Docker images"
-	@echo "  make up             - Start all services"
+	@echo "  make up             - Start all services with standard config"
+	@echo "  make up-enhanced    - Start all services with enhanced config"
 	@echo "  make down           - Stop all services"
 	@echo "  make restart        - Restart all services"
 	@echo "  make logs           - View logs from all services"
@@ -16,6 +17,7 @@ help:
 	@echo "  make check-gtid     - Check GTID status"
 	@echo "  make backup-master  - Create backup from master"
 	@echo "  make restore-replica - Restore backup to replica"
+	@echo "  make validate-enhanced - Validate enhanced collector config"
 
 # Build Docker images
 build:
@@ -27,6 +29,15 @@ up:
 	@echo "Waiting for services to be healthy..."
 	@sleep 20
 	@echo "Services started. MySQL replica is available on port 8086"
+	@make status
+
+# Start all services with enhanced configuration
+up-enhanced:
+	@echo "Starting services with enhanced configuration..."
+	COLLECTOR_CONFIG=collector-enhanced.yaml docker-compose up -d
+	@echo "Waiting for services to be healthy..."
+	@sleep 20
+	@echo "Services started with enhanced configuration. MySQL replica is available on port 8086"
 	@make status
 
 # Stop all services
@@ -145,3 +156,8 @@ init-data:
 	@echo "Initializing more sample data..."
 	@docker exec mysql-master mysql -uroot -prootpassword test_db -e "CALL generate_test_data(50, 200);"
 	@echo "Sample data initialized"
+
+# Validate enhanced configuration
+validate-enhanced:
+	@echo "Validating enhanced collector configuration..."
+	@docker run --rm -v $$(pwd)/config:/config otel/opentelemetry-collector-contrib:latest validate --config=/config/collector-enhanced.yaml

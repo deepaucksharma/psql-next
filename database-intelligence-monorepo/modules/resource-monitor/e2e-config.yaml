@@ -1,0 +1,350 @@
+# E2E Configuration for Resource Monitor Module
+# This file defines expected metrics, dashboards, and alerts for validation
+
+# Service endpoints (defaults if not specified)
+prometheus_url: http://localhost:9090
+grafana_url: http://localhost:3000
+alertmanager_url: http://localhost:9093
+
+# Custom endpoints specific to this module
+custom_endpoints:
+  resource_api: http://localhost:8080/api/resources
+  capacity_api: http://localhost:8080/api/capacity
+  optimization_api: http://localhost:8080/api/optimization
+  health_check: http://localhost:8080/health
+
+# Expected metrics that should be collected
+expected_metrics:
+  # Resource Monitor specific metrics
+  resource_monitor_enabled:
+    type: gauge
+    description: "Whether resource monitoring is enabled"
+    required: true
+    min_value: 0
+    max_value: 1
+    
+  mysql_cpu_usage_percent:
+    type: gauge
+    description: "MySQL process CPU usage percentage"
+    required: true
+    min_value: 0
+    max_value: 100
+    labels:
+      - instance
+    
+  mysql_memory_usage_bytes:
+    type: gauge
+    description: "MySQL process memory usage in bytes"
+    required: true
+    min_value: 0
+    labels:
+      - memory_type
+      - instance
+    
+  mysql_memory_usage_percent:
+    type: gauge
+    description: "MySQL process memory usage percentage"
+    required: true
+    min_value: 0
+    max_value: 100
+    labels:
+      - instance
+    
+  mysql_disk_io_read_bytes_total:
+    type: counter
+    description: "Total bytes read from disk"
+    required: true
+    min_value: 0
+    labels:
+      - device
+      - instance
+    
+  mysql_disk_io_write_bytes_total:
+    type: counter
+    description: "Total bytes written to disk"
+    required: true
+    min_value: 0
+    labels:
+      - device
+      - instance
+    
+  mysql_disk_io_read_iops:
+    type: gauge
+    description: "Disk read IOPS"
+    required: true
+    min_value: 0
+    labels:
+      - device
+      - instance
+    
+  mysql_disk_io_write_iops:
+    type: gauge
+    description: "Disk write IOPS"
+    required: true
+    min_value: 0
+    labels:
+      - device
+      - instance
+    
+  mysql_disk_usage_bytes:
+    type: gauge
+    description: "Disk space usage in bytes"
+    required: true
+    min_value: 0
+    labels:
+      - mount_point
+      - filesystem_type
+      - instance
+    
+  mysql_disk_usage_percent:
+    type: gauge
+    description: "Disk space usage percentage"
+    required: true
+    min_value: 0
+    max_value: 100
+    labels:
+      - mount_point
+      - instance
+    
+  mysql_network_receive_bytes_total:
+    type: counter
+    description: "Total bytes received over network"
+    required: true
+    min_value: 0
+    labels:
+      - interface
+      - instance
+    
+  mysql_network_transmit_bytes_total:
+    type: counter
+    description: "Total bytes transmitted over network"
+    required: true
+    min_value: 0
+    labels:
+      - interface
+      - instance
+    
+  mysql_connection_pool_size:
+    type: gauge
+    description: "Current connection pool size"
+    required: true
+    min_value: 0
+    labels:
+      - pool_name
+    
+  mysql_connection_pool_usage_ratio:
+    type: gauge
+    description: "Connection pool usage ratio"
+    required: true
+    min_value: 0
+    max_value: 1
+    labels:
+      - pool_name
+    
+  mysql_innodb_buffer_pool_utilization:
+    type: gauge
+    description: "InnoDB buffer pool utilization percentage"
+    required: true
+    min_value: 0
+    max_value: 100
+    
+  mysql_query_cache_utilization:
+    type: gauge
+    description: "Query cache utilization percentage"
+    required: false
+    min_value: 0
+    max_value: 100
+    
+  resource_saturation_score:
+    type: gauge
+    description: "Overall resource saturation score"
+    required: true
+    min_value: 0
+    max_value: 100
+    labels:
+      - resource_type
+    
+  resource_optimization_opportunities:
+    type: gauge
+    description: "Number of resource optimization opportunities detected"
+    required: false
+    min_value: 0
+    labels:
+      - optimization_type
+
+# Expected Grafana dashboards
+expected_dashboards:
+  resource-monitor-overview:
+    title: "MySQL Resource Monitor Overview"
+    required: true
+    panels:
+      - "CPU Usage"
+      - "Memory Usage"
+      - "Disk I/O Performance"
+      - "Network Traffic"
+      - "Disk Space Usage"
+      - "Resource Saturation Score"
+      - "Connection Pool Status"
+      
+  resource-utilization-detailed:
+    title: "Detailed Resource Utilization"
+    required: true
+    panels:
+      - "CPU Usage by Core"
+      - "Memory Breakdown"
+      - "IOPS Distribution"
+      - "Disk Latency"
+      - "Network Packet Rate"
+      - "Buffer Pool Analytics"
+      - "Cache Efficiency"
+      
+  capacity-planning:
+    title: "Resource Capacity Planning"
+    required: true
+    panels:
+      - "Resource Growth Trends"
+      - "Capacity Forecasting"
+      - "Peak Usage Analysis"
+      - "Resource Efficiency Score"
+      - "Optimization Recommendations"
+      - "Cost vs Performance"
+      
+  resource-optimization:
+    title: "Resource Optimization Insights"
+    required: false
+    panels:
+      - "Underutilized Resources"
+      - "Resource Bottlenecks"
+      - "Configuration Recommendations"
+      - "Resource Allocation Efficiency"
+
+# Expected alert rules
+expected_alerts:
+  resource_monitor_down:
+    name: "ResourceMonitorDown"
+    severity: critical
+    required: true
+    expression: 'resource_monitor_enabled == 0'
+    for: 5m
+    labels:
+      severity: critical
+      service: resource-monitor
+      module: resource-monitor
+    annotations:
+      summary: "Resource monitoring is down"
+      description: "Resource monitoring service has been down for more than 5 minutes"
+      
+  high_cpu_usage:
+    name: "MySQLHighCPUUsage"
+    severity: critical
+    required: true
+    expression: 'mysql_cpu_usage_percent > 90'
+    for: 5m
+    labels:
+      severity: critical
+      service: resource-monitor
+      module: resource-monitor
+    annotations:
+      summary: "MySQL CPU usage is critically high"
+      description: "MySQL CPU usage is {{ $value }}% on {{ $labels.instance }}"
+      
+  high_memory_usage:
+    name: "MySQLHighMemoryUsage"
+    severity: warning
+    required: true
+    expression: 'mysql_memory_usage_percent > 85'
+    for: 10m
+    labels:
+      severity: warning
+      service: resource-monitor
+      module: resource-monitor
+    annotations:
+      summary: "MySQL memory usage is high"
+      description: "MySQL memory usage is {{ $value }}% on {{ $labels.instance }}"
+      
+  disk_space_low:
+    name: "MySQLDiskSpaceLow"
+    severity: critical
+    required: true
+    expression: 'mysql_disk_usage_percent > 90'
+    for: 5m
+    labels:
+      severity: critical
+      service: resource-monitor
+      module: resource-monitor
+    annotations:
+      summary: "MySQL disk space is critically low"
+      description: "Disk usage is {{ $value }}% on {{ $labels.mount_point }}"
+      
+  high_disk_io:
+    name: "MySQLHighDiskIO"
+    severity: warning
+    required: true
+    expression: '(mysql_disk_io_read_iops + mysql_disk_io_write_iops) > 10000'
+    for: 15m
+    labels:
+      severity: warning
+      service: resource-monitor
+      module: resource-monitor
+    annotations:
+      summary: "High disk I/O detected"
+      description: "Combined IOPS is {{ $value }} on {{ $labels.device }}"
+      
+  connection_pool_exhausted:
+    name: "ConnectionPoolExhausted"
+    severity: warning
+    required: true
+    expression: 'mysql_connection_pool_usage_ratio > 0.9'
+    for: 10m
+    labels:
+      severity: warning
+      service: resource-monitor
+      module: resource-monitor
+    annotations:
+      summary: "Connection pool nearly exhausted"
+      description: "Connection pool {{ $labels.pool_name }} is {{ $value | humanizePercentage }} utilized"
+      
+  high_resource_saturation:
+    name: "HighResourceSaturation"
+    severity: warning
+    required: false
+    expression: 'resource_saturation_score > 80'
+    for: 20m
+    labels:
+      severity: warning
+      service: resource-monitor
+      module: resource-monitor
+    annotations:
+      summary: "High resource saturation detected"
+      description: "{{ $labels.resource_type }} saturation score is {{ $value }}"
+      
+  network_bandwidth_high:
+    name: "HighNetworkBandwidth"
+    severity: info
+    required: false
+    expression: 'rate(mysql_network_receive_bytes_total[5m]) + rate(mysql_network_transmit_bytes_total[5m]) > 100000000'
+    for: 15m
+    labels:
+      severity: info
+      service: resource-monitor
+      module: resource-monitor
+    annotations:
+      summary: "High network bandwidth usage"
+      description: "Network bandwidth usage is {{ $value | humanize }}B/s on {{ $labels.interface }}"
+
+# Additional validation settings
+validation_settings:
+  # How long to wait for metrics to appear (seconds)
+  metric_wait_time: 45
+  
+  # Minimum number of data points required for validation
+  min_data_points: 3
+  
+  # Freshness threshold for all metrics (seconds)
+  default_freshness_threshold: 60
+  
+  # Custom validation scripts (optional)
+  custom_validators:
+    - validate_resource_metrics.py
+    - check_capacity_calculations.py
+    - verify_optimization_engine.py

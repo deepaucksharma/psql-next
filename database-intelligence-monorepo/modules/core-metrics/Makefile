@@ -1,7 +1,18 @@
 MODULE_NAME = core-metrics
 PORT = 8081
 
-.PHONY: build test run stop logs clean test-unit test-integration
+.PHONY: build test run run-enhanced stop logs clean test-unit test-integration validate-enhanced help
+
+help:
+	@echo "Core Metrics Module - Available Commands:"
+	@echo "  make build           - Build Docker images"
+	@echo "  make run             - Run with standard configuration"
+	@echo "  make run-enhanced    - Run with enhanced configuration"
+	@echo "  make stop            - Stop all services"
+	@echo "  make logs            - View service logs"
+	@echo "  make clean           - Clean up containers and volumes"
+	@echo "  make test            - Run all tests"
+	@echo "  make validate-enhanced - Validate enhanced collector config"
 
 build:
 	docker-compose build
@@ -28,6 +39,12 @@ run:
 	@echo "$(MODULE_NAME) is running on port $(PORT)"
 	@echo "Metrics available at: http://localhost:$(PORT)/metrics"
 
+run-enhanced:
+	@echo "Running $(MODULE_NAME) with enhanced configuration..."
+	COLLECTOR_CONFIG=collector-enhanced.yaml docker-compose up -d
+	@echo "$(MODULE_NAME) is running on port $(PORT) with enhanced configuration"
+	@echo "Metrics available at: http://localhost:$(PORT)/metrics"
+
 stop:
 	docker-compose down
 
@@ -40,3 +57,7 @@ clean:
 
 status:
 	@curl -s http://localhost:$(PORT)/metrics | head -20 || echo "Module not running"
+
+validate-enhanced:
+	@echo "Validating enhanced collector configuration..."
+	@docker run --rm -v $$(pwd)/config:/config otel/opentelemetry-collector-contrib:latest validate --config=/config/collector-enhanced.yaml

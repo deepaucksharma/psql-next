@@ -6,89 +6,6 @@ receivers:
     database: test_db
     collection_interval: 10s
     transport: tcp
-    metrics:
-      mysql.buffer_pool.data_pages:
-        enabled: true
-      mysql.buffer_pool.limit:
-        enabled: true
-      mysql.buffer_pool.operations:
-        enabled: true
-      mysql.buffer_pool.page_flushes:
-        enabled: true
-      mysql.buffer_pool.pages:
-        enabled: true
-      mysql.buffer_pool.usage:
-        enabled: true
-      mysql.commands:
-        enabled: true
-      mysql.connection.count:
-        enabled: true
-      mysql.connection.errors:
-        enabled: true
-      mysql.double_writes:
-        enabled: true
-      mysql.handlers:
-        enabled: true
-      mysql.index.io.wait.count:
-        enabled: true
-      mysql.index.io.wait.time:
-        enabled: true
-      mysql.innodb_row_lock.time:
-        enabled: true
-      mysql.innodb_row_lock.waits:
-        enabled: true
-      mysql.locks:
-        enabled: true
-      mysql.log_operations:
-        enabled: true
-      mysql.opened_resources:
-        enabled: true
-      mysql.operations:
-        enabled: true
-      mysql.page_operations:
-        enabled: true
-      mysql.prepared_statements:
-        enabled: true
-      mysql.query.client.count:
-        enabled: true
-      mysql.query.count:
-        enabled: true
-      mysql.query.slow.count:
-        enabled: true
-      mysql.replica.sql_delay:
-        enabled: true
-      mysql.replica.time_behind_source:
-        enabled: true
-      mysql.row_locks:
-        enabled: true
-      mysql.row_operations:
-        enabled: true
-      mysql.sorts:
-        enabled: true
-      mysql.statement_event.count:
-        enabled: true
-      mysql.statement_event.wait.time:
-        enabled: true
-      mysql.table.io.wait.count:
-        enabled: true
-      mysql.table.io.wait.time:
-        enabled: true
-      mysql.table.lock_wait.read.count:
-        enabled: true
-      mysql.table.lock_wait.read.time:
-        enabled: true
-      mysql.table.lock_wait.write.count:
-        enabled: true
-      mysql.table.lock_wait.write.time:
-        enabled: true
-      mysql.table_open_cache:
-        enabled: true
-      mysql.threads:
-        enabled: true
-      mysql.tmp_resources:
-        enabled: true
-      mysql.uptime:
-        enabled: true
 
   mysql/replica:
     endpoint: mysql-replica:3306
@@ -97,17 +14,6 @@ receivers:
     database: test_db
     collection_interval: 10s
     transport: tcp
-    metrics:
-      mysql.replica.sql_delay:
-        enabled: true
-      mysql.replica.time_behind_source:
-        enabled: true
-      mysql.connection.count:
-        enabled: true
-      mysql.threads:
-        enabled: true
-      mysql.commands:
-        enabled: true
 
   # Custom SQL queries for replication monitoring
   sqlquery:
@@ -250,8 +156,8 @@ exporters:
     resource_to_telemetry_conversion:
       enabled: true
 
-  logging:
-    loglevel: info
+  debug:
+    verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
 
@@ -281,7 +187,7 @@ service:
     metrics:
       receivers: [mysql, mysql/replica, sqlquery, sqlquery/replica]
       processors: [memory_limiter, batch, resource, attributes]
-      exporters: [prometheus, logging, otlp]
+      exporters: [prometheus, debug, otlp]
   telemetry:
     logs:
       level: info

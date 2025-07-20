@@ -1,0 +1,662 @@
+{
+  "name": "MySQL Intelligence - Complete Monitoring",
+  "description": "Comprehensive MySQL monitoring with ML-based intelligence, business impact, and cross-signal correlation",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Executive Overview",
+      "description": "High-level business and performance metrics",
+      "widgets": [
+        {
+          "title": "MySQL Fleet Health Score",
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "height": 3,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.health.score) as 'Overall Health', count(unique(entity.name)) as 'Active Instances', percentage(count(*), WHERE replication.severity = 'healthy') as 'Healthy Replication %' FROM Metric WHERE entity.type = 'MYSQL_INSTANCE' SINCE 5 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 50
+              },
+              {
+                "alertSeverity": "WARNING",
+                "value": 80
+              }
+            ]
+          }
+        },
+        {
+          "title": "Business Impact - Last 24 Hours",
+          "visualization": {
+            "id": "viz.area"
+          },
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "height": 3,
+            "width": 8
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT sum(business.revenue_impact) FROM Metric WHERE business_criticality IN ('CRITICAL', 'HIGH') FACET business_criticality TIMESERIES AUTO SINCE 24 hours ago"
+              }
+            ],
+            "colors": {
+              "seriesOverrides": [
+                {
+                  "seriesName": "CRITICAL",
+                  "color": "#FF0000"
+                },
+                {
+                  "seriesName": "HIGH",
+                  "color": "#FFA500"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Top Performance Issues",
+          "visualization": {
+            "id": "viz.table"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "height": 4,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(query_text) as 'Query', latest(performance_issue) as 'Issue Type', average(intelligence_score) as 'Impact Score', latest(recommendations) as 'Recommendation' FROM Metric WHERE performance_issue != 'OK' AND metricName = 'mysql.intelligence.comprehensive' FACET query_digest LIMIT 10 SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Intelligence Score Distribution",
+          "visualization": {
+            "id": "viz.histogram"
+          },
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "height": 4,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT histogram(mysql.intelligence.comprehensive, 10, 20) FROM Metric WHERE intelligence_score > 0 SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "SQL Intelligence Analysis",
+      "description": "Deep query analysis with ML insights",
+      "widgets": [
+        {
+          "title": "Query Wait Profile Analysis",
+          "visualization": {
+            "id": "viz.heatmap"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "height": 4,
+            "width": 8
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT histogram(current_wait_time_ms, width: 50, buckets: 20) FROM Metric FACET wait.primary_category WHERE current_wait_time_ms > 0 SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "ML Anomaly Detection",
+          "visualization": {
+            "id": "viz.line"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "height": 4,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) FROM Metric WHERE ml.is_anomaly = true FACET ml.workload_type TIMESERIES AUTO SINCE 6 hours ago"
+              }
+            ],
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Resource Pressure Correlation",
+          "visualization": {
+            "id": "viz.scatter"
+          },
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "height": 4,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(ml.resource_pressure) as 'Resource Pressure', average(current_exec_time_ms) as 'Execution Time' FROM Metric WHERE ml.resource_pressure > 0 FACET query_digest SINCE 2 hours ago LIMIT 100"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Pattern Recognition",
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "layout": {
+            "column": 7,
+            "row": 5,
+            "height": 4,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) FROM Metric FACET ml.workload_type WHERE ml.workload_type IS NOT NULL SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replication & High Availability",
+      "description": "Master-slave replication monitoring",
+      "widgets": [
+        {
+          "title": "Replication Lag Trend",
+          "visualization": {
+            "id": "viz.line"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "height": 3,
+            "width": 8
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.replica.time_behind_source) FROM Metric FACET entity.name WHERE entity.name LIKE '%replica%' TIMESERIES AUTO SINCE 6 hours ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "WARNING",
+                "value": 60
+              },
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 300
+              }
+            ]
+          }
+        },
+        {
+          "title": "Replication Health Status",
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "height": 3,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(replication.health_score) as 'Health Score', latest(mysql.replication.slave.io_running) as 'IO Thread', latest(mysql.replication.slave.sql_running) as 'SQL Thread' FROM Metric WHERE entity.name LIKE '%replica%' FACET entity.name SINCE 5 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "GTID Execution Status",
+          "visualization": {
+            "id": "viz.table"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "height": 3,
+            "width": 12
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(mysql.replication.gtid.executed) as 'Executed GTIDs', latest(mysql.replication.gtid.purged) as 'Purged GTIDs', latest(mysql.replication.master.log_position) as 'Master Position' FROM Metric FACET entity.name SINCE 5 minutes ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Business Impact & SLA",
+      "description": "Business metrics and SLA tracking",
+      "widgets": [
+        {
+          "title": "SLA Violations by Schema",
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "height": 4,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) FROM Metric WHERE business.sla_violated = true FACET db_schema SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Revenue Impact by Hour",
+          "visualization": {
+            "id": "viz.area"
+          },
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "height": 4,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT sum(business.revenue_impact) FROM Metric WHERE business.revenue_impact > 0 TIMESERIES 1 hour SINCE 24 hours ago"
+              }
+            ],
+            "colors": {
+              "seriesOverrides": [
+                {
+                  "seriesName": "business.revenue_impact",
+                  "color": "#FF6B6B"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Critical Table Operations",
+          "visualization": {
+            "id": "viz.table"
+          },
+          "layout": {
+            "column": 1,
+            "row": 5,
+            "height": 4,
+            "width": 12
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) as 'Operations', average(current_exec_time_ms) as 'Avg Execution Time', sum(business.revenue_impact) as 'Total Impact' FROM Metric WHERE critical_table = true FACET locked_table, business_criticality SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance Advisory",
+      "description": "Automated recommendations and optimization insights",
+      "widgets": [
+        {
+          "title": "Top Recommendations",
+          "visualization": {
+            "id": "viz.table"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "height": 5,
+            "width": 8
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(advisor.type) as 'Issue Type', latest(advisor.recommendation) as 'Recommendation', latest(advisor.priority) as 'Priority', count(*) as 'Occurrences' FROM Metric WHERE advisor.type IS NOT NULL FACET query_digest SINCE 1 hour ago LIMIT 20"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Optimization Opportunities",
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "height": 2,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) as 'Missing Indexes', sum(historical_exec_count) as 'Total Executions Affected' FROM Metric WHERE performance_issue = 'MISSING_INDEX' SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Resource Saturation Alerts",
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "layout": {
+            "column": 9,
+            "row": 3,
+            "height": 2,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) as 'Saturation Events', average(ml.resource_pressure) as 'Avg Resource Pressure' FROM Metric WHERE advisor.type = 'resource_saturation' SINCE 1 hour ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "WARNING",
+                "value": 70
+              },
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 85
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-Signal Correlation",
+      "description": "Trace, log, and metric correlation insights",
+      "widgets": [
+        {
+          "title": "Traces with Database Operations",
+          "visualization": {
+            "id": "viz.line"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "height": 3,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(traces_spanmetrics_latency) FROM Metric WHERE db.system = 'mysql' FACET db.operation TIMESERIES AUTO SINCE 1 hour ago"
+              }
+            ],
+            "linkedEntityGuids": []
+          }
+        },
+        {
+          "title": "Exemplar Distribution",
+          "visualization": {
+            "id": "viz.histogram"
+          },
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "height": 3,
+            "width": 6
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT histogram(traces_spanmetrics_latency, 20) FROM Metric WHERE exemplar.trace_id IS NOT NULL SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Slow Query Log Correlation",
+          "visualization": {
+            "id": "viz.table"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "height": 4,
+            "width": 12
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(mysql.slowlog.count) as 'Slow Queries', average(query_duration_ms) as 'Avg Duration', latest(correlation.trace_id) as 'Sample Trace ID' FROM Metric WHERE metric_name LIKE 'mysql.slowlog%' FACET query_digest SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Canary & Synthetic Tests",
+      "description": "Synthetic monitoring and baseline tracking",
+      "widgets": [
+        {
+          "title": "Canary Test Results",
+          "visualization": {
+            "id": "viz.line"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "height": 3,
+            "width": 8
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(mysql.canary.latency), average(mysql.canary.lock_latency), average(mysql.canary.metadata_latency) FROM Metric TIMESERIES AUTO SINCE 6 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Baseline Deviation",
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "height": 3,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT average(canary.deviation_percent) as 'Avg Deviation %', percentage(count(*), WHERE canary.health = 'healthy') as 'Healthy Tests %' FROM Metric WHERE metricName LIKE 'mysql.canary%' SINCE 1 hour ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "WARNING",
+                "value": 20
+              },
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 50
+              }
+            ]
+          }
+        },
+        {
+          "title": "Workload Simulation Results",
+          "visualization": {
+            "id": "viz.table"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "height": 3,
+            "width": 12
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(workload_type) as 'Workload Type', average(operations) as 'Operations', latest(canary.health) as 'Health Status' FROM Metric WHERE metricName = 'mysql.canary.workload.oltp' OR metricName = 'mysql.canary.workload.olap' FACET workload_type SINCE 30 minutes ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Anomaly Detection",
+      "description": "Statistical anomalies and outliers",
+      "widgets": [
+        {
+          "title": "Anomaly Timeline",
+          "visualization": {
+            "id": "viz.line"
+          },
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "height": 3,
+            "width": 8
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) FROM Metric WHERE ml.is_anomaly = true OR anomaly.detected = true FACET anomaly_type TIMESERIES AUTO SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Anomaly Severity Distribution",
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "height": 3,
+            "width": 4
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT count(*) FROM Metric WHERE anomaly.detected = true OR ml.is_anomaly = true FACET alert.severity SINCE 6 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Top Anomalous Queries",
+          "visualization": {
+            "id": "viz.table"
+          },
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "height": 4,
+            "width": 12
+          },
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+                "query": "SELECT latest(query_text) as 'Query', average(ml.anomaly_score) as 'Anomaly Score', average(ml.baseline_deviation) as 'Baseline Deviation', count(*) as 'Occurrences' FROM Metric WHERE ml.is_anomaly = true FACET query_digest SINCE 1 hour ago LIMIT 20"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "name": "environment",
+      "title": "Environment",
+      "type": "NRQL",
+      "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+      "query": "SELECT uniques(environment) FROM Metric WHERE entity.type = 'MYSQL_INSTANCE' SINCE 1 day ago"
+    },
+    {
+      "name": "cluster",
+      "title": "Cluster",
+      "type": "NRQL",
+      "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+      "query": "SELECT uniques(cluster) FROM Metric WHERE entity.type = 'MYSQL_INSTANCE' SINCE 1 day ago"
+    },
+    {
+      "name": "instance",
+      "title": "MySQL Instance",
+      "type": "NRQL",
+      "accountId": "${NEW_RELIC_ACCOUNT_ID}",
+      "query": "SELECT uniques(entity.name) FROM Metric WHERE entity.type = 'MYSQL_INSTANCE' SINCE 1 day ago"
+    }
+  ]
+}

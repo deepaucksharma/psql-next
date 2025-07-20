@@ -48,9 +48,10 @@ services:
       - "4317:4317"   # OTLP gRPC receiver
       - "4318:4318"   # OTLP HTTP receiver
       - "8888:8888"   # Prometheus metrics
+      - "8898:8889"   # Prometheus metrics
     volumes:
-      - ./config/collector.yaml:/etc/otel-collector/config.yaml
-    command: ["--config=/etc/otel-collector/config.yaml"]
+      - ./config:/etc/otel
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
     networks:
       - otel-network
 

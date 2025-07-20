@@ -18,9 +18,10 @@ services:
       RESOURCE_USAGE_THRESHOLD: "2.0"  # 2x standard deviation
     ports:
       - "8084:8084"
+      - "8892:8889"
     volumes:
       - ./config:/etc/otel
-    command: ["--config", "/etc/otel/collector.yaml"]
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:13133/"]
       interval: 30s

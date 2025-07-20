@@ -13,39 +13,6 @@ receivers:
     transport: tcp
     tls:
       insecure: ${env:MYSQL_TLS_INSECURE:true}
-    metrics:
-      # Core replication metrics
-      mysql.replica.sql_delay:
-        enabled: true
-      mysql.replica.time_behind_source:
-        enabled: true
-      # Additional monitoring metrics
-      mysql.buffer_pool.data_pages:
-        enabled: true
-      mysql.buffer_pool.limit:
-        enabled: true
-      mysql.buffer_pool.operations:
-        enabled: true
-      mysql.buffer_pool.page_flushes:
-        enabled: true
-      mysql.buffer_pool.pages:
-        enabled: true
-      mysql.buffer_pool.usage:
-        enabled: true
-      mysql.commands:
-        enabled: true
-      mysql.connection.count:
-        enabled: true
-      mysql.connection.errors:
-        enabled: true
-      mysql.connection.max:
-        enabled: true
-      mysql.query.count:
-        enabled: true
-      mysql.threads:
-        enabled: true
-      mysql.uptime:
-        enabled: true
 
   # Replica MySQL receiver
   mysql/replica:
@@ -58,23 +25,6 @@ receivers:
     transport: tcp
     tls:
       insecure: ${env:MYSQL_TLS_INSECURE:true}
-    metrics:
-      mysql.replica.sql_delay:
-        enabled: true
-      mysql.replica.time_behind_source:
-        enabled: true
-      mysql.buffer_pool.usage:
-        enabled: true
-      mysql.connection.count:
-        enabled: true
-      mysql.connection.max:
-        enabled: true
-      mysql.query.count:
-        enabled: true
-      mysql.threads:
-        enabled: true
-      mysql.uptime:
-        enabled: true
 
   # Enhanced SQL queries for replication monitoring
   sqlquery/primary:
@@ -339,6 +289,41 @@ processors:
         value: "2.0.0"
         action: insert
 
+  # New Relic specific attributes
+  attributes/newrelic:
+    actions:
+      - key: newrelic.source
+        value: opentelemetry
+        action: insert
+      - key: instrumentation.name
+        value: mysql-otel-collector
+        action: insert
+      - key: instrumentation.version
+        value: "2.0.0"
+        action: insert
+      - key: instrumentation.provider
+        value: opentelemetry
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+
+  # Entity synthesis for New Relic One
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_INSTANCE"
+        action: insert
+      - key: entity.guid
+        value: "MYSQL|${env:CLUSTER_NAME}|${env:MYSQL_PRIMARY_ENDPOINT}"
+        action: insert
+      - key: entity.name
+        value: "${env:MYSQL_PRIMARY_ENDPOINT}"
+        action: insert
+      - key: newrelic.entity.synthesis
+        value: "true"
+        action: insert
+
   # Filter to separate alerts
   filter/alerts:
     metrics:
@@ -349,32 +334,42 @@ processors:
             value: "replication_lag|replication_stopped"
 
 exporters:
-  # Prometheus exporter
-  prometheus:
-    endpoint: "0.0.0.0:8889"
-    namespace: mysql_replication
-    const_labels:
-      monitor: "replication"
-    resource_to_telemetry_conversion:
+  # Primary New Relic OTLP exporter for standard metrics
+  otlphttp/newrelic_standard:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
       enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 10000
 
-  # Logging exporter
-  logging:
-    loglevel: info
+  # High-priority exporter for critical replication alerts
+  otlphttp/newrelic_critical:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: critical
+    compression: none  # No compression for lower latency
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+
+  # Debug exporter
+  debug:
+    verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
-
-  # OTLP exporter for cross-module communication
-  otlp:
-    endpoint: ${env:OTLP_ENDPOINT:localhost:4317}
-    tls:
-      insecure: true
-
-  # Alert forwarding to alert-manager
-  otlp/alerts:
-    endpoint: ${env:ALERT_MANAGER_ENDPOINT:alert-manager:8089}
-    tls:
-      insecure: true
 
   # Debug file export
   file/debug:
@@ -412,9 +407,11 @@ service:
         resourcedetection,
         resource/semantic_conventions, 
         transform/replication_health,
-        attributes
+        attributes,
+        attributes/newrelic,
+        attributes/entity_synthesis
       ]
-      exporters: [prometheus, logging, otlp]
+      exporters: [otlphttp/newrelic_standard, debug]
     
     # Alerts pipeline
     metrics/alerts:
@@ -424,9 +421,11 @@ service:
         batch,
         transform/replication_alerts,
         filter/alerts,
-        attributes
+        attributes,
+        attributes/newrelic,
+        attributes/entity_synthesis
       ]
-      exporters: [otlp/alerts, logging]
+      exporters: [otlphttp/newrelic_critical, debug]
     
     # Debug pipeline
     metrics/debug:
