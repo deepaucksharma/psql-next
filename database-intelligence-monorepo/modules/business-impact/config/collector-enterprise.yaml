@@ -179,10 +179,7 @@ processors:
           # Cap the score at configured maximum
           - set(attributes["business_impact_score"], ${env:MAX_IMPACT_SCORE:-10.0}) where attributes["business_impact_score"] > ${env:MAX_IMPACT_SCORE:-10.0}
           
-          # Add SLA impact based on duration
-          - set(attributes["sla_impact"], "critical") where metric.name == "db.client.operation.duration" and value > ${env:SLA_CRITICAL_THRESHOLD:-5.0}
-          - set(attributes["sla_impact"], "warning") where metric.name == "db.client.operation.duration" and value > ${env:SLA_WARNING_THRESHOLD:-2.0} and value <= ${env:SLA_CRITICAL_THRESHOLD:-5.0}
-          - set(attributes["sla_impact"], "normal") where metric.name == "db.client.operation.duration" and value <= ${env:SLA_WARNING_THRESHOLD:-2.0}
+          # SLA impact analysis moved to metric context
           
           # Add business-critical table identification
           - set(attributes["critical_table"], true) where IsMatch(attributes["db.sql.table"], "(?i).*(order|payment|user|customer|transaction|invoice|product|inventory).*")
@@ -192,12 +189,12 @@ processors:
   transform/create_metrics:
     error_mode: ignore
     metric_statements:
-      - context: scope
+      - context: metric
         statements:
           # Create business impact metrics
-          - set(metric.name, "business.impact.score") where metric.name == "db.client.operation.duration"
-          - set(metric.unit, "score") where metric.name == "business.impact.score"
-          - set(metric.description, "Business impact score (0-10) based on query patterns and tables") where metric.name == "business.impact.score"
+          - set(name, "business.impact.score") where name == "db.client.operation.duration"
+          - set(unit, "score") where name == "business.impact.score"
+          - set(description, "Business impact score (0-10) based on query patterns and tables") where name == "business.impact.score"
 
   # Revenue impact calculations
   transform/revenue_impact:
@@ -210,7 +207,7 @@ processors:
           - set(attributes["estimated_revenue_impact"], 0.0)
           
           # Direct revenue impact for revenue-category queries
-          - set(attributes["estimated_revenue_impact"], attributes["revenue_per_second"] * value) where attributes["business_category"] == "revenue" and metric.name == "db.client.operation.duration"
+          - set(attributes["estimated_revenue_impact"], attributes["revenue_per_second"] * value) where attributes["business_category"] == "revenue"
           
           # Indirect revenue impact for customer-facing queries
           - set(attributes["estimated_revenue_impact"], attributes["revenue_per_second"] * value * 0.7) where attributes["business_category"] == "customer" and metric.name == "db.client.operation.duration"

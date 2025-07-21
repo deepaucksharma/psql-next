@@ -291,16 +291,16 @@ processors:
           # Deduct points for lag
           - set(attributes["replication.health_score"], 
                 attributes["replication.health_score"] - Min(attributes["value"], 50))
-            where metric.name == "mysql.replication.slave.seconds_behind_master" and attributes["value"] > 0
+             and attributes["value"] > 0
           
           # Deduct points for stopped threads
           - set(attributes["replication.health_score"], 
                 attributes["replication.health_score"] - 30)
-            where metric.name == "mysql.replication.slave.io_running" and value == 0
+             and value == 0
           
           - set(attributes["replication.health_score"], 
                 attributes["replication.health_score"] - 30)
-            where metric.name == "mysql.replication.slave.sql_running" and value == 0
+             and value == 0
           
           # Set severity based on health score
           - set(attributes["replication.severity"], "critical")
@@ -318,7 +318,7 @@ processors:
         statements:
           # Generate alert for high lag
           - set(attributes["alert.type"], "replication_lag")
-            where metric.name == "mysql.replication.slave.seconds_behind_master" and value > ${env:REPLICATION_LAG_THRESHOLD:300}
+             and value > ${env:REPLICATION_LAG_THRESHOLD:300}
           - set(attributes["alert.severity"], "critical")
             where attributes["alert.type"] == "replication_lag" and value > 600
           - set(attributes["alert.message"], 

@@ -55,7 +55,7 @@ services:
       # Alert manager endpoint
       ALERT_MANAGER_ENDPOINT: ${ALERT_MANAGER_ENDPOINT:-alert-manager:4317}
       # Override specific endpoints if needed
-      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector-enterprise-working.yaml}
+      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector.yaml}
     ports:
       - "8087:8087"      # Prometheus metrics
       - "8903:8889"      # Internal metrics

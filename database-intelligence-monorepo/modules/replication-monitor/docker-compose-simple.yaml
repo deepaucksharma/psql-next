@@ -7,7 +7,7 @@ services:
     # Use shared/validation/health-check-all.sh for validation purposes.
     # See shared/validation/README-health-check.md for details.
     
-    build: ../core-metrics  # Use the same base image as core-metrics
+    image: otel/opentelemetry-collector-contrib:latest
     container_name: replication-monitor-collector
     env_file:
       - ../../shared/config/service-endpoints.env
@@ -27,7 +27,7 @@ services:
       ENVIRONMENT: production
       CLUSTER_NAME: database-intelligence-cluster
       # Override specific endpoints if needed
-      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector-mock-replication.yaml}
+      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector-simple.yaml}
     ports:
       - "8086:8086"      # Prometheus metrics
       - "8905:8889"      # Internal metrics
@@ -41,7 +41,7 @@ services:
       - ./config:/etc/otel:ro
       - ../../shared/config:/etc/shared:ro
       - ./logs:/tmp/logs
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-mock-replication.yaml}"]
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-simple.yaml}"]
     networks:
       - db-intelligence
     deploy:

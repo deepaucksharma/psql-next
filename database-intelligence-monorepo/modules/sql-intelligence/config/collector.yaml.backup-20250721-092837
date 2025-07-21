@@ -1,0 +1,704 @@
+# SQL Intelligence - Ultra-Comprehensive Configuration
+# Pushes boundaries of OpenTelemetry + MySQL for maximum New Relic value
+# Single source of truth for all SQL intelligence collection
+
+# =====================================================
+# RECEIVERS - Advanced MySQL Performance Schema Queries
+# =====================================================
+
+receivers:
+  # Ultra-comprehensive query analysis with CTEs
+  sqlquery/comprehensive_analysis:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 60s  # Increased from 30s to reduce MySQL load
+    queries:
+      - sql: |
+          WITH 
+          -- Core query statistics
+          query_stats AS (
+            SELECT 
+              DIGEST,
+              DIGEST_TEXT,
+              SCHEMA_NAME,
+              COUNT_STAR as executions,
+              COUNT_STAR / (UNIX_TIMESTAMP(MAX(LAST_SEEN)) - UNIX_TIMESTAMP(MIN(FIRST_SEEN)) + 1) as exec_per_sec,
+              UNIX_TIMESTAMP(MAX(LAST_SEEN)) - UNIX_TIMESTAMP(MIN(FIRST_SEEN)) as lifetime_seconds,
+              SUM_TIMER_WAIT/1000000000 as total_time_sec,
+              AVG_TIMER_WAIT/1000000000 as avg_latency_ms,
+              MAX_TIMER_WAIT/1000000000 as max_latency_ms,
+              MIN_TIMER_WAIT/1000000000 as min_latency_ms,
+              QUANTILE_95/1000000000 as p95_latency_ms,
+              QUANTILE_99/1000000000 as p99_latency_ms,
+              QUANTILE_999/1000000000 as p999_latency_ms,
+              SUM_ROWS_EXAMINED as rows_examined_total,
+              SUM_ROWS_SENT as rows_sent_total,
+              SUM_ROWS_AFFECTED as rows_affected_total,
+              CASE 
+                WHEN SUM_ROWS_SENT > 0 
+                THEN SUM_ROWS_EXAMINED / SUM_ROWS_SENT 
+                ELSE 999999 
+              END as examination_ratio,
+              SUM_NO_INDEX_USED as no_index_used_count,
+              SUM_NO_GOOD_INDEX_USED as no_good_index_count,
+              CASE 
+                WHEN COUNT_STAR > 0 
+                THEN ((COUNT_STAR - SUM_NO_INDEX_USED) / COUNT_STAR) * 100
+                ELSE 100 
+              END as index_usage_pct,
+              SUM_CREATED_TMP_DISK_TABLES as tmp_disk_tables,
+              SUM_CREATED_TMP_TABLES as tmp_tables,
+              CASE 
+                WHEN COUNT_STAR > 0 
+                THEN (SUM_CREATED_TMP_DISK_TABLES / COUNT_STAR) * 100
+                ELSE 0 
+              END as disk_tmp_table_pct,
+              SUM_SORT_MERGE_PASSES as sort_merge_passes,
+              SUM_SORT_ROWS as sort_rows,
+              SUM_SELECT_FULL_JOIN as full_joins,
+              SUM_SELECT_SCAN as full_scans,
+              FIRST_SEEN,
+              LAST_SEEN
+            FROM performance_schema.events_statements_summary_by_digest
+            WHERE SCHEMA_NAME IS NOT NULL
+              AND DIGEST_TEXT NOT LIKE '%performance_schema%'
+              AND DIGEST_TEXT NOT LIKE '%information_schema%'
+          ),
+          
+          -- Currently executing queries
+          current_queries AS (
+            SELECT 
+              DIGEST,
+              COUNT(*) as concurrent_count,
+              MAX(TIME) as max_runtime_sec,
+              GROUP_CONCAT(DISTINCT PROCESSLIST_HOST) as active_hosts,
+              PROCESSLIST_ID,
+              PROCESSLIST_TIME,
+              PROCESSLIST_HOST
+            FROM performance_schema.threads t
+            JOIN performance_schema.events_statements_current c ON t.THREAD_ID = c.THREAD_ID
+            WHERE t.PROCESSLIST_ID IS NOT NULL
+              AND t.PROCESSLIST_COMMAND != 'Sleep'
+            GROUP BY DIGEST, PROCESSLIST_ID, PROCESSLIST_TIME, PROCESSLIST_HOST
+          ),
+          
+          -- Execution plan cost estimation
+          plan_costs AS (
+            SELECT 
+              q.DIGEST,
+              q.executions,
+              q.avg_latency_ms,
+              q.examination_ratio,
+              q.index_usage_pct,
+              q.disk_tmp_table_pct,
+              -- Calculate composite cost score (0-100, higher is worse)
+              LEAST(100, 
+                (q.avg_latency_ms / 10) * 0.3 +  -- Latency impact (max 30 points)
+                (LOG10(GREATEST(q.examination_ratio, 1)) * 10) * 0.3 +  -- Efficiency impact (max 30 points)
+                ((100 - q.index_usage_pct) / 100 * 40) * 0.2 +  -- Index impact (max 20 points)
+                (q.disk_tmp_table_pct / 100 * 20) * 0.2  -- Temp table impact (max 20 points)
+              ) as query_cost_score,
+              -- Determine optimization potential
+              CASE
+                WHEN q.examination_ratio > 1000 THEN 'very_high'
+                WHEN q.examination_ratio > 100 THEN 'high'
+                WHEN q.examination_ratio > 10 THEN 'medium'
+                ELSE 'low'
+              END as optimization_potential
+            FROM query_stats q
+          )
+          
+          -- Final comprehensive output
+          SELECT 
+            -- Query identification
+            q.DIGEST,
+            q.DIGEST_TEXT,
+            q.SCHEMA_NAME,
+            
+            -- Execution metrics
+            q.executions,
+            q.exec_per_sec,
+            q.lifetime_seconds,
+            q.total_time_sec,
+            q.avg_latency_ms,
+            q.max_latency_ms,
+            q.min_latency_ms,
+            q.p95_latency_ms,
+            q.p99_latency_ms,
+            q.p999_latency_ms,
+            
+            -- Row processing metrics
+            q.rows_examined_total,
+            q.rows_sent_total,
+            q.rows_affected_total,
+            q.examination_ratio,
+            
+            -- Index metrics
+            q.no_index_used_count,
+            q.no_good_index_count,
+            q.index_usage_pct,
+            
+            -- Temp table metrics
+            q.tmp_disk_tables,
+            q.tmp_tables,
+            q.disk_tmp_table_pct,
+            
+            -- Sort metrics
+            q.sort_merge_passes,
+            q.sort_rows,
+            
+            -- Join metrics
+            q.full_joins,
+            q.full_scans,
+            
+            -- Timestamps
+            q.FIRST_SEEN,
+            q.LAST_SEEN,
+            
+            -- Cost analysis
+            pc.query_cost_score,
+            pc.optimization_potential,
+            
+            -- Intelligence recommendations
+            CASE
+              WHEN pc.query_cost_score > 80 THEN 'critical_optimization_required'
+              WHEN pc.query_cost_score > 60 THEN 'high_optimization_recommended'
+              WHEN pc.query_cost_score > 40 THEN 'medium_optimization_suggested'
+              WHEN pc.query_cost_score > 20 THEN 'low_optimization_possible'
+              ELSE 'well_optimized'
+            END as recommendation_level,
+            
+            -- Specific recommendations
+            CONCAT_WS('; ',
+              CASE WHEN q.no_index_used_count > q.executions * 0.5 
+                   THEN 'ADD INDEX: Query frequently scans without index' 
+                   ELSE NULL END,
+              CASE WHEN q.examination_ratio > 100 
+                   THEN CONCAT('OPTIMIZE: Query examines ', ROUND(q.examination_ratio), 'x more rows than needed')
+                   ELSE NULL END,
+              CASE WHEN q.disk_tmp_table_pct > 10 
+                   THEN 'MEMORY: Increase tmp_table_size to avoid disk usage'
+                   ELSE NULL END,
+              CASE WHEN q.full_joins > 0 
+                   THEN 'JOIN: Cartesian product detected, review JOIN conditions'
+                   ELSE NULL END,
+              CASE WHEN q.avg_latency_ms > 1000 
+                   THEN CONCAT('LATENCY: Average ', ROUND(q.avg_latency_ms), 'ms exceeds SLA')
+                   ELSE NULL END
+            ) as specific_recommendations,
+            
+            -- Business impact score (0-100)
+            LEAST(100,
+              (q.exec_per_sec * 10) +  -- Frequency impact
+              (q.avg_latency_ms / 100) +  -- Latency impact
+              (pc.query_cost_score / 2)  -- Efficiency impact
+            ) as business_impact_score,
+            
+            -- Current execution context (if running)
+            COUNT(cq.PROCESSLIST_ID) as currently_running_count,
+            MAX(cq.PROCESSLIST_TIME) as max_current_runtime_sec,
+            GROUP_CONCAT(DISTINCT cq.PROCESSLIST_HOST) as active_hosts
+            
+          FROM query_stats q
+          JOIN plan_costs pc ON q.DIGEST = pc.DIGEST
+          LEFT JOIN current_queries cq ON q.DIGEST = cq.DIGEST
+          GROUP BY q.DIGEST
+          HAVING 
+            -- Focus on impactful queries
+            q.total_time_sec > 1  -- At least 1 second total time
+            OR q.executions > 100  -- Or frequently executed
+            OR pc.query_cost_score > 40  -- Or inefficient
+            OR currently_running_count > 0  -- Or currently running
+          ORDER BY 
+            business_impact_score DESC,
+            q.total_time_sec DESC
+          LIMIT 200
+        
+        metrics:
+          - metric_name: mysql.query.intelligence.comprehensive
+            value_column: "query_cost_score"
+            data_type: gauge
+            value_type: double
+            attribute_columns: [
+              DIGEST, DIGEST_TEXT, SCHEMA_NAME, executions, exec_per_sec,
+              avg_latency_ms, p95_latency_ms, p99_latency_ms,
+              examination_ratio, index_usage_pct, disk_tmp_table_pct,
+              optimization_potential, recommendation_level, specific_recommendations,
+              business_impact_score, currently_running_count
+            ]
+
+  # Table access pattern intelligence
+  sqlquery/access_patterns:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 60s
+    queries:
+      - sql: |
+          WITH time_windows AS (
+            SELECT 
+              OBJECT_SCHEMA,
+              OBJECT_NAME,
+              COUNT_READ,
+              COUNT_WRITE,
+              SUM_TIMER_READ/1000000000 as read_latency_sec,
+              SUM_TIMER_WRITE/1000000000 as write_latency_sec,
+              CURRENT_TIMESTAMP as snapshot_time,
+              HOUR(CURRENT_TIMESTAMP) as hour_of_day,
+              DAYOFWEEK(CURRENT_TIMESTAMP) as day_of_week
+            FROM performance_schema.table_io_waits_summary_by_table
+            WHERE OBJECT_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+          )
+          SELECT 
+            OBJECT_SCHEMA,
+            OBJECT_NAME,
+            COUNT_READ as current_reads,
+            COUNT_WRITE as current_writes,
+            read_latency_sec,
+            write_latency_sec,
+            hour_of_day,
+            day_of_week,
+            -- Access pattern classification
+            CASE 
+              WHEN hour_of_day BETWEEN 9 AND 17 THEN 'business_hours'
+              WHEN hour_of_day BETWEEN 0 AND 6 THEN 'maintenance_window'
+              ELSE 'off_hours'
+            END as time_category,
+            -- Workload type
+            CASE
+              WHEN COUNT_WRITE > COUNT_READ * 3 THEN 'write_intensive'
+              WHEN COUNT_READ > COUNT_WRITE * 3 THEN 'read_intensive'
+              WHEN COUNT_READ + COUNT_WRITE < 100 THEN 'low_activity'
+              ELSE 'mixed_workload'
+            END as workload_type,
+            -- Calculate IOPS
+            (COUNT_READ + COUNT_WRITE) / 60 as iops_estimate
+          FROM time_windows
+          WHERE COUNT_READ + COUNT_WRITE > 0
+        
+        metrics:
+          - metric_name: mysql.table.access_patterns
+            value_column: "iops_estimate"
+            data_type: gauge
+            value_type: double
+            attribute_columns: [
+              OBJECT_SCHEMA, OBJECT_NAME, current_reads, current_writes,
+              read_latency_sec, write_latency_sec, time_category, workload_type
+            ]
+
+  # Index effectiveness analysis
+  sqlquery/index_effectiveness:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/information_schema"
+    collection_interval: 300s
+    queries:
+      - sql: |
+          WITH index_stats AS (
+            SELECT 
+              s.TABLE_SCHEMA,
+              s.TABLE_NAME,
+              s.INDEX_NAME,
+              s.COLUMN_NAME,
+              s.CARDINALITY,
+              s.SEQ_IN_INDEX,
+              s.NULLABLE,
+              s.INDEX_TYPE,
+              t.TABLE_ROWS,
+              t.DATA_LENGTH,
+              t.INDEX_LENGTH,
+              -- Index selectivity
+              CASE 
+                WHEN t.TABLE_ROWS > 0 
+                THEN (s.CARDINALITY / t.TABLE_ROWS) * 100
+                ELSE 0 
+              END as selectivity_pct,
+              -- Index size efficiency
+              CASE 
+                WHEN t.DATA_LENGTH > 0
+                THEN (t.INDEX_LENGTH / t.DATA_LENGTH) * 100
+                ELSE 0
+              END as index_size_ratio_pct
+            FROM information_schema.STATISTICS s
+            JOIN information_schema.TABLES t 
+              ON s.TABLE_SCHEMA = t.TABLE_SCHEMA 
+              AND s.TABLE_NAME = t.TABLE_NAME
+            WHERE s.TABLE_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+              AND s.SEQ_IN_INDEX = 1  -- First column only for main stats
+          ),
+          usage_stats AS (
+            SELECT 
+              OBJECT_SCHEMA,
+              OBJECT_NAME,
+              INDEX_NAME,
+              COUNT_STAR as usage_count,
+              COUNT_READ as read_count,
+              COUNT_WRITE as write_count
+            FROM performance_schema.table_io_waits_summary_by_index_usage
+            WHERE OBJECT_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+              AND INDEX_NAME IS NOT NULL
+          )
+          SELECT 
+            i.TABLE_SCHEMA,
+            i.TABLE_NAME,
+            i.INDEX_NAME,
+            i.COLUMN_NAME,
+            i.CARDINALITY,
+            i.TABLE_ROWS,
+            i.selectivity_pct,
+            i.index_size_ratio_pct,
+            i.INDEX_TYPE,
+            COALESCE(u.usage_count, 0) as usage_count,
+            COALESCE(u.read_count, 0) as read_count,
+            COALESCE(u.write_count, 0) as write_count,
+            -- Index effectiveness score
+            CASE
+              WHEN COALESCE(u.usage_count, 0) = 0 THEN 0  -- Unused index
+              WHEN i.selectivity_pct > 95 THEN 100  -- Highly selective
+              WHEN i.selectivity_pct > 80 THEN 80   -- Good selectivity
+              WHEN i.selectivity_pct > 50 THEN 60   -- Moderate selectivity
+              ELSE 40  -- Poor selectivity
+            END as effectiveness_score,
+            -- Recommendations
+            CASE
+              WHEN COALESCE(u.usage_count, 0) = 0 AND i.INDEX_NAME != 'PRIMARY' 
+                THEN 'CONSIDER_DROPPING: Index never used'
+              WHEN i.selectivity_pct < 30 AND i.INDEX_NAME != 'PRIMARY'
+                THEN 'LOW_SELECTIVITY: Index may not be effective'
+              WHEN i.index_size_ratio_pct > 50
+                THEN 'LARGE_INDEX: Consider index size optimization'
+              ELSE 'OK'
+            END as index_recommendation
+          FROM index_stats i
+          LEFT JOIN usage_stats u 
+            ON i.TABLE_SCHEMA = u.OBJECT_SCHEMA 
+            AND i.TABLE_NAME = u.OBJECT_NAME 
+            AND i.INDEX_NAME = u.INDEX_NAME
+          ORDER BY effectiveness_score ASC, usage_count DESC
+        
+        metrics:
+          - metric_name: mysql.index.effectiveness
+            value_column: "effectiveness_score"
+            data_type: gauge
+            value_type: double
+            attribute_columns: [
+              TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, COLUMN_NAME,
+              selectivity_pct, usage_count, index_recommendation
+            ]
+
+  # Lock wait analysis
+  sqlquery/lock_analysis:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 15s
+    queries:
+      - sql: |
+          SELECT 
+            OBJECT_SCHEMA,
+            OBJECT_NAME,
+            COUNT_READ as read_locks,
+            COUNT_WRITE as write_locks,
+            SUM_TIMER_READ/1000000000 as read_lock_wait_sec,
+            SUM_TIMER_WRITE/1000000000 as write_lock_wait_sec,
+            -- Lock contention score
+            CASE
+              WHEN COUNT_READ + COUNT_WRITE > 0
+              THEN (SUM_TIMER_READ + SUM_TIMER_WRITE) / (COUNT_READ + COUNT_WRITE) / 1000000
+              ELSE 0
+            END as avg_lock_wait_ms,
+            -- Contention level
+            CASE
+              WHEN (SUM_TIMER_READ + SUM_TIMER_WRITE) / 1000000000 > 10 THEN 'critical'
+              WHEN (SUM_TIMER_READ + SUM_TIMER_WRITE) / 1000000000 > 5 THEN 'high'
+              WHEN (SUM_TIMER_READ + SUM_TIMER_WRITE) / 1000000000 > 1 THEN 'medium'
+              ELSE 'low'
+            END as contention_level
+          FROM performance_schema.table_lock_waits_summary_by_table
+          WHERE OBJECT_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+            AND (COUNT_READ > 0 OR COUNT_WRITE > 0)
+            AND (SUM_TIMER_READ > 0 OR SUM_TIMER_WRITE > 0)
+          ORDER BY (SUM_TIMER_READ + SUM_TIMER_WRITE) DESC
+        
+        metrics:
+          - metric_name: mysql.lock.contention
+            value_column: "avg_lock_wait_ms"
+            data_type: gauge
+            value_type: double
+            attribute_columns: [
+              OBJECT_SCHEMA, OBJECT_NAME, read_locks, write_locks,
+              read_lock_wait_sec, write_lock_wait_sec, contention_level
+            ]
+
+  # Core MySQL metrics (standard)
+  mysql:
+    endpoint: ${env:MYSQL_ENDPOINT}
+    username: ${env:MYSQL_USER}
+    password: ${env:MYSQL_PASSWORD}
+    collection_interval: 10s
+    initial_delay: 1s
+
+  # Prometheus scraping for federated metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'sql-intelligence-self'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['localhost:8082']
+
+  # OTLP receiver for external data
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+# =====================================================
+# PROCESSORS - Advanced Intelligence Pipeline
+# =====================================================
+
+processors:
+  # Stage 1: Resource protection (always first)
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+
+  # Stage 2: Batching for efficiency
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+    send_batch_max_size: 2000
+
+  # Stage 3: Context enrichment
+  attributes:
+    actions:
+      - key: service.name
+        value: "sql-intelligence"
+        action: insert
+      - key: service.version
+        value: "2.0.0"
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT}
+        action: insert
+      - key: cluster.name
+        value: ${env:CLUSTER_NAME}
+        action: insert
+
+  resource:
+    attributes:
+      - key: mysql.endpoint
+        value: ${env:MYSQL_ENDPOINT}
+        action: insert
+      - key: mysql.version
+        from_attribute: mysql.version
+        action: insert
+
+  # Stage 4: Advanced query intelligence (simplified for compatibility)
+  # TODO: Re-enable advanced transforms after OTTL syntax validation
+  # transform/query_intelligence:
+  #   error_mode: ignore
+  #   metric_statements:
+  #     - context: datapoint
+  #       statements:
+  #         - set(attributes["analysis_version"], "2.0")
+  
+  # Stage 5: Predictive analysis (disabled for compatibility)
+  # TODO: Re-enable after OTTL syntax validation
+  # transform/predictive_intelligence:
+  #   error_mode: ignore
+  #   metric_statements:
+  #     - context: datapoint
+  #       statements:
+  #         - set(attributes["risk_assessment"], "enabled")
+
+  # Stage 6: Metric standardization
+  metricstransform/standardize:
+    transforms:
+      # Rename to follow pattern: mysql.<object>.<measurement>.<unit>
+      - include: mysql.query.intelligence.comprehensive
+        new_name: mysql.query.cost.score
+        action: update
+      
+      - include: mysql.table.access_patterns
+        new_name: mysql.table.iops.estimate
+        action: update
+      
+      - include: mysql.index.effectiveness
+        new_name: mysql.index.effectiveness.score
+        action: update
+      
+      - include: mysql.lock.contention
+        new_name: mysql.lock.wait.milliseconds
+        action: update
+
+  # Stage 7: New Relic integration
+  attributes/newrelic:
+    actions:
+      - key: instrumentation.provider
+        value: "opentelemetry"
+        action: insert
+      - key: collector.module
+        value: "sql-intelligence"
+        action: insert
+      - key: newrelic.source
+        value: "mysql.performance_schema"
+        action: insert
+
+  # Stage 8: Entity synthesis
+  attributes/entity_synthesis:
+    actions:
+      - key: entity.type
+        value: "MYSQL_QUERY_INTELLIGENCE"
+        action: insert
+      
+      # Extract host and port dynamically
+      - key: db.system
+        value: "mysql"
+        action: insert
+      
+      - key: entity.guid
+        value: MYSQL_QUERY_INTEL|${env:CLUSTER_NAME}|${env:MYSQL_ENDPOINT}
+        action: insert
+      
+      - key: entity.name
+        value: "${env:CLUSTER_NAME}-sql-intelligence"
+        action: insert
+
+  # Stage 9: Priority filtering (simplified for compatibility)
+  filter/critical:
+    error_mode: ignore
+    metrics:
+      include:
+        match_type: regexp
+        metric_names:
+          - "mysql\\.query\\..*"
+          - "mysql\\.lock\\..*"
+
+# =====================================================
+# EXPORTERS - Multi-tier export strategy
+# =====================================================
+
+exporters:
+  # Primary New Relic exporter
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 5
+      queue_size: 1000
+
+  # Priority lane for critical metrics
+  otlphttp/newrelic_priority:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      X-Priority: "high"
+    compression: none  # Speed over size
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+
+  # Alert file for critical issues
+  file/alerts:
+    path: /tmp/sql-intelligence/critical-queries.json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 5
+    format: json
+
+  # Prometheus for federation
+  prometheus:
+    endpoint: "0.0.0.0:8082"
+    namespace: mysql
+    send_timestamps: true
+    enable_open_metrics: true
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Debug for development
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+# =====================================================
+# EXTENSIONS - Monitoring and profiling
+# =====================================================
+
+extensions:
+  # WARNING: Health check endpoint intentionally REMOVED
+  # This is a deliberate security decision
+  # DO NOT add health_check extension
+  # Use Prometheus metrics endpoint (port 8082) for monitoring
+
+  # Performance profiling
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+# =====================================================
+# SERVICE - Pipeline configuration
+# =====================================================
+
+service:
+  extensions: [pprof]
+  
+  pipelines:
+    # Single unified pipeline (no duplication)
+    metrics:
+      receivers: [
+        mysql,
+        sqlquery/comprehensive_analysis,
+        sqlquery/access_patterns,
+        sqlquery/index_effectiveness,
+        sqlquery/lock_analysis,
+        prometheus,
+        otlp
+      ]
+      processors: [
+        memory_limiter,
+        batch,
+        attributes,
+        resource,
+        metricstransform/standardize,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic, prometheus, debug]
+    
+    # Priority pipeline for critical metrics
+    metrics/critical:
+      receivers: [
+        mysql,
+        sqlquery/comprehensive_analysis,
+        sqlquery/lock_analysis
+      ]
+      processors: [
+        memory_limiter,
+        batch,
+        filter/critical,
+        attributes/newrelic,
+        attributes/entity_synthesis
+      ]
+      exporters: [otlphttp/newrelic_priority, file/alerts]
+  
+  telemetry:
+    logs:
+      level: info
+      output_paths: [stdout]

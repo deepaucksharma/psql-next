@@ -1,0 +1,108 @@
+# Replication Monitor - Simple Test Configuration
+# Basic configuration without requiring actual replication setup
+
+receivers:
+  # Test MySQL instance monitoring
+  mysql:
+    endpoint: ${env:MYSQL_ENDPOINT:-mysql:3306}
+    username: ${env:MYSQL_USER:-root}
+    password: ${env:MYSQL_PASSWORD:-test}
+    collection_interval: 10s
+    transport: tcp
+
+  # Basic replication queries
+  sqlquery/replication:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-test}@tcp(${env:MYSQL_ENDPOINT:-mysql:3306})/information_schema"
+    collection_interval: 30s
+    queries:
+      # Basic server info
+      - sql: |
+          SELECT 
+            @@server_id as server_id,
+            @@server_uuid as server_uuid,
+            @@version as version,
+            @@hostname as hostname
+        metrics:
+          - metric_name: replication.server.info
+            value_column: server_id
+            value_type: int
+            attribute_columns: ["server_uuid", "version", "hostname"]
+      
+      # Binary log status
+      - sql: |
+          SELECT 
+            @@log_bin as log_bin_enabled,
+            @@binlog_format as binlog_format,
+            @@sync_binlog as sync_binlog
+        metrics:
+          - metric_name: replication.binlog.enabled
+            value_column: log_bin_enabled
+            value_type: int
+            attribute_columns: ["binlog_format"]
+          - metric_name: replication.binlog.sync_setting
+            value_column: sync_binlog
+            value_type: int
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+  
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+  
+  # Add module attributes
+  attributes:
+    actions:
+      - key: module
+        value: replication-monitor
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT:-test}
+        action: insert
+  
+  # Resource processor
+  resource:
+    attributes:
+      - key: service.name
+        value: replication-monitor
+        action: upsert
+
+exporters:
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+  
+  # Prometheus exporter
+  prometheus:
+    endpoint: 0.0.0.0:8086
+
+extensions:
+  # WARNING: DO NOT ADD health_check extension here!
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  # WARNING: DO NOT ADD health_check to extensions list!
+  extensions: [pprof, zpages]
+  
+  pipelines:
+    metrics:
+      receivers: [mysql, sqlquery/replication]
+      processors: [memory_limiter, batch, attributes, resource]
+      exporters: [debug, prometheus]
+  
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      initial_fields:
+        service: replication-monitor

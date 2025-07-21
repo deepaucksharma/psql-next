@@ -1,16 +1,12 @@
 version: '3.8'
 
 services:
-  otel-collector:
+  resource-monitor:
     # WARNING: DO NOT ADD healthcheck section here!
     # Health checks have been intentionally removed from production Docker configs.
-    # Use shared/validation/health-check-all.sh for validation purposes.
-    # See shared/validation/README-health-check.md for details.
     
-    build: .
-    container_name: resource-monitor-collector
-    env_file:
-      - ../../shared/config/service-endpoints.env
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: resource-monitor-otel
     environment:
       MODULE_NAME: resource-monitor
       MYSQL_ENDPOINT: ${MYSQL_ENDPOINT:-mysql-test:3306}
@@ -32,37 +28,21 @@ services:
       HOST_VAR: /host/var
       HOST_RUN: /host/run
       HOST_DEV: /host/dev
-      # Resource thresholds
-      CPU_THRESHOLD_WARNING: "70"
-      CPU_THRESHOLD_CRITICAL: "85"
-      MEMORY_THRESHOLD_WARNING: "75"
-      MEMORY_THRESHOLD_CRITICAL: "90"
-      DISK_THRESHOLD_WARNING: "80"
-      DISK_THRESHOLD_CRITICAL: "95"
-      # Override specific endpoints if needed
-      COLLECTOR_CONFIG: ${COLLECTOR_CONFIG:-collector-simple.yaml}
     ports:
       - "8088:8088"     # Module export port
-      - "8904:8889"     # Internal metrics (changed from 8894 to avoid conflict)
-      - "4331:4317"     # OTLP gRPC receiver (changed from 4325)
-      - "4332:4318"     # OTLP HTTP receiver (changed from 4326)
+      - "8904:8889"     # Internal metrics
+      - "4331:4317"     # OTLP gRPC receiver
+      - "4332:4318"     # OTLP HTTP receiver
       - "55686:55679"   # ZPages
       - "1782:1777"     # pprof
       # WARNING: DO NOT expose port 13133 (health check port)!
-      # Health check ports have been intentionally removed.
     volumes:
       - ./config:/etc/otel:ro
-      - ../../shared/config:/etc/shared:ro
       - ./logs:/tmp/logs
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /etc/hostname:/etc/hostname:ro
-      - resource_metrics:/tmp/resource-metrics
-      - resource_monitor_queue_standard:/tmp/resource-monitor-queue-standard
-      - resource_monitor_queue_critical:/tmp/resource-monitor-queue-critical
-    networks:
-      - db-intelligence
     privileged: true
     pid: host
     command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-simple.yaml}"]
@@ -74,15 +54,3 @@ services:
         reservations:
           memory: 512M
           cpus: '0.5'
-
-volumes:
-  resource_metrics:
-    driver: local
-  resource_monitor_queue_standard:
-    driver: local
-  resource_monitor_queue_critical:
-    driver: local
-
-networks:
-  db-intelligence:
-    driver: bridge

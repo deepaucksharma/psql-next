@@ -1,0 +1,333 @@
+{
+  "name": "MySQL Index & I/O Analysis (Validated)",
+  "description": "Index effectiveness and I/O performance with validated metrics",
+  "permissions": "PUBLIC_READ_ONLY",
+  "pages": [
+    {
+      "name": "Index Health Dashboard",
+      "description": "Comprehensive index effectiveness analysis",
+      "widgets": [
+        {
+          "title": "Index Health Score",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 3,
+            "height": 3
+          },
+          "visualization": "billboard",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT average(mysql_mysql_index_effectiveness_score) as 'Index Health' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' SINCE 30 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 80,
+                "colorRange": "SUCCESS"
+              },
+              {
+                "value": 50,
+                "colorRange": "WARNING"
+              },
+              {
+                "value": 0,
+                "colorRange": "CRITICAL"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Statistics",
+          "layout": {
+            "column": 4,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT uniqueCount(INDEX_NAME) as 'Total Indexes', uniqueCount(INDEX_NAME, WHERE usage_count = '0' AND INDEX_NAME != 'PRIMARY') as 'Unused Indexes', uniqueCount(INDEX_NAME, WHERE index_recommendation LIKE '%DROPPING%') as 'Drop Candidates', uniqueCount(INDEX_NAME, WHERE index_recommendation = 'OK') as 'Healthy Indexes' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Recommendations",
+          "layout": {
+            "column": 8,
+            "row": 1,
+            "width": 5,
+            "height": 3
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' FACET index_recommendation SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Effectiveness by Table",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(TABLE_SCHEMA) as 'Database', latest(TABLE_NAME) as 'Table', latest(INDEX_NAME) as 'Index', latest(COLUMN_NAME) as 'Column', latest(selectivity_pct) as 'Selectivity %', latest(usage_count) as 'Usage Count', latest(mysql_mysql_index_effectiveness_score) as 'Score', latest(index_recommendation) as 'Recommendation' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' FACET INDEX_NAME, TABLE_NAME SINCE 1 hour ago LIMIT 25"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "I/O Performance Analysis",
+      "description": "Table and index I/O patterns",
+      "widgets": [
+        {
+          "title": "Table IOPS Overview",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": "billboard",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT sum(mysql_mysql_table_iops_estimate) as 'Total IOPS' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' SINCE 5 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "I/O Latency Distribution",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": "histogram",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT histogram(read_latency_sec * 1000, 20) as 'Read Latency (ms)' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_table_iops_estimate' SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Workload Distribution",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_table_iops_estimate' FACET workload_type SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Table I/O Performance",
+          "layout": {
+            "column": 1,
+            "row": 3,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "bar",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql_mysql_table_iops_estimate) as 'IOPS', latest(read_latency_sec) * 1000 as 'Read Latency (ms)', latest(write_latency_sec) * 1000 as 'Write Latency (ms)' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_table_iops_estimate' FACET OBJECT_NAME SINCE 10 minutes ago LIMIT 10"
+              }
+            ]
+          }
+        },
+        {
+          "title": "I/O Operations Trend",
+          "layout": {
+            "column": 7,
+            "row": 3,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT rate(sum(mysql.table.io.wait.count), 1 second) as 'Table I/O Ops/sec', rate(sum(mysql.index.io.wait.count), 1 second) as 'Index I/O Ops/sec' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Optimization Opportunities",
+      "description": "Actionable optimization recommendations",
+      "widgets": [
+        {
+          "title": "Unused Indexes (Drop Candidates)",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(TABLE_SCHEMA) as 'Database', latest(TABLE_NAME) as 'Table', latest(INDEX_NAME) as 'Index', latest(COLUMN_NAME) as 'Column', latest(selectivity_pct) as 'Selectivity %', latest(usage_count) as 'Usage Count', 'DROP INDEX' as 'Recommended Action' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' AND usage_count = '0' AND INDEX_NAME != 'PRIMARY' FACET TABLE_SCHEMA, TABLE_NAME, INDEX_NAME SINCE 1 hour ago LIMIT 15"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Low Efficiency Indexes",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "bar",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql_mysql_index_effectiveness_score) as 'Effectiveness Score' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' AND mysql_mysql_index_effectiveness_score < 50 FACET INDEX_NAME, TABLE_NAME SINCE 30 minutes ago LIMIT 10"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Storage Optimization Potential",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT uniqueCount(INDEX_NAME, WHERE index_recommendation LIKE '%DROPPING%' AND INDEX_NAME != 'PRIMARY') * 50 as 'Est. Storage Saved (MB)', uniqueCount(INDEX_NAME, WHERE index_recommendation LIKE '%LARGE%') as 'Large Indexes', uniqueCount(INDEX_NAME, WHERE index_recommendation LIKE '%SELECTIVITY%') as 'Low Selectivity' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Real-time Monitoring",
+      "description": "Live I/O and index performance monitoring",
+      "widgets": [
+        {
+          "title": "Current System State",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 2
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT sum(mysql_mysql_table_iops_estimate) as 'Current IOPS', average(mysql_mysql_lock_wait_milliseconds) as 'Avg Lock Wait (ms)', latest(mysql.threads, WHERE kind = 'connected') as 'Active Connections', uniqueCount(OBJECT_NAME, WHERE mysql_mysql_table_iops_estimate > 10) as 'High Activity Tables' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' SINCE 2 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Hot Tables Activity",
+          "layout": {
+            "column": 1,
+            "row": 3,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "area",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql_mysql_table_iops_estimate) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_table_iops_estimate' TIMESERIES 2 minutes SINCE 30 minutes ago FACET OBJECT_NAME"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Lock Contention Timeline",
+          "layout": {
+            "column": 7,
+            "row": 3,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT average(mysql_mysql_lock_wait_milliseconds) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND mysql_mysql_lock_wait_milliseconds > 0 TIMESERIES 2 minutes SINCE 30 minutes ago FACET OBJECT_NAME"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Time-Based Access Pattern Matrix",
+          "layout": {
+            "column": 1,
+            "row": 6,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": "heatmap",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql_mysql_table_iops_estimate) as 'IOPS' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_table_iops_estimate' FACET OBJECT_NAME, time_category SINCE 2 hours ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

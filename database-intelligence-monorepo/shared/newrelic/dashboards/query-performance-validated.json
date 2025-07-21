@@ -1,0 +1,265 @@
+{
+  "name": "MySQL Query Performance (Validated)",
+  "description": "Detailed analysis of query execution patterns with validated metrics",
+  "permissions": "PUBLIC_READ_ONLY",
+  "pages": [
+    {
+      "name": "Query Operations",
+      "description": "MySQL handler operations and query processing",
+      "widgets": [
+        {
+          "title": "Handler Operations Distribution",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT sum(mysql.handlers) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' FACET kind SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Throughput Trend",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT rate(sum(mysql.handlers), 1 second) as 'QPS' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 2 minutes SINCE 1 hour ago FACET kind"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Prepared Statements Usage",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql.prepared_statements) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Row Operations Analysis",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "area",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT rate(sum(mysql.row_operations), 1 minute) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 5 minutes SINCE 1 hour ago FACET operation"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "I/O Performance",
+      "description": "Table and index I/O analysis",
+      "widgets": [
+        {
+          "title": "Table vs Index I/O Operations",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "area",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT rate(sum(mysql.table.io.wait.count), 1 second) as 'Table I/O', rate(sum(mysql.index.io.wait.count), 1 second) as 'Index I/O' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "I/O Wait Times",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT average(mysql.table.io.wait.time) / 1000000 as 'Table Wait (ms)', average(mysql.index.io.wait.time) / 1000000 as 'Index Wait (ms)' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Table I/O Breakdown by Table",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(OBJECT_NAME) as 'Table', latest(current_reads) as 'Current Reads', latest(current_writes) as 'Current Writes', latest(mysql_mysql_table_iops_estimate) as 'IOPS', latest(read_latency_sec) * 1000 as 'Read Latency (ms)', latest(write_latency_sec) * 1000 as 'Write Latency (ms)', latest(workload_type) as 'Workload Type' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_table_iops_estimate' FACET OBJECT_NAME SINCE 10 minutes ago LIMIT 10"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Lock Analysis",
+      "description": "Database locking patterns and contention",
+      "widgets": [
+        {
+          "title": "Lock Wait Times by Table",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "bar",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql_mysql_lock_wait_milliseconds) as 'Lock Wait (ms)' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' FACET OBJECT_NAME SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Lock Contention Levels",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_lock_wait_milliseconds' FACET contention_level SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Lock Statistics Summary",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 2
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(OBJECT_NAME) as 'Table', latest(read_locks) as 'Read Locks', latest(write_locks) as 'Write Locks', latest(read_lock_wait_sec) * 1000 as 'Read Wait (ms)', latest(write_lock_wait_sec) * 1000 as 'Write Wait (ms)', latest(contention_level) as 'Contention Level' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_lock_wait_milliseconds' FACET OBJECT_NAME SINCE 30 minutes ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance Optimization",
+      "description": "Sort operations and temporary resources",
+      "widgets": [
+        {
+          "title": "Sort Operations",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT rate(sum(mysql.sorts), 1 minute) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 5 minutes SINCE 1 hour ago FACET kind"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Log Operations",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "area",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT rate(sum(mysql.log_operations), 1 minute) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 5 minutes SINCE 1 hour ago FACET operation"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Current Performance Metrics",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 2
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT rate(sum(mysql.handlers), 1 second) as 'Current QPS', latest(mysql.threads, WHERE kind = 'connected') as 'Active Connections', average(mysql_mysql_lock_wait_milliseconds) as 'Avg Lock Wait (ms)', sum(mysql_mysql_table_iops_estimate) as 'Total IOPS' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' SINCE 5 minutes ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

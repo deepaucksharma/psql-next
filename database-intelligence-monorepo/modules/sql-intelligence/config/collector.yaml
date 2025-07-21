@@ -7,224 +7,403 @@
 # =====================================================
 
 receivers:
-  # Ultra-comprehensive query analysis with CTEs
-  sqlquery/comprehensive_analysis:
+  # Enhanced query analysis with comprehensive scoring
+  sqlquery/enhanced_query_analysis:
     driver: mysql
     datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
-    collection_interval: 60s  # Increased from 30s to reduce MySQL load
+    collection_interval: 30s
     queries:
       - sql: |
-          WITH 
-          -- Core query statistics
-          query_stats AS (
-            SELECT 
-              DIGEST,
-              DIGEST_TEXT,
-              SCHEMA_NAME,
-              COUNT_STAR as executions,
-              COUNT_STAR / (UNIX_TIMESTAMP(MAX(LAST_SEEN)) - UNIX_TIMESTAMP(MIN(FIRST_SEEN)) + 1) as exec_per_sec,
-              UNIX_TIMESTAMP(MAX(LAST_SEEN)) - UNIX_TIMESTAMP(MIN(FIRST_SEEN)) as lifetime_seconds,
-              SUM_TIMER_WAIT/1000000000 as total_time_sec,
-              AVG_TIMER_WAIT/1000000000 as avg_latency_ms,
-              MAX_TIMER_WAIT/1000000000 as max_latency_ms,
-              MIN_TIMER_WAIT/1000000000 as min_latency_ms,
-              QUANTILE_95/1000000000 as p95_latency_ms,
-              QUANTILE_99/1000000000 as p99_latency_ms,
-              QUANTILE_999/1000000000 as p999_latency_ms,
-              SUM_ROWS_EXAMINED as rows_examined_total,
-              SUM_ROWS_SENT as rows_sent_total,
-              SUM_ROWS_AFFECTED as rows_affected_total,
-              CASE 
-                WHEN SUM_ROWS_SENT > 0 
-                THEN SUM_ROWS_EXAMINED / SUM_ROWS_SENT 
-                ELSE 999999 
-              END as examination_ratio,
-              SUM_NO_INDEX_USED as no_index_used_count,
-              SUM_NO_GOOD_INDEX_USED as no_good_index_count,
-              CASE 
-                WHEN COUNT_STAR > 0 
-                THEN ((COUNT_STAR - SUM_NO_INDEX_USED) / COUNT_STAR) * 100
-                ELSE 100 
-              END as index_usage_pct,
-              SUM_CREATED_TMP_DISK_TABLES as tmp_disk_tables,
-              SUM_CREATED_TMP_TABLES as tmp_tables,
-              CASE 
-                WHEN COUNT_STAR > 0 
-                THEN (SUM_CREATED_TMP_DISK_TABLES / COUNT_STAR) * 100
-                ELSE 0 
-              END as disk_tmp_table_pct,
-              SUM_SORT_MERGE_PASSES as sort_merge_passes,
-              SUM_SORT_ROWS as sort_rows,
-              SUM_SELECT_FULL_JOIN as full_joins,
-              SUM_SELECT_SCAN as full_scans,
-              FIRST_SEEN,
-              LAST_SEEN
-            FROM performance_schema.events_statements_summary_by_digest
-            WHERE SCHEMA_NAME IS NOT NULL
-              AND DIGEST_TEXT NOT LIKE '%performance_schema%'
-              AND DIGEST_TEXT NOT LIKE '%information_schema%'
-          ),
-          
-          -- Currently executing queries
-          current_queries AS (
-            SELECT 
-              DIGEST,
-              COUNT(*) as concurrent_count,
-              MAX(TIME) as max_runtime_sec,
-              GROUP_CONCAT(DISTINCT PROCESSLIST_HOST) as active_hosts,
-              PROCESSLIST_ID,
-              PROCESSLIST_TIME,
-              PROCESSLIST_HOST
-            FROM performance_schema.threads t
-            JOIN performance_schema.events_statements_current c ON t.THREAD_ID = c.THREAD_ID
-            WHERE t.PROCESSLIST_ID IS NOT NULL
-              AND t.PROCESSLIST_COMMAND != 'Sleep'
-            GROUP BY DIGEST, PROCESSLIST_ID, PROCESSLIST_TIME, PROCESSLIST_HOST
-          ),
-          
-          -- Execution plan cost estimation
-          plan_costs AS (
-            SELECT 
-              q.DIGEST,
-              q.executions,
-              q.avg_latency_ms,
-              q.examination_ratio,
-              q.index_usage_pct,
-              q.disk_tmp_table_pct,
-              -- Calculate composite cost score (0-100, higher is worse)
-              LEAST(100, 
-                (q.avg_latency_ms / 10) * 0.3 +  -- Latency impact (max 30 points)
-                (LOG10(GREATEST(q.examination_ratio, 1)) * 10) * 0.3 +  -- Efficiency impact (max 30 points)
-                ((100 - q.index_usage_pct) / 100 * 40) * 0.2 +  -- Index impact (max 20 points)
-                (q.disk_tmp_table_pct / 100 * 20) * 0.2  -- Temp table impact (max 20 points)
-              ) as query_cost_score,
-              -- Determine optimization potential
-              CASE
-                WHEN q.examination_ratio > 1000 THEN 'very_high'
-                WHEN q.examination_ratio > 100 THEN 'high'
-                WHEN q.examination_ratio > 10 THEN 'medium'
-                ELSE 'low'
-              END as optimization_potential
-            FROM query_stats q
-          )
-          
-          -- Final comprehensive output
           SELECT 
-            -- Query identification
-            q.DIGEST,
-            q.DIGEST_TEXT,
-            q.SCHEMA_NAME,
-            
-            -- Execution metrics
-            q.executions,
-            q.exec_per_sec,
-            q.lifetime_seconds,
-            q.total_time_sec,
-            q.avg_latency_ms,
-            q.max_latency_ms,
-            q.min_latency_ms,
-            q.p95_latency_ms,
-            q.p99_latency_ms,
-            q.p999_latency_ms,
-            
-            -- Row processing metrics
-            q.rows_examined_total,
-            q.rows_sent_total,
-            q.rows_affected_total,
-            q.examination_ratio,
-            
-            -- Index metrics
-            q.no_index_used_count,
-            q.no_good_index_count,
-            q.index_usage_pct,
-            
-            -- Temp table metrics
-            q.tmp_disk_tables,
-            q.tmp_tables,
-            q.disk_tmp_table_pct,
-            
-            -- Sort metrics
-            q.sort_merge_passes,
-            q.sort_rows,
-            
-            -- Join metrics
-            q.full_joins,
-            q.full_scans,
-            
-            -- Timestamps
-            q.FIRST_SEEN,
-            q.LAST_SEEN,
-            
-            -- Cost analysis
-            pc.query_cost_score,
-            pc.optimization_potential,
-            
-            -- Intelligence recommendations
+            DIGEST,
+            SCHEMA_NAME,
+            DIGEST_TEXT,
+            COUNT_STAR as executions,
+            AVG_TIMER_WAIT/1000000000 as avg_latency_ms,
+            SUM_TIMER_WAIT/1000000000 as total_time_sec,
+            MAX_TIMER_WAIT/1000000000 as max_latency_ms,
+            MIN_TIMER_WAIT/1000000000 as min_latency_ms,
+            SUM_ROWS_EXAMINED as rows_examined,
+            SUM_ROWS_SENT as rows_sent,
+            SUM_ROWS_AFFECTED as rows_affected,
+            CASE 
+              WHEN SUM_ROWS_SENT > 0 
+              THEN SUM_ROWS_EXAMINED / SUM_ROWS_SENT 
+              ELSE 0 
+            END as examination_ratio,
+            SUM_NO_INDEX_USED as no_index_used,
+            SUM_NO_GOOD_INDEX_USED as no_good_index_used,
+            CASE 
+              WHEN COUNT_STAR > 0 
+              THEN ((COUNT_STAR - SUM_NO_INDEX_USED) / COUNT_STAR) * 100
+              ELSE 100 
+            END as index_usage_pct,
+            SUM_CREATED_TMP_DISK_TABLES as tmp_disk_tables,
+            SUM_CREATED_TMP_TABLES as tmp_tables,
+            CASE 
+              WHEN COUNT_STAR > 0 
+              THEN (SUM_CREATED_TMP_DISK_TABLES / COUNT_STAR) * 100
+              ELSE 0 
+            END as disk_tmp_table_pct,
+            SUM_SORT_MERGE_PASSES as sort_merge_passes,
+            SUM_SORT_ROWS as sort_rows,
+            SUM_SELECT_FULL_JOIN as full_joins,
+            SUM_SELECT_SCAN as full_table_scans,
+            SUM_SORT_SCAN as sort_scans,
+            -- Enhanced cost score calculation (0-100, higher is worse)
+            LEAST(100, 
+              -- Latency factor (0-35 points)
+              (AVG_TIMER_WAIT/1000000000 / 10) * 0.35 +  
+              -- Efficiency factor (0-30 points)  
+              (CASE 
+                WHEN SUM_ROWS_SENT > 0 
+                THEN LOG10(GREATEST(SUM_ROWS_EXAMINED / SUM_ROWS_SENT, 1)) * 3
+                ELSE 0 
+              END) * 0.30 +  
+              -- Index usage factor (0-20 points)
+              (SUM_NO_INDEX_USED / GREATEST(COUNT_STAR, 1) * 100) * 0.20 +
+              -- Temporary table factor (0-10 points)
+              (CASE 
+                WHEN COUNT_STAR > 0 
+                THEN (SUM_CREATED_TMP_DISK_TABLES / COUNT_STAR) * 100 * 0.10
+                ELSE 0 
+              END) +
+              -- Full scan penalty (0-5 points)
+              (SUM_SELECT_SCAN / GREATEST(COUNT_STAR, 1) * 100) * 0.05
+            ) as query_cost_score,
+            -- Performance tier classification
             CASE
-              WHEN pc.query_cost_score > 80 THEN 'critical_optimization_required'
-              WHEN pc.query_cost_score > 60 THEN 'high_optimization_recommended'
-              WHEN pc.query_cost_score > 40 THEN 'medium_optimization_suggested'
-              WHEN pc.query_cost_score > 20 THEN 'low_optimization_possible'
-              ELSE 'well_optimized'
-            END as recommendation_level,
-            
-            -- Specific recommendations
-            CONCAT_WS('; ',
-              CASE WHEN q.no_index_used_count > q.executions * 0.5 
-                   THEN 'ADD INDEX: Query frequently scans without index' 
-                   ELSE NULL END,
-              CASE WHEN q.examination_ratio > 100 
-                   THEN CONCAT('OPTIMIZE: Query examines ', ROUND(q.examination_ratio), 'x more rows than needed')
-                   ELSE NULL END,
-              CASE WHEN q.disk_tmp_table_pct > 10 
-                   THEN 'MEMORY: Increase tmp_table_size to avoid disk usage'
-                   ELSE NULL END,
-              CASE WHEN q.full_joins > 0 
-                   THEN 'JOIN: Cartesian product detected, review JOIN conditions'
-                   ELSE NULL END,
-              CASE WHEN q.avg_latency_ms > 1000 
-                   THEN CONCAT('LATENCY: Average ', ROUND(q.avg_latency_ms), 'ms exceeds SLA')
-                   ELSE NULL END
-            ) as specific_recommendations,
-            
-            -- Business impact score (0-100)
+              WHEN (AVG_TIMER_WAIT/1000000000) > 1000 THEN 'critical'
+              WHEN (AVG_TIMER_WAIT/1000000000) > 100 THEN 'slow'
+              WHEN (AVG_TIMER_WAIT/1000000000) > 10 THEN 'moderate'
+              ELSE 'fast'
+            END as performance_tier,
+            -- Query pattern classification
+            CASE
+              WHEN DIGEST_TEXT LIKE 'SELECT%' AND SUM_ROWS_AFFECTED = 0 THEN 'read_heavy'
+              WHEN DIGEST_TEXT LIKE 'INSERT%' OR DIGEST_TEXT LIKE 'UPDATE%' OR DIGEST_TEXT LIKE 'DELETE%' THEN 'write_heavy'
+              WHEN DIGEST_TEXT LIKE 'CREATE%' OR DIGEST_TEXT LIKE 'DROP%' OR DIGEST_TEXT LIKE 'ALTER%' THEN 'ddl'
+              ELSE 'mixed'
+            END as query_pattern,
+            -- Optimization priority scoring
+            CASE
+              WHEN COUNT_STAR > 100 AND (AVG_TIMER_WAIT/1000000000) > 100 THEN 'critical'
+              WHEN COUNT_STAR > 50 AND (SUM_NO_INDEX_USED / COUNT_STAR) > 0.5 THEN 'high'
+              WHEN (SUM_ROWS_EXAMINED / GREATEST(SUM_ROWS_SENT, 1)) > 10 THEN 'medium'
+              ELSE 'low'
+            END as optimization_priority,
+            -- Enhanced business impact calculation
             LEAST(100,
-              (q.exec_per_sec * 10) +  -- Frequency impact
-              (q.avg_latency_ms / 100) +  -- Latency impact
-              (pc.query_cost_score / 2)  -- Efficiency impact
-            ) as business_impact_score,
-            
-            -- Current execution context (if running)
-            COUNT(cq.PROCESSLIST_ID) as currently_running_count,
-            MAX(cq.PROCESSLIST_TIME) as max_current_runtime_sec,
-            GROUP_CONCAT(DISTINCT cq.PROCESSLIST_HOST) as active_hosts
-            
-          FROM query_stats q
-          JOIN plan_costs pc ON q.DIGEST = pc.DIGEST
-          LEFT JOIN current_queries cq ON q.DIGEST = cq.DIGEST
-          GROUP BY q.DIGEST
-          HAVING 
-            -- Focus on impactful queries
-            q.total_time_sec > 1  -- At least 1 second total time
-            OR q.executions > 100  -- Or frequently executed
-            OR pc.query_cost_score > 40  -- Or inefficient
-            OR currently_running_count > 0  -- Or currently running
-          ORDER BY 
-            business_impact_score DESC,
-            q.total_time_sec DESC
-          LIMIT 200
+              -- Frequency weight (0-40 points)
+              (COUNT_STAR / 60) * 0.40 +  
+              -- Latency weight (0-30 points)
+              (AVG_TIMER_WAIT/1000000000 / 100) * 0.30 +  
+              -- Resource consumption weight (0-20 points)
+              ((SUM_ROWS_EXAMINED + SUM_SORT_ROWS) / 10000) * 0.20 +
+              -- Inefficiency penalty (0-10 points)
+              (SUM_NO_INDEX_USED / GREATEST(COUNT_STAR, 1) * 100) * 0.10
+            ) as business_impact_score
+          FROM performance_schema.events_statements_summary_by_digest
+          WHERE SCHEMA_NAME IS NOT NULL
+            AND DIGEST_TEXT NOT LIKE '%performance_schema%'
+            AND DIGEST_TEXT NOT LIKE '%information_schema%'
+            AND COUNT_STAR > 0  -- Only executed queries
+          ORDER BY business_impact_score DESC, query_cost_score DESC
+          LIMIT 150
         
         metrics:
-          - metric_name: mysql.query.intelligence.comprehensive
+          - metric_name: mysql.query.intelligence.enhanced
             value_column: "query_cost_score"
             data_type: gauge
             value_type: double
             attribute_columns: [
-              DIGEST, DIGEST_TEXT, SCHEMA_NAME, executions, exec_per_sec,
-              avg_latency_ms, p95_latency_ms, p99_latency_ms,
-              examination_ratio, index_usage_pct, disk_tmp_table_pct,
-              optimization_potential, recommendation_level, specific_recommendations,
-              business_impact_score, currently_running_count
+              DIGEST, DIGEST_TEXT, SCHEMA_NAME, executions,
+              avg_latency_ms, max_latency_ms, min_latency_ms, total_time_sec, 
+              rows_examined, rows_sent, rows_affected, examination_ratio, 
+              no_index_used, no_good_index_used, index_usage_pct,
+              tmp_disk_tables, tmp_tables, disk_tmp_table_pct,
+              sort_merge_passes, sort_rows, full_joins, full_table_scans, sort_scans,
+              performance_tier, query_pattern, optimization_priority, business_impact_score
+            ]
+
+  # Query execution plan analysis for deep insights  
+  sqlquery/execution_plan_analysis:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 60s
+    queries:
+      - sql: |
+          SELECT 
+            sq.DIGEST,
+            sq.SCHEMA_NAME,
+            sq.DIGEST_TEXT,
+            sq.COUNT_STAR as executions,
+            sq.AVG_TIMER_WAIT/1000000000 as avg_latency_ms,
+            -- Join with events_stages for execution stage analysis
+            COALESCE(st.stage_analysis, 'no_stage_data') as execution_stages,
+            -- Calculate execution complexity score
+            CASE
+              WHEN sq.DIGEST_TEXT LIKE '%JOIN%' THEN 'complex_join'
+              WHEN sq.DIGEST_TEXT LIKE '%SUBQUERY%' OR sq.DIGEST_TEXT LIKE '%(%SELECT%' THEN 'subquery'
+              WHEN sq.DIGEST_TEXT LIKE '%ORDER BY%' AND sq.DIGEST_TEXT LIKE '%GROUP BY%' THEN 'complex_sort'
+              WHEN sq.DIGEST_TEXT LIKE '%UNION%' THEN 'union_query'
+              WHEN sq.DIGEST_TEXT LIKE '%DISTINCT%' THEN 'distinct_query'
+              ELSE 'simple'
+            END as query_complexity,
+            -- Estimate execution cost based on operations
+            LEAST(100,
+              -- Base complexity score
+              CASE
+                WHEN sq.DIGEST_TEXT LIKE '%JOIN%' THEN 30
+                WHEN sq.DIGEST_TEXT LIKE '%SUBQUERY%' THEN 25  
+                WHEN sq.DIGEST_TEXT LIKE '%ORDER BY%' THEN 15
+                WHEN sq.DIGEST_TEXT LIKE '%GROUP BY%' THEN 20
+                WHEN sq.DIGEST_TEXT LIKE '%DISTINCT%' THEN 10
+                ELSE 5
+              END +
+              -- Latency penalty
+              (sq.AVG_TIMER_WAIT/1000000000 / 10) * 0.3 +
+              -- Frequency amplifier  
+              (sq.COUNT_STAR / 100) * 0.2
+            ) as execution_complexity_score,
+            -- Query optimization suggestions
+            CASE
+              WHEN sq.SUM_NO_INDEX_USED > sq.COUNT_STAR * 0.8 THEN 'add_missing_indexes'
+              WHEN sq.DIGEST_TEXT LIKE '%ORDER BY%' AND sq.SUM_SORT_ROWS > sq.COUNT_STAR * 1000 THEN 'optimize_sorting'
+              WHEN sq.DIGEST_TEXT LIKE '%JOIN%' AND sq.AVG_TIMER_WAIT/1000000000 > 100 THEN 'optimize_joins'
+              WHEN sq.SUM_CREATED_TMP_DISK_TABLES > 0 THEN 'increase_tmp_table_size'
+              WHEN sq.SUM_SELECT_FULL_JOIN > 0 THEN 'fix_cartesian_products'
+              ELSE 'well_optimized'
+            END as optimization_suggestion,
+            -- Performance impact assessment
+            CASE
+              WHEN sq.COUNT_STAR > 1000 AND sq.AVG_TIMER_WAIT/1000000000 > 500 THEN 'critical_impact'
+              WHEN sq.COUNT_STAR > 100 AND sq.AVG_TIMER_WAIT/1000000000 > 100 THEN 'high_impact'
+              WHEN sq.COUNT_STAR > 10 AND sq.AVG_TIMER_WAIT/1000000000 > 50 THEN 'medium_impact'
+              ELSE 'low_impact'
+            END as performance_impact
+          FROM performance_schema.events_statements_summary_by_digest sq
+          LEFT JOIN (
+            SELECT 
+              OBJECT_SCHEMA,
+              GROUP_CONCAT(DISTINCT EVENT_NAME ORDER BY EVENT_NAME) as stage_analysis
+            FROM performance_schema.events_stages_summary_by_stage_by_digest
+            WHERE OBJECT_SCHEMA IS NOT NULL
+            GROUP BY OBJECT_SCHEMA
+            LIMIT 50
+          ) st ON sq.SCHEMA_NAME = st.OBJECT_SCHEMA
+          WHERE sq.SCHEMA_NAME IS NOT NULL
+            AND sq.DIGEST_TEXT NOT LIKE '%performance_schema%'
+            AND sq.DIGEST_TEXT NOT LIKE '%information_schema%'
+            AND sq.COUNT_STAR > 0
+            AND sq.AVG_TIMER_WAIT/1000000000 > 1  -- Focus on queries taking >1ms
+          ORDER BY execution_complexity_score DESC, sq.COUNT_STAR DESC
+          LIMIT 100
+          
+        metrics:
+          - metric_name: mysql.query.execution.complexity
+            value_column: "execution_complexity_score"
+            data_type: gauge
+            value_type: double
+            attribute_columns: [
+              DIGEST, SCHEMA_NAME, DIGEST_TEXT, executions, avg_latency_ms,
+              query_complexity, optimization_suggestion, performance_impact, execution_stages
+            ]
+
+  # Query recommendation engine with specific suggestions
+  sqlquery/query_recommendations:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 120s
+    queries:
+      - sql: |
+          SELECT 
+            sq.DIGEST,
+            sq.SCHEMA_NAME,
+            sq.DIGEST_TEXT,
+            sq.COUNT_STAR as executions,
+            sq.AVG_TIMER_WAIT/1000000000 as avg_latency_ms,
+            sq.SUM_TIMER_WAIT/1000000000 as total_time_sec,
+            -- Priority-based recommendations
+            CASE
+              WHEN sq.SUM_NO_INDEX_USED > sq.COUNT_STAR * 0.9 THEN 'critical'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 1000 AND sq.COUNT_STAR > 10 THEN 'critical'
+              WHEN sq.SUM_NO_INDEX_USED > sq.COUNT_STAR * 0.5 THEN 'high'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 100 AND sq.COUNT_STAR > 5 THEN 'high'
+              WHEN sq.SUM_CREATED_TMP_DISK_TABLES > 0 THEN 'medium'
+              WHEN sq.SUM_SELECT_FULL_JOIN > 0 THEN 'medium'
+              ELSE 'low'
+            END as recommendation_priority,
+            -- Specific actionable recommendations
+            CONCAT_WS('; ',
+              CASE 
+                WHEN sq.SUM_NO_INDEX_USED > sq.COUNT_STAR * 0.8 
+                THEN CONCAT('ADD INDEX: Create indexes for frequently scanned tables (', 
+                     ROUND((sq.SUM_NO_INDEX_USED / sq.COUNT_STAR) * 100, 1), '% scans without index)')
+                ELSE NULL 
+              END,
+              CASE 
+                WHEN sq.SUM_CREATED_TMP_DISK_TABLES > 0 
+                THEN CONCAT('MEMORY CONFIG: Increase tmp_table_size (', sq.SUM_CREATED_TMP_DISK_TABLES, ' disk tmp tables)')
+                ELSE NULL 
+              END,
+              CASE 
+                WHEN sq.SUM_SELECT_FULL_JOIN > 0 
+                THEN 'JOIN OPTIMIZATION: Review JOIN conditions for cartesian products'
+                ELSE NULL 
+              END,
+              CASE 
+                WHEN sq.AVG_TIMER_WAIT/1000000000 > 1000 
+                THEN CONCAT('QUERY REWRITE: Average latency ', ROUND(sq.AVG_TIMER_WAIT/1000000000, 2), 'ms exceeds threshold')
+                ELSE NULL 
+              END,
+              CASE 
+                WHEN sq.SUM_SORT_ROWS > sq.COUNT_STAR * 10000 
+                THEN CONCAT('SORT OPTIMIZATION: Large sort operations (', sq.SUM_SORT_ROWS, ' rows sorted)')
+                ELSE NULL 
+              END
+            ) as specific_recommendations,
+            -- Estimated performance improvement
+            CASE
+              WHEN sq.SUM_NO_INDEX_USED > sq.COUNT_STAR * 0.8 THEN '50-80%'
+              WHEN sq.SUM_CREATED_TMP_DISK_TABLES > sq.COUNT_STAR * 0.5 THEN '30-50%'
+              WHEN sq.SUM_SELECT_FULL_JOIN > 0 THEN '60-90%'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 1000 THEN '40-70%'
+              ELSE '10-30%'
+            END as estimated_improvement,
+            -- Implementation complexity
+            CASE
+              WHEN sq.DIGEST_TEXT LIKE '%JOIN%' AND sq.SUM_SELECT_FULL_JOIN > 0 THEN 'complex'
+              WHEN sq.SUM_NO_INDEX_USED > sq.COUNT_STAR * 0.8 THEN 'medium'
+              WHEN sq.SUM_CREATED_TMP_DISK_TABLES > 0 THEN 'easy'
+              ELSE 'easy'
+            END as implementation_complexity,
+            -- Business impact if optimized
+            LEAST(100,
+              (sq.COUNT_STAR * sq.AVG_TIMER_WAIT/1000000000 / 1000) * 0.6 +  -- Time savings
+              (sq.COUNT_STAR / 100) * 0.4  -- Frequency impact
+            ) as optimization_business_impact,
+            -- Resource savings potential
+            CASE
+              WHEN sq.SUM_NO_INDEX_USED > sq.COUNT_STAR * 0.8 THEN 'cpu_intensive'
+              WHEN sq.SUM_CREATED_TMP_DISK_TABLES > 0 THEN 'disk_io_intensive'
+              WHEN sq.SUM_SORT_ROWS > sq.COUNT_STAR * 1000 THEN 'memory_intensive'
+              ELSE 'minimal_resource_impact'
+            END as resource_savings_type
+          FROM performance_schema.events_statements_summary_by_digest sq
+          WHERE sq.SCHEMA_NAME IS NOT NULL
+            AND sq.DIGEST_TEXT NOT LIKE '%performance_schema%'
+            AND sq.DIGEST_TEXT NOT LIKE '%information_schema%'
+            AND sq.COUNT_STAR > 0
+            AND (
+              sq.SUM_NO_INDEX_USED > sq.COUNT_STAR * 0.3  -- Has index issues
+              OR sq.AVG_TIMER_WAIT/1000000000 > 50  -- Slow queries
+              OR sq.SUM_CREATED_TMP_DISK_TABLES > 0  -- Memory issues
+              OR sq.SUM_SELECT_FULL_JOIN > 0  -- Join issues
+            )
+          ORDER BY optimization_business_impact DESC, sq.COUNT_STAR DESC
+          LIMIT 50
+          
+        metrics:
+          - metric_name: mysql.query.optimization.recommendations
+            value_column: "optimization_business_impact"
+            data_type: gauge
+            value_type: double
+            attribute_columns: [
+              DIGEST, SCHEMA_NAME, DIGEST_TEXT, executions, avg_latency_ms, total_time_sec,
+              recommendation_priority, specific_recommendations, estimated_improvement,
+              implementation_complexity, resource_savings_type
+            ]
+
+  # Slow query log analysis for critical performance issues
+  sqlquery/slow_query_analysis:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 300s  # Run every 5 minutes for slow query focus
+    queries:
+      - sql: |
+          SELECT 
+            sq.DIGEST,
+            sq.SCHEMA_NAME,
+            sq.DIGEST_TEXT,
+            sq.COUNT_STAR as executions,
+            sq.AVG_TIMER_WAIT/1000000000 as avg_latency_ms,
+            sq.MAX_TIMER_WAIT/1000000000 as max_latency_ms,
+            sq.SUM_TIMER_WAIT/1000000000 as total_time_sec,
+            -- Percentile analysis for latency distribution
+            CASE
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 10000 THEN 'p99_extreme'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 5000 THEN 'p95_critical'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 1000 THEN 'p90_slow'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 100 THEN 'p75_moderate'
+              ELSE 'p50_acceptable'
+            END as latency_percentile,
+            -- Resource consumption analysis
+            (sq.SUM_ROWS_EXAMINED + sq.SUM_SORT_ROWS) as total_rows_processed,
+            sq.SUM_CREATED_TMP_DISK_TABLES as disk_tmp_tables,
+            sq.SUM_CREATED_TMP_TABLES as memory_tmp_tables,
+            -- Calculate total resource cost
+            (sq.SUM_TIMER_WAIT/1000000000) * sq.COUNT_STAR as total_cpu_seconds,
+            -- Severity classification
+            CASE
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 5000 AND sq.COUNT_STAR > 5 THEN 'critical'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 1000 AND sq.COUNT_STAR > 10 THEN 'high'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 500 AND sq.COUNT_STAR > 20 THEN 'medium'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 100 AND sq.COUNT_STAR > 50 THEN 'low'
+              ELSE 'minimal'
+            END as severity_level,
+            -- Root cause analysis
+            CASE
+              WHEN sq.SUM_NO_INDEX_USED > sq.COUNT_STAR * 0.8 THEN 'missing_indexes'
+              WHEN sq.SUM_CREATED_TMP_DISK_TABLES > sq.COUNT_STAR * 0.3 THEN 'insufficient_memory'
+              WHEN sq.SUM_SELECT_FULL_JOIN > 0 THEN 'cartesian_joins'
+              WHEN sq.SUM_SORT_ROWS > sq.COUNT_STAR * 50000 THEN 'large_sorts'
+              WHEN sq.SUM_LOCK_TIME/1000000000 > sq.SUM_TIMER_WAIT/1000000000 * 0.1 THEN 'lock_contention'
+              ELSE 'query_complexity'
+            END as primary_bottleneck,
+            -- Performance impact on system
+            LEAST(100,
+              -- CPU time impact (40% weight)
+              ((sq.SUM_TIMER_WAIT/1000000000) * sq.COUNT_STAR / 3600) * 0.40 +
+              -- Frequency impact (30% weight)
+              (sq.COUNT_STAR / 1000) * 0.30 +
+              -- Resource consumption impact (30% weight)
+              ((sq.SUM_ROWS_EXAMINED + sq.SUM_SORT_ROWS) / 1000000) * 0.30
+            ) as system_impact_score,
+            -- Time window analysis
+            CASE
+              WHEN HOUR(sq.LAST_SEEN) BETWEEN 9 AND 17 THEN 'business_hours'
+              WHEN HOUR(sq.LAST_SEEN) BETWEEN 18 AND 23 THEN 'evening_peak'
+              WHEN HOUR(sq.LAST_SEEN) BETWEEN 0 AND 6 THEN 'maintenance_window'
+              ELSE 'off_hours'
+            END as execution_time_pattern,
+            -- Urgency for optimization
+            CASE
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 10000 THEN 'immediate'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 5000 AND sq.COUNT_STAR > 5 THEN 'urgent'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 1000 AND sq.COUNT_STAR > 10 THEN 'high_priority'
+              WHEN sq.AVG_TIMER_WAIT/1000000000 > 500 AND sq.COUNT_STAR > 20 THEN 'medium_priority'
+              ELSE 'low_priority'
+            END as optimization_urgency
+          FROM performance_schema.events_statements_summary_by_digest sq
+          WHERE sq.SCHEMA_NAME IS NOT NULL
+            AND sq.DIGEST_TEXT NOT LIKE '%performance_schema%'
+            AND sq.DIGEST_TEXT NOT LIKE '%information_schema%'
+            AND sq.COUNT_STAR > 0
+            AND sq.AVG_TIMER_WAIT/1000000000 > 100  -- Focus on queries >100ms
+          ORDER BY system_impact_score DESC, sq.AVG_TIMER_WAIT DESC
+          LIMIT 75
+          
+        metrics:
+          - metric_name: mysql.query.slow_analysis.impact
+            value_column: "system_impact_score"
+            data_type: gauge
+            value_type: double
+            attribute_columns: [
+              DIGEST, SCHEMA_NAME, DIGEST_TEXT, executions, 
+              avg_latency_ms, max_latency_ms, total_time_sec, latency_percentile,
+              total_rows_processed, disk_tmp_tables, memory_tmp_tables, total_cpu_seconds,
+              severity_level, primary_bottleneck, execution_time_pattern, optimization_urgency
             ]
 
   # Table access pattern intelligence
@@ -435,12 +614,12 @@ receivers:
     collection_interval: 10s
     initial_delay: 1s
 
-  # Prometheus scraping for federated metrics
+  # Prometheus scraping for federated metrics (simplified)
   prometheus:
     config:
       scrape_configs:
         - job_name: 'sql-intelligence-self'
-          scrape_interval: 15s
+          scrape_interval: 30s
           static_configs:
             - targets: ['localhost:8082']
 
@@ -494,30 +673,42 @@ processors:
         from_attribute: mysql.version
         action: insert
 
-  # Stage 4: Advanced query intelligence (simplified for compatibility)
-  # TODO: Re-enable advanced transforms after OTTL syntax validation
-  # transform/query_intelligence:
-  #   error_mode: ignore
-  #   metric_statements:
-  #     - context: datapoint
-  #       statements:
-  #         - set(attributes["analysis_version"], "2.0")
+  # Stage 4: Query intelligence enrichment
+  transform/query_intelligence:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["analysis_version"], "2.0")
+          - set(attributes["intelligence_enabled"], "true")
   
-  # Stage 5: Predictive analysis (disabled for compatibility)
-  # TODO: Re-enable after OTTL syntax validation
-  # transform/predictive_intelligence:
-  #   error_mode: ignore
-  #   metric_statements:
-  #     - context: datapoint
-  #       statements:
-  #         - set(attributes["risk_assessment"], "enabled")
+  # Stage 5: Risk assessment enrichment
+  transform/risk_assessment:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["risk_assessment"], "enabled")
+          - set(attributes["monitoring_tier"], "production")
 
   # Stage 6: Metric standardization
   metricstransform/standardize:
     transforms:
       # Rename to follow pattern: mysql.<object>.<measurement>.<unit>
-      - include: mysql.query.intelligence.comprehensive
+      - include: mysql.query.intelligence.enhanced
         new_name: mysql.query.cost.score
+        action: update
+      
+      - include: mysql.query.execution.complexity
+        new_name: mysql.query.execution.complexity_score
+        action: update
+      
+      - include: mysql.query.optimization.recommendations
+        new_name: mysql.query.optimization.business_impact
+        action: update
+      
+      - include: mysql.query.slow_analysis.impact
+        new_name: mysql.query.slow.system_impact_score
         action: update
       
       - include: mysql.table.access_patterns
@@ -616,7 +807,7 @@ exporters:
 
   # Alert file for critical issues
   file/alerts:
-    path: /tmp/sql-intelligence/critical-queries.json
+    path: ./critical-queries.json
     rotation:
       max_megabytes: 10
       max_days: 3
@@ -664,7 +855,10 @@ service:
     metrics:
       receivers: [
         mysql,
-        sqlquery/comprehensive_analysis,
+        sqlquery/enhanced_query_analysis,
+        sqlquery/execution_plan_analysis,
+        sqlquery/query_recommendations,
+        sqlquery/slow_query_analysis,
         sqlquery/access_patterns,
         sqlquery/index_effectiveness,
         sqlquery/lock_analysis,
@@ -676,27 +870,13 @@ service:
         batch,
         attributes,
         resource,
+        transform/query_intelligence,
+        transform/risk_assessment,
         metricstransform/standardize,
         attributes/newrelic,
         attributes/entity_synthesis
       ]
       exporters: [otlphttp/newrelic, prometheus, debug]
-    
-    # Priority pipeline for critical metrics
-    metrics/critical:
-      receivers: [
-        mysql,
-        sqlquery/comprehensive_analysis,
-        sqlquery/lock_analysis
-      ]
-      processors: [
-        memory_limiter,
-        batch,
-        filter/critical,
-        attributes/newrelic,
-        attributes/entity_synthesis
-      ]
-      exporters: [otlphttp/newrelic_priority, file/alerts]
   
   telemetry:
     logs:

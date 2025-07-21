@@ -9,9 +9,9 @@ services:
     
     image: otel/opentelemetry-collector-contrib:latest
     container_name: cross-signal-correlator
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-simple.yaml}"]
     volumes:
-      - ./config/${COLLECTOR_CONFIG:-collector.yaml}:/etc/otel/collector.yaml:ro
+      - ./config:/etc/otel:ro
       - /var/log/mysql:/var/log/mysql:ro  # For slow query log access
       - correlation-storage:/var/lib/otel/correlation
     environment:
@@ -42,12 +42,12 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       
     ports:
-      - "4332:4317"   # OTLP gRPC for traces (unique port)
-      - "4333:4318"   # OTLP HTTP for traces (unique port)
+      - "4334:4317"   # OTLP gRPC for traces (unique port)
+      - "4335:4318"   # OTLP HTTP for traces (unique port)
       - "8899:8889"   # Prometheus metrics
       - "8095:8888"   # Internal metrics (unique port)
-      - "1777:1777"   # pprof
-      - "55679:55679" # zpages
+      - "1783:1777"   # pprof
+      - "55687:55679" # zpages
       # WARNING: DO NOT expose port 13133 (health check port)!
       # Health check ports have been intentionally removed.
     

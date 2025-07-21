@@ -1,8 +1,9 @@
 version: '3.8'
 
 services:
-  mysql-test:
+  mysql:
     image: mysql:8.0
+    container_name: replication-mysql
     environment:
       MYSQL_ROOT_PASSWORD: test
       MYSQL_DATABASE: testdb
@@ -14,20 +15,20 @@ services:
       timeout: 5s
       retries: 5
     
-  wait-profiler:
+  replication-monitor:
     # WARNING: DO NOT ADD healthcheck section here!
     # Health checks have been intentionally removed from production Docker configs.
-    # Use shared/validation/health-check-all.sh for validation purposes.
-    # See shared/validation/README-health-check.md for details.
     
-    build: .
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: replication-monitor-otel
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-simple.yaml}"]
     environment:
-      MODULE_NAME: wait-profiler
-      MYSQL_ENDPOINT: mysql-test:3306
+      MODULE_NAME: replication-monitor
+      MYSQL_ENDPOINT: mysql:3306
       MYSQL_USER: root
       MYSQL_PASSWORD: test
-      EXPORT_PORT: 8083
-      OTEL_SERVICE_NAME: wait-profiler
+      EXPORT_PORT: 8086
+      OTEL_SERVICE_NAME: replication-monitor
       # New Relic Configuration
       NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
       NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
@@ -35,20 +36,20 @@ services:
       NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
       ENVIRONMENT: production
       CLUSTER_NAME: database-intelligence-cluster
-    ports:
-      - "8083:8083"      # Module metrics
-      - "8891:8889"      # OTLP gRPC debug
-      # WARNING: DO NOT expose port 13133 (health check port)!
-      # Health check ports have been intentionally removed.
-    depends_on:
-      mysql-test:
-        condition: service_healthy
     volumes:
       - ./config:/etc/otel:ro
       - ./logs:/tmp/logs
-      - wait_profiler_queue_standard:/tmp/wait-profiler-queue-standard
-      - wait_profiler_queue_critical:/tmp/wait-profiler-queue-critical
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
+    ports:
+      - "8086:8086"   # Module export port
+      - "8896:8889"   # Prometheus exporter
+      - "4327:4317"   # OTLP gRPC receiver (unique port)
+      - "4328:4318"   # OTLP HTTP receiver (unique port)
+      - "55684:55679" # ZPages
+      - "1780:1777"   # pprof
+      # WARNING: DO NOT expose port 13133 (health check port)!
+    depends_on:
+      mysql:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -57,9 +58,3 @@ services:
         reservations:
           memory: 512M
           cpus: '0.5'
-
-volumes:
-  wait_profiler_queue_standard:
-    driver: local
-  wait_profiler_queue_critical:
-    driver: local

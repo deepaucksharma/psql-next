@@ -1,0 +1,87 @@
+# Canary Tester Simple Configuration
+# Minimal configuration for testing without New Relic
+
+receivers:
+  # SQL query receiver for synthetic canary tests
+  sqlquery/canary:
+    driver: mysql
+    datasource: "${env:MYSQL_USER:-root}:${env:MYSQL_PASSWORD:-test}@tcp(${env:MYSQL_ENDPOINT:-canary-mysql:3306})/performance_schema"
+    collection_interval: 30s
+    queries:
+      - sql: "SELECT 1 as health_check"
+        metrics:
+          - metric_name: canary.health_check
+            value_column: health_check
+            value_type: int
+            
+      - sql: |
+          SELECT COUNT(*) as connection_count 
+          FROM performance_schema.threads 
+          WHERE PROCESSLIST_USER IS NOT NULL
+        metrics:
+          - metric_name: canary.connection.count
+            value_column: connection_count
+            value_type: int
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+    
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    
+  # Add module attributes
+  attributes:
+    actions:
+      - key: module
+        value: canary-tester
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT:-test}
+        action: insert
+        
+  # Resource processor
+  resource:
+    attributes:
+      - key: service.name
+        value: canary-tester
+        action: upsert
+
+exporters:
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+    
+  # Prometheus exporter for local metrics
+  prometheus:
+    endpoint: 0.0.0.0:8090
+
+extensions:
+  # WARNING: DO NOT ADD health_check extension here!
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  # WARNING: DO NOT ADD health_check to extensions list!
+  extensions: [pprof, zpages]
+  
+  pipelines:
+    metrics:
+      receivers: [sqlquery/canary]
+      processors: [memory_limiter, batch, attributes, resource]
+      exporters: [debug, prometheus]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      initial_fields:
+        service: canary-tester

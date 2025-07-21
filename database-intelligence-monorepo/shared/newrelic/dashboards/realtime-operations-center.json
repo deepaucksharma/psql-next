@@ -1,0 +1,371 @@
+{
+  "name": "Real-time Operations Center",
+  "description": "Live operational intelligence with real-time monitoring, alerting, and immediate action guidance",
+  "permissions": "PUBLIC_READ_ONLY",
+  "pages": [
+    {
+      "name": "Live Operations",
+      "description": "Real-time operational status with immediate alert capabilities",
+      "widgets": [
+        {
+          "title": "System Status Monitor",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT if(latest(mysql.threads) > 0, 'ONLINE', 'OFFLINE') as 'System Status', latest(mysql.threads) as 'Active Connections', rate(sum(mysql.handlers), 1 second) as 'Current QPS', (100 - average(mysql_mysql_query_cost_score)) as 'Health Score' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' SINCE 2 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Critical Alerts",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) as 'Immediate Action Required', count(*) as 'Critical Slow Queries', count(*) as 'High Priority Optimizations', count(*) as 'Lock Contentions' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND ((metricName = 'mysql_mysql_query_slow_system_impact_score' AND optimization_urgency = 'immediate') OR (metricName = 'mysql_mysql_query_slow_system_impact_score' AND severity_level = 'critical') OR (metricName = 'mysql_mysql_query_optimization_business_impact' AND recommendation_priority = 'critical') OR (metricName = 'mysql_mysql_lock_wait_milliseconds' AND mysql_mysql_lock_wait_milliseconds > 100)) SINCE 5 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 5,
+                "colorRange": "CRITICAL"
+              },
+              {
+                "value": 2,
+                "colorRange": "WARNING"
+              },
+              {
+                "value": 0,
+                "colorRange": "SUCCESS"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Live Performance Stream",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT average(mysql_mysql_query_cost_score) as 'Query Cost Score', average(avg_latency_ms) as 'Avg Latency (ms)', rate(sum(mysql.handlers), 1 second) as 'QPS', latest(mysql.threads) as 'Active Connections' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 1 minute SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Immediate Action Required",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query Requiring Action', latest(optimization_urgency) as 'Urgency Level', latest(severity_level) as 'Severity', latest(primary_bottleneck) as 'Root Cause', latest(avg_latency_ms) as 'Current Latency (ms)', latest(mysql_mysql_query_slow_system_impact_score) as 'System Impact', 'INVESTIGATE IMMEDIATELY' as 'Action' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' AND optimization_urgency IN ('immediate', 'urgent') FACET DIGEST SINCE 10 minutes ago ORDER BY mysql_mysql_query_slow_system_impact_score DESC LIMIT 10"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alert Dashboard",
+      "description": "Comprehensive alerting and notification center",
+      "widgets": [
+        {
+          "title": "Alert Summary",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) as 'Critical Performance Issues', count(*) as 'High Priority Optimizations', count(*) as 'Index Problems', count(*) as 'Lock Contentions', count(*) as 'Slow Query Alerts' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND ((metricName = 'mysql_mysql_query_cost_score' AND performance_tier = 'critical') OR (metricName = 'mysql_mysql_query_optimization_business_impact' AND recommendation_priority = 'critical') OR (metricName = 'mysql_mysql_index_effectiveness_score' AND mysql_mysql_index_effectiveness_score = 0) OR (metricName = 'mysql_mysql_lock_wait_milliseconds' AND mysql_mysql_lock_wait_milliseconds > 100) OR (metricName = 'mysql_mysql_query_slow_system_impact_score' AND severity_level = 'critical')) SINCE 15 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Alert Severity Distribution",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' FACET severity_level SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Performance Alerts Timeline",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) as 'Critical Issues', count(*) as 'High Priority Issues', count(*) as 'Medium Priority Issues' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_optimization_business_impact' AND recommendation_priority IN ('critical', 'high', 'medium') TIMESERIES 5 minutes SINCE 2 hours ago FACET recommendation_priority"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Critical Alert Details",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 5
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query with Alert', latest(severity_level) as 'Alert Severity', latest(optimization_urgency) as 'Action Urgency', latest(primary_bottleneck) as 'Issue Type', latest(specific_recommendations) as 'Recommended Actions', latest(avg_latency_ms) as 'Current Latency (ms)', latest(mysql_mysql_query_slow_system_impact_score) as 'Impact Score', 'HIGH PRIORITY' as 'Alert Status' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND ((metricName = 'mysql_mysql_query_slow_system_impact_score' AND severity_level IN ('critical', 'high')) OR (metricName = 'mysql_mysql_query_optimization_business_impact' AND recommendation_priority = 'critical')) FACET DIGEST SINCE 30 minutes ago ORDER BY mysql_mysql_query_slow_system_impact_score DESC LIMIT 20"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance Monitoring",
+      "description": "Real-time performance monitoring with threshold-based alerts",
+      "widgets": [
+        {
+          "title": "SLA Compliance Monitor",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT percentage(count(*), WHERE avg_latency_ms < 100) as 'Under 100ms SLA %', percentage(count(*), WHERE avg_latency_ms < 1000) as 'Under 1s SLA %', average(avg_latency_ms) as 'Current Avg Latency (ms)', max(max_latency_ms) as 'Peak Latency (ms)' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_cost_score' SINCE 10 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 95,
+                "colorRange": "SUCCESS"
+              },
+              {
+                "value": 80,
+                "colorRange": "WARNING"
+              },
+              {
+                "value": 0,
+                "colorRange": "CRITICAL"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Resource Threshold Monitor",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql.threads) as 'Active Connections', (sum(mysql.buffer_pool.pages, WHERE kind = 'data') / sum(mysql.buffer_pool.pages)) * 100 as 'Buffer Pool Usage %', rate(sum(mysql.handlers), 1 second) as 'Current QPS', average(mysql_mysql_lock_wait_milliseconds) as 'Avg Lock Wait (ms)' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' SINCE 5 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 90,
+                "colorRange": "CRITICAL"
+              },
+              {
+                "value": 70,
+                "colorRange": "WARNING"
+              },
+              {
+                "value": 0,
+                "colorRange": "SUCCESS"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Live Performance Metrics",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT average(mysql_mysql_query_cost_score) as 'Query Cost Score', average(mysql_mysql_index_effectiveness_score) as 'Index Effectiveness', (100 - average(mysql_mysql_lock_wait_milliseconds)) as 'Lock Performance Score', rate(sum(mysql.handlers), 1 second) as 'QPS' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 2 minutes SINCE 60 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Threshold Breach Alerts",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 8,
+            "height": 4
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query Breaching Thresholds', latest(avg_latency_ms) as 'Current Latency (ms)', latest(performance_tier) as 'Performance Tier', latest(optimization_priority) as 'Optimization Priority', case when latest(avg_latency_ms) > 1000 then 'CRITICAL LATENCY' when latest(avg_latency_ms) > 100 then 'HIGH LATENCY' else 'NORMAL' end as 'Threshold Status' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_cost_score' AND avg_latency_ms > 100 FACET DIGEST SINCE 15 minutes ago ORDER BY avg_latency_ms DESC LIMIT 15"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Performance Trend Alert",
+          "layout": {
+            "column": 9,
+            "row": 8,
+            "width": 4,
+            "height": 4
+          },
+          "visualization": "billboard",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT if(average(mysql_mysql_query_cost_score) > 50, 'DEGRADED', 'HEALTHY') as 'Performance Trend' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_cost_score' SINCE 10 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 1,
+                "colorRange": "CRITICAL"
+              },
+              {
+                "value": 0,
+                "colorRange": "SUCCESS"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Incident Response",
+      "description": "Incident response center with actionable intelligence for operations teams",
+      "widgets": [
+        {
+          "title": "Active Incidents",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) as 'P1 Incidents (Immediate)', count(*) as 'P2 Incidents (Urgent)', count(*) as 'P3 Incidents (High)', sum(mysql_mysql_query_slow_system_impact_score) as 'Total System Impact' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' AND optimization_urgency IN ('immediate', 'urgent', 'high_priority') SINCE 15 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Incident Priority Matrix",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' FACET optimization_urgency SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Incident Response Actions",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 6
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(DIGEST_TEXT) as 'Incident Query', latest(optimization_urgency) as 'Incident Priority', latest(severity_level) as 'Severity Level', latest(primary_bottleneck) as 'Root Cause Analysis', latest(avg_latency_ms) as 'Current Impact (ms)', latest(mysql_mysql_query_slow_system_impact_score) as 'System Impact Score', case when latest(optimization_urgency) = 'immediate' then 'ESCALATE TO P1 - IMMEDIATE ACTION' when latest(optimization_urgency) = 'urgent' then 'ESCALATE TO P2 - URGENT RESPONSE' when latest(optimization_urgency) = 'high_priority' then 'P3 - HIGH PRIORITY QUEUE' else 'MONITOR' end as 'Response Action', case when latest(primary_bottleneck) = 'missing_indexes' then 'ADD INDEXES IMMEDIATELY' when latest(primary_bottleneck) = 'insufficient_memory' then 'INCREASE MEMORY ALLOCATION' when latest(primary_bottleneck) = 'cartesian_joins' then 'FIX JOIN CONDITIONS' when latest(primary_bottleneck) = 'large_sorts' then 'OPTIMIZE SORT OPERATIONS' else 'INVESTIGATE QUERY COMPLEXITY' end as 'Technical Response' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' AND optimization_urgency IN ('immediate', 'urgent', 'high_priority') FACET DIGEST SINCE 30 minutes ago ORDER BY mysql_mysql_query_slow_system_impact_score DESC LIMIT 20"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -112,12 +112,11 @@ processors:
   transform/sla_impact:
     error_mode: ignore
     metric_statements:
-      - context: datapoint
+      - context: metric
         statements:
-          # Add SLA impact based on duration
-          - set(attributes["sla_impact"], "violation") where metric.name == "db.client.operation.duration" and value > 5.0
-          - set(attributes["sla_impact"], "warning") where metric.name == "db.client.operation.duration" and value > 2.0 and value <= 5.0
-          - set(attributes["sla_impact"], "normal") where metric.name == "db.client.operation.duration" and value <= 2.0
+          # Rename metric for SLA analysis
+          - set(name, "db.sla.operation.duration") where name == "db.client.operation.duration"
+          - set(attributes["sla.check_enabled"], "true") where name == "db.sla.operation.duration"
           
           # SLA violation cost
           - set(attributes["sla.violation_cost"], 500.0) where attributes["sla_impact"] == "violation" and attributes["business_criticality"] == "CRITICAL"
@@ -131,12 +130,12 @@ processors:
   transform/create_metrics:
     error_mode: ignore
     metric_statements:
-      - context: scope
+      - context: metric
         statements:
           # Create business impact metrics
-          - set(metric.name, "business.impact.score") where metric.name == "db.client.operation.duration"
-          - set(metric.unit, "score") where metric.name == "business.impact.score"
-          - set(metric.description, "Business impact score (0-10) based on query patterns and tables") where metric.name == "business.impact.score"
+          - set(name, "business.impact.score") where name == "db.client.operation.duration"
+          - set(unit, "score") where name == "business.impact.score"
+          - set(description, "Business impact score (0-10) based on query patterns and tables") where name == "business.impact.score"
 
   attributes/business_metadata:
     actions:

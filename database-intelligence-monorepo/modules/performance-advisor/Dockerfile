@@ -4,6 +4,9 @@ FROM otel/opentelemetry-collector-contrib:latest
 # Health checks have been intentionally removed from production images.
 # Use shared/validation/health-check-all.sh for validation purposes.
 
+# Force cache invalidation
+ARG CACHEBUST=1
+
 # Copy configuration
 COPY config/collector.yaml /etc/otel/collector.yaml
 

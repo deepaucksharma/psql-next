@@ -17,10 +17,9 @@ services:
   wait-profiler:
     # WARNING: DO NOT ADD healthcheck section here!
     # Health checks have been intentionally removed from production Docker configs.
-    # Use shared/validation/health-check-all.sh for validation purposes.
-    # See shared/validation/README-health-check.md for details.
     
-    build: .
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: wait-profiler-otel
     environment:
       MODULE_NAME: wait-profiler
       MYSQL_ENDPOINT: mysql-test:3306
@@ -39,16 +38,13 @@ services:
       - "8083:8083"      # Module metrics
       - "8891:8889"      # OTLP gRPC debug
       # WARNING: DO NOT expose port 13133 (health check port)!
-      # Health check ports have been intentionally removed.
     depends_on:
       mysql-test:
         condition: service_healthy
     volumes:
       - ./config:/etc/otel:ro
       - ./logs:/tmp/logs
-      - wait_profiler_queue_standard:/tmp/wait-profiler-queue-standard
-      - wait_profiler_queue_critical:/tmp/wait-profiler-queue-critical
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-simple.yaml}"]
     deploy:
       resources:
         limits:
@@ -57,9 +53,3 @@ services:
         reservations:
           memory: 512M
           cpus: '0.5'
-
-volumes:
-  wait_profiler_queue_standard:
-    driver: local
-  wait_profiler_queue_critical:
-    driver: local

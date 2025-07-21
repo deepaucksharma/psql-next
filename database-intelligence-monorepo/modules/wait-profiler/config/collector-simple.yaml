@@ -1,0 +1,92 @@
+# Wait Profiler - Simple Configuration
+# Basic wait event collection
+
+receivers:
+  # Simple wait events query
+  sqlquery/wait_events:
+    driver: mysql
+    datasource: "${env:MYSQL_USER}:${env:MYSQL_PASSWORD}@tcp(${env:MYSQL_ENDPOINT})/performance_schema"
+    collection_interval: 10s
+    queries:
+      - sql: |
+          SELECT 
+            EVENT_NAME,
+            COUNT_STAR as wait_count,
+            SUM_TIMER_WAIT/1000000000 as total_wait_ms
+          FROM performance_schema.events_waits_summary_global_by_event_name
+          WHERE COUNT_STAR > 0
+            AND EVENT_NAME NOT LIKE 'idle%'
+          ORDER BY SUM_TIMER_WAIT DESC
+          LIMIT 20
+        metrics:
+          - metric_name: wait_profiler.wait.count
+            value_column: wait_count
+            value_type: int
+            attribute_columns: [EVENT_NAME]
+          - metric_name: wait_profiler.wait.time_ms
+            value_column: total_wait_ms
+            value_type: double
+            attribute_columns: [EVENT_NAME]
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+  
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+  
+  # Add module attributes
+  attributes:
+    actions:
+      - key: module
+        value: wait-profiler
+        action: insert
+      - key: environment
+        value: ${env:ENVIRONMENT:-production}
+        action: insert
+  
+  # Resource processor
+  resource:
+    attributes:
+      - key: service.name
+        value: wait-profiler
+        action: upsert
+
+exporters:
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+  
+  # Prometheus exporter
+  prometheus:
+    endpoint: 0.0.0.0:8083
+
+extensions:
+  # WARNING: DO NOT ADD health_check extension here!
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  # WARNING: DO NOT ADD health_check to extensions list!
+  extensions: [pprof, zpages]
+  
+  pipelines:
+    metrics:
+      receivers: [sqlquery/wait_events]
+      processors: [memory_limiter, batch, attributes, resource]
+      exporters: [debug, prometheus]
+  
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      initial_fields:
+        service: wait-profiler

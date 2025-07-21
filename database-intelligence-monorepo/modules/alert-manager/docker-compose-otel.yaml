@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  alert-manager:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: alert-manager-otel
+    environment:
+      MODULE_NAME: alert-manager
+      EXPORT_PORT: 8089
+      OTEL_SERVICE_NAME: alert-manager
+      # Alert-specific configuration
+      WEBHOOK_ENDPOINT: ${WEBHOOK_ENDPOINT:-http://localhost:9999/alerts}
+      ALERT_FILE_PATH: ${ALERT_FILE_PATH:-/tmp/alerts.log}
+      # New Relic Configuration
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT}
+      NEW_RELIC_ACCOUNT_ID: ${NEW_RELIC_ACCOUNT_ID}
+      NEW_RELIC_API_KEY: ${NEW_RELIC_API_KEY}
+      ENVIRONMENT: production
+      CLUSTER_NAME: database-intelligence-cluster
+    ports:
+      - "8089:8089"      # Module metrics
+      - "8897:8889"      # Internal metrics
+      - "4339:4318"      # OTLP HTTP receiver (unique port)
+      - "4340:4317"      # OTLP gRPC receiver (unique port)
+      # WARNING: DO NOT expose port 13133 (health check port)!
+    volumes:
+      - ./config:/etc/otel:ro
+      - /tmp:/tmp  # For alert file logging
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-simple.yaml}"]
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'

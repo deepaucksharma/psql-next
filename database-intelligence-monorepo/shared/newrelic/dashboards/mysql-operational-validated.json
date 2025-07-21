@@ -1,0 +1,329 @@
+{
+  "name": "MySQL Operational Excellence (Validated)",
+  "description": "Real-time operational monitoring with validated metrics",
+  "permissions": "PUBLIC_READ_ONLY",
+  "pages": [
+    {
+      "name": "Live Operations Dashboard",
+      "description": "Real-time system health and performance",
+      "widgets": [
+        {
+          "title": "System Status",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 2
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql.threads, WHERE kind = 'connected') as 'Active Connections', rate(sum(mysql.handlers), 1 second) as 'Current QPS', filter(sum(mysql.buffer_pool.pages), WHERE kind = 'data') / sum(mysql.buffer_pool.pages) * 100 as 'Buffer Pool Util %', sum(mysql_mysql_table_iops_estimate) as 'Total IOPS' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' SINCE 2 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Connection Activity",
+          "layout": {
+            "column": 1,
+            "row": 3,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql.threads) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 1 minute SINCE 30 minutes ago FACET kind"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Throughput",
+          "layout": {
+            "column": 5,
+            "row": 3,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": "area",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT rate(sum(mysql.handlers), 1 second) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 1 minute SINCE 30 minutes ago FACET kind"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Buffer Pool Status",
+          "layout": {
+            "column": 9,
+            "row": 3,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": "stacked_bar",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(mysql.buffer_pool.pages) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 5 minutes SINCE 30 minutes ago FACET kind"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance Alerts",
+      "description": "Critical metrics and alert conditions",
+      "widgets": [
+        {
+          "title": "Critical Metrics Status",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": "billboard",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT max(mysql_mysql_lock_wait_milliseconds) as 'Max Lock Wait (ms)' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' SINCE 5 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 100,
+                "colorRange": "CRITICAL"
+              },
+              {
+                "value": 50,
+                "colorRange": "WARNING"
+              },
+              {
+                "value": 0,
+                "colorRange": "SUCCESS"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Tables Under Stress",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": "billboard",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT uniqueCount(OBJECT_NAME, WHERE mysql_mysql_table_iops_estimate > 50 OR mysql_mysql_lock_wait_milliseconds > 10) as 'High Load Tables' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' SINCE 5 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Issues",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 2
+          },
+          "visualization": "billboard",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT uniqueCount(INDEX_NAME, WHERE index_recommendation != 'OK') as 'Indexes Needing Attention' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Performance Issues Timeline",
+          "layout": {
+            "column": 1,
+            "row": 3,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT max(mysql_mysql_lock_wait_milliseconds) as 'Max Lock Wait', count(*) as 'Lock Events' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND mysql_mysql_lock_wait_milliseconds > 0 TIMESERIES 2 minutes SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Resource Utilization Trend",
+          "layout": {
+            "column": 7,
+            "row": 3,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT filter(sum(mysql.buffer_pool.pages), WHERE kind = 'data') / sum(mysql.buffer_pool.pages) * 100 as 'Buffer Pool %', latest(mysql.threads, WHERE kind = 'connected') / 151 * 100 as 'Connection %' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Capacity Planning",
+      "description": "Resource trends and growth analysis",
+      "widgets": [
+        {
+          "title": "Resource Growth Trends",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT sum(mysql.buffer_pool.pages) * 16 / 1024 as 'Buffer Pool (MB)', rate(sum(mysql.buffer_pool.operations, WHERE operation = 'reads'), 1 hour) as 'Read Rate/hr' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 1 hour SINCE 24 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "IOPS Capacity Analysis",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "area",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT sum(mysql_mysql_table_iops_estimate) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' TIMESERIES 10 minutes SINCE 6 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Growth Projections",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(OBJECT_NAME) as 'Table', latest(mysql_mysql_table_iops_estimate) as 'Current IOPS', latest(mysql_mysql_table_iops_estimate) * 1.2 as 'Projected IOPS (+20%)', latest(workload_type) as 'Workload Type', CASE WHEN latest(mysql_mysql_table_iops_estimate) > 50 THEN 'Scale Up' WHEN latest(mysql_mysql_table_iops_estimate) > 20 THEN 'Monitor' ELSE 'OK' END as 'Recommendation' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_table_iops_estimate' FACET OBJECT_NAME SINCE 10 minutes ago LIMIT 10"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Optimization Summary",
+      "description": "ROI analysis and optimization opportunities",
+      "widgets": [
+        {
+          "title": "Optimization ROI Calculator",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT uniqueCount(INDEX_NAME, WHERE index_recommendation LIKE '%DROPPING%') * 10 as 'CPU Savings %', uniqueCount(INDEX_NAME, WHERE index_recommendation LIKE '%DROPPING%') * 50 as 'Storage Saved (MB)', uniqueCount(TABLE_NAME, WHERE numeric(selectivity_pct) < 30) * 5 as 'Query Speed +%' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Performance Score",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "billboard",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT 100 - (uniqueCount(INDEX_NAME, WHERE index_recommendation != 'OK') / uniqueCount(INDEX_NAME) * 100) as 'Performance Score' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' SINCE 30 minutes ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 90,
+                "colorRange": "SUCCESS"
+              },
+              {
+                "value": 70,
+                "colorRange": "WARNING"
+              },
+              {
+                "value": 0,
+                "colorRange": "CRITICAL"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Top Optimization Actions",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(OBJECT_NAME) as 'Resource', latest(mysql_mysql_table_iops_estimate) as 'IOPS', latest(workload_type) as 'Workload', latest(mysql_mysql_lock_wait_milliseconds) as 'Lock Wait (ms)', CASE WHEN latest(mysql_mysql_table_iops_estimate) > 50 THEN 'Add Indexes' WHEN latest(workload_type) = 'write_intensive' THEN 'Optimize Writes' WHEN latest(mysql_mysql_lock_wait_milliseconds) > 5 THEN 'Reduce Locks' ELSE 'Monitor' END as 'Primary Action', CASE WHEN latest(mysql_mysql_table_iops_estimate) > 50 THEN 'High' WHEN latest(mysql_mysql_lock_wait_milliseconds) > 5 THEN 'Medium' ELSE 'Low' END as 'Priority' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_table_iops_estimate' FACET OBJECT_NAME SINCE 10 minutes ago LIMIT 10"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

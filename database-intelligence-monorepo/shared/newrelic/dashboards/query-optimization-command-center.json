@@ -1,0 +1,391 @@
+{
+  "name": "Query Optimization Command Center",
+  "description": "Advanced query optimization center with comprehensive recommendations, ROI analysis, and implementation guidance",
+  "permissions": "PUBLIC_READ_ONLY",
+  "pages": [
+    {
+      "name": "Optimization Dashboard",
+      "description": "Strategic optimization overview with business impact analysis",
+      "widgets": [
+        {
+          "title": "Optimization ROI Summary",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT uniqueCount(DIGEST, WHERE recommendation_priority = 'critical') as 'Critical Issues', uniqueCount(DIGEST, WHERE estimated_improvement LIKE '%50-80%') as 'High ROI Opportunities', sum(mysql_mysql_query_optimization_business_impact) as 'Total Business Impact Score', uniqueCount(DIGEST, WHERE implementation_complexity = 'easy') as 'Quick Wins Available' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_optimization_business_impact' SINCE 2 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Priority Action Matrix",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_optimization_business_impact' FACET recommendation_priority SINCE 2 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Top Optimization Opportunities",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 5
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query Statement', latest(recommendation_priority) as 'Priority', latest(specific_recommendations) as 'Recommended Actions', latest(estimated_improvement) as 'Expected ROI', latest(implementation_complexity) as 'Implementation', latest(resource_savings_type) as 'Resource Savings', latest(mysql_mysql_query_optimization_business_impact) as 'Impact Score', latest(avg_latency_ms) as 'Current Latency (ms)', latest(executions) as 'Frequency' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_optimization_business_impact' FACET DIGEST SINCE 4 hours ago ORDER BY mysql_mysql_query_optimization_business_impact DESC LIMIT 25"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Implementation Roadmap",
+          "layout": {
+            "column": 1,
+            "row": 9,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": "stacked_bar",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_optimization_business_impact' FACET implementation_complexity, recommendation_priority SINCE 3 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Resource Savings Analysis",
+          "layout": {
+            "column": 7,
+            "row": 9,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": "area",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT sum(mysql_mysql_query_optimization_business_impact) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_optimization_business_impact' TIMESERIES 30 minutes SINCE 6 hours ago FACET resource_savings_type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Index Optimization",
+      "description": "Comprehensive index analysis and optimization recommendations",
+      "widgets": [
+        {
+          "title": "Index Health Overview",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT average(mysql_mysql_index_effectiveness_score) as 'Avg Index Health', uniqueCount(INDEX_NAME, WHERE index_recommendation LIKE '%DROPPING%') as 'Unused Indexes', uniqueCount(INDEX_NAME, WHERE selectivity_pct < 30) as 'Low Selectivity', uniqueCount(INDEX_NAME, WHERE usage_count = '0') as 'Never Used' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Usage Distribution",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "histogram",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT histogram(mysql_mysql_index_effectiveness_score, 20) as 'Index Effectiveness Distribution' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' SINCE 2 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Optimization Recommendations",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 5
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(TABLE_SCHEMA) as 'Schema', latest(TABLE_NAME) as 'Table', latest(INDEX_NAME) as 'Index', latest(COLUMN_NAME) as 'Column', latest(selectivity_pct) as 'Selectivity %', latest(usage_count) as 'Usage Count', latest(mysql_mysql_index_effectiveness_score) as 'Effectiveness Score', latest(index_recommendation) as 'Recommendation' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' FACET INDEX_NAME, TABLE_NAME SINCE 2 hours ago ORDER BY mysql_mysql_index_effectiveness_score ASC LIMIT 30"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Recommendations by Priority",
+          "layout": {
+            "column": 1,
+            "row": 9,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' FACET index_recommendation SINCE 2 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Index Health Trend",
+          "layout": {
+            "column": 7,
+            "row": 9,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": "line",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT average(mysql_mysql_index_effectiveness_score) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_index_effectiveness_score' TIMESERIES 20 minutes SINCE 4 hours ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query Performance Analysis",
+      "description": "Deep query performance analysis with execution intelligence",
+      "widgets": [
+        {
+          "title": "Performance Tier Analysis",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": "stacked_bar",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_cost_score' TIMESERIES 15 minutes SINCE 3 hours ago FACET performance_tier"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Pattern Distribution",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_cost_score' FACET query_pattern SINCE 2 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Query Execution Complexity Analysis",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": "area",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT average(mysql_mysql_query_execution_complexity_score) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_execution_complexity_score' TIMESERIES 20 minutes SINCE 4 hours ago FACET query_complexity"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Performance Impact Matrix",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": "heatmap",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT average(mysql_mysql_query_execution_complexity_score) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_execution_complexity_score' FACET performance_impact, optimization_suggestion SINCE 3 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Critical Query Analysis",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 4
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query', latest(performance_tier) as 'Performance Tier', latest(query_complexity) as 'Complexity', latest(mysql_mysql_query_cost_score) as 'Cost Score', latest(avg_latency_ms) as 'Avg Latency (ms)', latest(max_latency_ms) as 'Max Latency (ms)', latest(optimization_priority) as 'Optimization Priority', latest(business_impact_score) as 'Business Impact', latest(executions) as 'Executions' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_cost_score' AND performance_tier IN ('slow', 'critical') FACET DIGEST SINCE 3 hours ago ORDER BY mysql_mysql_query_cost_score DESC LIMIT 20"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Slow Query Intelligence",
+      "description": "Advanced slow query analysis with system impact assessment",
+      "widgets": [
+        {
+          "title": "Slow Query Impact Summary",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": "billboard_comparison",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT uniqueCount(DIGEST, WHERE severity_level = 'critical') as 'Critical Slow Queries', uniqueCount(DIGEST, WHERE optimization_urgency = 'immediate') as 'Immediate Action Required', average(mysql_mysql_query_slow_system_impact_score) as 'Avg System Impact', sum(total_cpu_seconds) as 'Total CPU Time (sec)' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' SINCE 2 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Urgency Classification",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' FACET optimization_urgency SINCE 2 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Latency Percentile Analysis",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": "stacked_bar",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT count(*) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' FACET latency_percentile SINCE 3 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Primary Bottleneck Analysis",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 4
+          },
+          "visualization": "pie",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT sum(mysql_mysql_query_slow_system_impact_score) FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' FACET primary_bottleneck SINCE 3 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Critical Slow Query Details",
+          "layout": {
+            "column": 1,
+            "row": 8,
+            "width": 12,
+            "height": 5
+          },
+          "visualization": "table",
+          "configuration": {
+            "nrqlQueries": [
+              {
+                "accountId": 3630072,
+                "query": "SELECT latest(DIGEST_TEXT) as 'Query', latest(severity_level) as 'Severity', latest(latency_percentile) as 'Latency Tier', latest(avg_latency_ms) as 'Avg Latency (ms)', latest(max_latency_ms) as 'Max Latency (ms)', latest(total_rows_processed) as 'Rows Processed', latest(primary_bottleneck) as 'Primary Issue', latest(optimization_urgency) as 'Urgency', latest(mysql_mysql_query_slow_system_impact_score) as 'System Impact Score', latest(execution_time_pattern) as 'Time Pattern' FROM Metric WHERE entity.type = 'MYSQL_QUERY_INTELLIGENCE' AND metricName = 'mysql_mysql_query_slow_system_impact_score' FACET DIGEST SINCE 4 hours ago ORDER BY mysql_mysql_query_slow_system_impact_score DESC LIMIT 25"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

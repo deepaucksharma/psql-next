@@ -1,0 +1,115 @@
+# Simple Cross-Signal Correlator Configuration
+# Basic configuration for trace/metric/log correlation
+
+receivers:
+  # OTLP receiver for traces and logs
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        
+  # Prometheus receiver for metric correlation
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'federation'
+          scrape_interval: 30s
+          static_configs:
+            - targets:
+              - '${env:CORE_METRICS_ENDPOINT:-core-metrics:8081}'
+              - '${env:SQL_INTELLIGENCE_ENDPOINT:-sql-intelligence:8082}'
+              - '${env:WAIT_PROFILER_ENDPOINT:-wait-profiler:8083}'
+
+processors:
+  # Memory management
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+    
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    
+  # Add correlation attributes
+  attributes:
+    actions:
+      - key: module
+        value: cross-signal-correlator
+        action: insert
+      - key: correlation.enabled
+        value: "true"
+        action: insert
+        
+  # Resource processor
+  resource:
+    attributes:
+      - key: service.name
+        value: cross-signal-correlator
+        action: upsert
+      - key: environment
+        value: ${env:ENVIRONMENT:-production}
+        action: upsert
+
+exporters:
+  # Debug output
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+    
+  # Prometheus exporter
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    metric_expiration: 10m
+    resource_to_telemetry_conversion:
+      enabled: true
+      
+  # OTLP for forwarding
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT:-localhost:4317}
+    tls:
+      insecure: true
+
+extensions:
+  # WARNING: DO NOT ADD health_check extension here!
+  # Health checks have been intentionally removed from production code.
+  
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  # WARNING: DO NOT ADD health_check to extensions list!
+  extensions: [pprof, zpages]
+  
+  pipelines:
+    # Traces pipeline
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, attributes, resource]
+      exporters: [debug, otlp]
+      
+    # Metrics pipeline  
+    metrics:
+      receivers: [prometheus, otlp]
+      processors: [memory_limiter, batch, attributes, resource]
+      exporters: [prometheus, debug]
+      
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, attributes, resource]
+      exporters: [debug, otlp]
+      
+  telemetry:
+    logs:
+      level: ${env:LOG_LEVEL:-info}
+      initial_fields:
+        service: cross-signal-correlator
+    metrics:
+      level: detailed

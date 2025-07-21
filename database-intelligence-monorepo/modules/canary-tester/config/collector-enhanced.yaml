@@ -168,19 +168,14 @@ processors:
   transform/canary_analysis:
     error_mode: ignore
     metric_statements:
-      - context: datapoint
+      - context: metric
         statements:
-          # Calculate baseline deviation
-          - set(attributes["canary.baseline_ms"], 10)
-            where metric.name == "mysql.canary.latency"
-          - set(attributes["canary.baseline_ms"], 50)
-            where metric.name == "mysql.canary.lock_latency"
-          - set(attributes["canary.baseline_ms"], 100)
-            where metric.name == "mysql.canary.metadata_latency"
-          - set(attributes["canary.baseline_ms"], 200)
-            where metric.name == "mysql.canary.index_scan_latency"
-          - set(attributes["canary.baseline_ms"], 500)
-            where metric.name == "mysql.canary.join_latency"
+          # Add baseline as metric attribute
+          - set(attributes["canary.baseline_ms"], 10) where name == "mysql.canary.latency"
+          - set(attributes["canary.baseline_ms"], 50) where name == "mysql.canary.lock_latency"
+          - set(attributes["canary.baseline_ms"], 100) where name == "mysql.canary.metadata_latency"
+          - set(attributes["canary.baseline_ms"], 200) where name == "mysql.canary.index_scan_latency"
+          - set(attributes["canary.baseline_ms"], 500) where name == "mysql.canary.join_latency"
             
           # Calculate deviation percentage
           - set(attributes["canary.deviation_percent"], 

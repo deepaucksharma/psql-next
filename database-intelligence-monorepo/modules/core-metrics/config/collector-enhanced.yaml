@@ -240,9 +240,9 @@ processors:
       - context: datapoint
         statements:
           # Table and index limits for cardinality control
-          - limit(attributes["table"], 100) where metric.name == "mysql.table.io.wait.count"
-          - limit(attributes["index_name"], 50) where metric.name == "mysql.index.io.wait.count"
-          - limit(attributes["digest"], 500) where metric.name == "mysql.statement_event.count"
+          - limit(attributes["table"], 100) 
+          - limit(attributes["index_name"], 50) 
+          - limit(attributes["digest"], 500) 
 
   # Filter important metrics
   filter/importance:

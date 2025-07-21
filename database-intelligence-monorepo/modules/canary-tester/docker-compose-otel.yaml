@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  canary-mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_DATABASE: canary_test
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "3306"
+    
+  canary-tester:
+    # WARNING: DO NOT ADD healthcheck section here!
+    # Health checks have been intentionally removed from production Docker configs.
+    # Use shared/validation/health-check-all.sh for validation purposes.
+    # See shared/validation/README-health-check.md for details.
+    
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: canary-tester-collector
+    ports:
+      - "8090:8090"      # Module metrics
+      - "4317"           # OTLP gRPC
+      - "4318"           # OTLP HTTP
+      # WARNING: DO NOT expose port 13133 (health check port)!
+      # Health check ports have been intentionally removed.
+    environment:
+      - MODULE_NAME=canary-tester
+      - MYSQL_ENDPOINT=canary-mysql:3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=test
+      - MYSQL_DATABASE=canary_test
+      - EXPORT_PORT=8090
+      - OTEL_SERVICE_NAME=canary-tester
+      # New Relic Configuration
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - NEW_RELIC_OTLP_ENDPOINT=${NEW_RELIC_OTLP_ENDPOINT}
+      - NEW_RELIC_ACCOUNT_ID=${NEW_RELIC_ACCOUNT_ID}
+      - NEW_RELIC_API_KEY=${NEW_RELIC_API_KEY}
+      - ENVIRONMENT=production
+      - CLUSTER_NAME=database-intelligence-cluster
+      # Canary settings
+      - CANARY_INTERVAL=60s
+      - CANARY_WORKLOAD_INTERVAL=300s
+      - CANARY_DATABASE=canary_test
+    volumes:
+      - ./config:/etc/otel:ro
+      - ./logs:/tmp/logs
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-simple.yaml}"]
+    depends_on:
+      canary-mysql:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'

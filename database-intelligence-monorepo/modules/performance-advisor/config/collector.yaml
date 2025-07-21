@@ -20,7 +20,8 @@ receivers:
     config:
       scrape_configs:
         - job_name: 'core-metrics-federation'
-          scrape_interval: 10s
+          scrape_interval: 30s
+          scrape_timeout: 10s
           static_configs:
             - targets: ['${env:CORE_METRICS_ENDPOINT:-core-metrics:8081}']
           metric_relabel_configs:
@@ -29,7 +30,8 @@ receivers:
               action: keep
               
         - job_name: 'sql-intelligence-federation'
-          scrape_interval: 10s
+          scrape_interval: 30s
+          scrape_timeout: 10s
           static_configs:
             - targets: ['${env:SQL_INTELLIGENCE_ENDPOINT:-sql-intelligence:8082}']
           metric_relabel_configs:
@@ -38,7 +40,8 @@ receivers:
               action: keep
               
         - job_name: 'wait-profiler-federation'
-          scrape_interval: 10s
+          scrape_interval: 30s
+          scrape_timeout: 10s
           static_configs:
             - targets: ['${env:WAIT_PROFILER_ENDPOINT:-wait-profiler:8083}']
           metric_relabel_configs:
@@ -47,7 +50,8 @@ receivers:
               action: keep
         
         - job_name: 'anomaly-detector-federation'
-          scrape_interval: 10s
+          scrape_interval: 30s
+          scrape_timeout: 10s
           static_configs:
             - targets: ['${env:ANOMALY_DETECTOR_ENDPOINT:-anomaly-detector:8084}']
           metric_relabel_configs:
@@ -160,90 +164,30 @@ processors:
   transform/recommendations:
     error_mode: ignore
     metric_statements:
-      # Missing Index Recommendations
-      - context: datapoint
+      # Simply rename metrics to recommendation namespace
+      - context: metric
         statements:
-          - set(attributes["recommendation_type"], "missing_index") where metric.name == "mysql.statement.executions" and attributes["statement_digest_text"] != nil
-          - set(attributes["severity"], "high") where metric.name == "mysql.statement.executions" and value > 1000
-          - set(attributes["recommendation"], "Consider adding index on columns used in WHERE clause") where metric.name == "mysql.statement.executions" and attributes["statement_digest_text"] != nil and IsMatch(attributes["statement_digest_text"], ".*WHERE.*")
-          - set(attributes["impact_score"], value * 0.8) where metric.name == "mysql.statement.executions" and attributes["recommendation_type"] == "missing_index"
-          - set(metric.name, "db.performance.recommendation.missing_index") where metric.name == "mysql.statement.executions" and attributes["recommendation_type"] == "missing_index"
-      
-      # Slow Query Recommendations
-      - context: datapoint
-        statements:
-          - set(attributes["recommendation_type"], "slow_query") where metric.name == "mysql.statement.avg_timer_wait" and value > 1000000000
-          - set(attributes["severity"], "critical") where metric.name == "mysql.statement.avg_timer_wait" and value > 5000000000
-          - set(attributes["severity"], "high") where metric.name == "mysql.statement.avg_timer_wait" and value > 1000000000 and value <= 5000000000
-          - set(attributes["recommendation"], "Query execution time exceeds threshold. Consider query optimization.") where metric.name == "mysql.statement.avg_timer_wait" and value > 1000000000
-          - set(attributes["threshold_exceeded_by"], (value - 1000000000) / 1000000000) where metric.name == "mysql.statement.avg_timer_wait" and value > 1000000000
-          - set(metric.name, "db.performance.recommendation.slow_query") where metric.name == "mysql.statement.avg_timer_wait" and attributes["recommendation_type"] == "slow_query"
-      
-      # Connection Pool Sizing Recommendations
-      - context: datapoint
-        statements:
-          - set(attributes["recommendation_type"], "connection_pool") where metric.name == "mysql.threads.running"
-          - set(attributes["current_connections"], value) where metric.name == "mysql.threads.running"
-          - set(attributes["severity"], "medium") where metric.name == "mysql.threads.running" and value > 50
-          - set(attributes["recommendation"], "Connection pool may be undersized. Consider increasing max_connections.") where metric.name == "mysql.threads.running" and value > 50
-          - set(attributes["optimal_pool_size"], value * 1.5) where metric.name == "mysql.threads.running" and value > 50
-          - set(metric.name, "db.performance.recommendation.connection_pool") where metric.name == "mysql.threads.running" and attributes["recommendation_type"] == "connection_pool"
-      
-      # Cache Hit Ratio Recommendations
-      - context: datapoint
-        statements:
-          - set(attributes["recommendation_type"], "cache_optimization") where metric.name == "mysql.cache.hit_ratio"
-          - set(attributes["current_hit_ratio"], value) where metric.name == "mysql.cache.hit_ratio"
-          - set(attributes["severity"], "high") where metric.name == "mysql.cache.hit_ratio" and value < 0.8
-          - set(attributes["severity"], "medium") where metric.name == "mysql.cache.hit_ratio" and value >= 0.8 and value < 0.95
-          - set(attributes["recommendation"], "Cache hit ratio below optimal. Consider increasing buffer pool size.") where metric.name == "mysql.cache.hit_ratio" and value < 0.95
-          - set(attributes["performance_impact"], (1 - value) * 100) where metric.name == "mysql.cache.hit_ratio"
-          - set(metric.name, "db.performance.recommendation.cache_efficiency") where metric.name == "mysql.cache.hit_ratio" and attributes["recommendation_type"] == "cache_optimization"
-      
-      # Table Lock Recommendations
-      - context: datapoint
-        statements:
-          - set(attributes["recommendation_type"], "lock_contention") where metric.name == "mysql.table.locks.waited"
-          - set(attributes["severity"], "high") where metric.name == "mysql.table.locks.waited" and value > 100
-          - set(attributes["recommendation"], "High lock contention detected. Consider row-level locking or query optimization.") where metric.name == "mysql.table.locks.waited" and value > 100
-          - set(attributes["lock_wait_ratio"], value / 1000) where metric.name == "mysql.table.locks.waited"
-          - set(metric.name, "db.performance.recommendation.table_locks") where metric.name == "mysql.table.locks.waited" and attributes["recommendation_type"] == "lock_contention"
-      
-      # Memory Usage Recommendations
-      - context: datapoint
-        statements:
-          - set(attributes["recommendation_type"], "memory_optimization") where metric.name == "mysql.buffer_pool.usage"
-          - set(attributes["current_usage_percent"], value) where metric.name == "mysql.buffer_pool.usage"
-          - set(attributes["severity"], "medium") where metric.name == "mysql.buffer_pool.usage" and value > 0.9
-          - set(attributes["recommendation"], "Buffer pool usage high. Monitor for memory pressure.") where metric.name == "mysql.buffer_pool.usage" and value > 0.9
-          - set(metric.name, "db.performance.recommendation.memory_usage") where metric.name == "mysql.buffer_pool.usage" and attributes["recommendation_type"] == "memory_optimization"
-      
-      # Query Pattern Recommendations
-      - context: datapoint
-        statements:
-          - set(attributes["recommendation_type"], "query_errors") where metric.name == "mysql.statement.errors"
-          - set(attributes["error_count"], value) where metric.name == "mysql.statement.errors"
-          - set(attributes["severity"], "high") where metric.name == "mysql.statement.errors" and value > 10
-          - set(attributes["recommendation"], "High error rate detected. Review query syntax and permissions.") where metric.name == "mysql.statement.errors" and value > 10
-          - set(metric.name, "db.performance.recommendation.query_pattern") where metric.name == "mysql.statement.errors" and attributes["recommendation_type"] == "query_errors"
-      
-      # Replication Lag Recommendations
-      - context: datapoint
-        statements:
-          - set(attributes["recommendation_type"], "replication_performance") where metric.name == "mysql.replica.lag"
-          - set(attributes["lag_seconds"], value) where metric.name == "mysql.replica.lag"
-          - set(attributes["severity"], "critical") where metric.name == "mysql.replica.lag" and value > 300
-          - set(attributes["severity"], "high") where metric.name == "mysql.replica.lag" and value > 60 and value <= 300
-          - set(attributes["recommendation"], "Replication lag exceeds threshold. Check network and replica performance.") where metric.name == "mysql.replica.lag" and value > 60
-          - set(metric.name, "db.performance.recommendation.replication_lag") where metric.name == "mysql.replica.lag" and attributes["recommendation_type"] == "replication_performance"
-      
-      # Add recommendation scores for prioritization
-      - context: datapoint
-        statements:
-          - set(attributes["priority_score"], 100) where attributes["severity"] == "critical"
-          - set(attributes["priority_score"], 75) where attributes["severity"] == "high"
-          - set(attributes["priority_score"], 50) where attributes["severity"] == "medium"
-          - set(attributes["priority_score"], 25) where attributes["severity"] == "low"
+          - set(name, "db.performance.recommendation.missing_index") where name == "mysql.statement.executions"
+          - set(name, "db.performance.recommendation.slow_query") where name == "mysql.statement.avg_timer_wait"
+          - set(name, "db.performance.recommendation.connection_pool") where name == "mysql.threads.running"
+          - set(name, "db.performance.recommendation.cache_efficiency") where name == "mysql.cache.hit_ratio"
+          - set(name, "db.performance.recommendation.table_locks") where name == "mysql.table.locks.waited"
+          - set(name, "db.performance.recommendation.memory_usage") where name == "mysql.buffer_pool.usage"
+          - set(name, "db.performance.recommendation.query_errors") where name == "mysql.statement.errors"
+          - set(name, "db.performance.recommendation.replication_lag") where name == "mysql.replica.lag"
+  
+  # Add recommendation attributes to metrics
+  attributes/recommendations:
+    actions:
+      - key: recommendation.source
+        value: performance-advisor
+        action: insert
+      - key: recommendation.version
+        value: "1.0"
+        action: insert
+      - key: recommendation.generated_at
+        value: ${env:HOSTNAME}
+        action: insert
   
   # Filter to only keep recommendation metrics
   filter/recommendations:
@@ -258,8 +202,10 @@ processors:
   filter/critical:
     error_mode: ignore
     metrics:
-      metric:
-        - 'attributes["severity"] == "critical" or attributes["severity"] == "high"'
+      include:
+        match_type: regexp
+        metric_names:
+          - "db\\.performance\\.recommendation\\.(slow_query|replication_lag)"
 
   # New Relic specific attributes for standard pipeline
   attributes/newrelic_standard:
@@ -356,24 +302,25 @@ exporters:
       num_consumers: 5
       queue_size: 10000
 
-  # Export to OTLP endpoint for alert manager
+  # Export to OTLP endpoint for alert manager (optional)
   otlp/recommendations:
     endpoint: ${env:ALERT_MANAGER_ENDPOINT:-localhost:4317}
     tls:
       insecure: true
     retry_on_failure:
       enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 300s
+      initial_interval: 30s
+      max_interval: 300s
+      max_elapsed_time: 600s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
 
   # Prometheus exporter for local monitoring
   prometheus:
     endpoint: "0.0.0.0:${env:EXPORT_PORT:-8087}"
     namespace: performance_advisor
-    const_labels:
-      module: performance-advisor
-      cluster: ${env:CLUSTER_NAME}
 
   # Debug exporter
   debug:
@@ -383,7 +330,7 @@ exporters:
 
   # File exporter for recommendation reports
   file/recommendations:
-    path: /tmp/performance-recommendations/recommendations.json
+    path: /tmp/logs/performance-recommendations.json
     rotation:
       max_megabytes: 100
       max_days: 30
@@ -416,13 +363,14 @@ service:
         batch/standard,
         transform/recommendations,
         filter/recommendations,
+        attributes/recommendations,
         attributes/recommendation_metadata,
         attributes/performance_advisor,
         resource/standard,
         attributes/newrelic_standard,
         attributes/entity_synthesis
       ]
-      exporters: [otlphttp/newrelic_standard, prometheus, debug, otlp/recommendations]
+      exporters: [otlphttp/newrelic_standard, prometheus, debug]
     
     # Critical recommendations pipeline
     metrics/critical:
@@ -433,6 +381,7 @@ service:
         transform/recommendations,
         filter/recommendations,
         filter/critical,
+        attributes/recommendations,
         attributes/recommendation_metadata,
         attributes/performance_advisor,
         resource/standard,

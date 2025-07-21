@@ -82,7 +82,7 @@ services:
     
     image: otel/opentelemetry-collector-contrib:latest
     container_name: replication-collector
-    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector-enterprise-working.yaml}"]
+    command: ["--config", "/etc/otel/${COLLECTOR_CONFIG:-collector.yaml}"]
     environment:
       MODULE_NAME: replication-monitor
       MYSQL_MASTER_ENDPOINT: mysql-master:3306
